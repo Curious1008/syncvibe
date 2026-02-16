@@ -1,0 +1,29 @@
+[package]
+name = "syncvibe"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "syncvibe"
+path = "src/main.rs"
+
+[dependencies]
+syncvibe-core = { path = "../syncvibe-core" }
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+ratatui = "0.29"
+crossterm = "0.28"
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+notify = "7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
+toml = "0.8"
+dirs = "6"
+rand = "0.8"
+anyhow = "1"
+rmcp = { version = "0.15", features = ["server", "transport-io"] }
+schemars = "1"
+futures-util = "0.3"
+unicode-width = "0.2"

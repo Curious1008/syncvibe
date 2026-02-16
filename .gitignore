@@ -1,0 +1,27 @@
+# Build
+/target/
+worker/node_modules/
+worker/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# SyncVibe local data (per-project, not repo config)
+.syncvibe/chat-log.jsonl
+.syncvibe/images/
+.syncvibe/room.json
+
+# Claude Code local state
+.claude/

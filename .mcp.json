@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "syncvibe": {
+      "args": [
+        "mcp-server"
+      ],
+      "command": "syncvibe"
+    }
+  }
+}
