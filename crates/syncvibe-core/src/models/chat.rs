@@ -61,3 +61,87 @@ impl ChatMessage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn user_message_fields() {
+        let msg = ChatMessage::new_user_message(
+            "u1".into(),
+            "Alice".into(),
+            "#ff0000".into(),
+            "hello".into(),
+            "s1".into(),
+            Some("t1".into()),
+        );
+        assert_eq!(msg.user_id, "u1");
+        assert_eq!(msg.user_name, "Alice");
+        assert_eq!(msg.content, "hello");
+        assert_eq!(msg.message_type, MessageType::User);
+        assert_eq!(msg.thread_id, Some("t1".into()));
+        assert_eq!(msg.session_id, "s1");
+        assert!(!msg.id.is_empty());
+    }
+
+    #[test]
+    fn system_message_fields() {
+        let msg = ChatMessage::new_system_message("joined".into(), "s1".into());
+        assert_eq!(msg.user_id, "system");
+        assert_eq!(msg.message_type, MessageType::System);
+        assert_eq!(msg.content, "joined");
+    }
+
+    #[test]
+    fn unique_ids() {
+        let a = ChatMessage::new_user_message(
+            "u".into(), "A".into(), "#000".into(), "a".into(), "s".into(), None,
+        );
+        let b = ChatMessage::new_user_message(
+            "u".into(), "A".into(), "#000".into(), "b".into(), "s".into(), None,
+        );
+        assert_ne!(a.id, b.id);
+    }
+
+    #[test]
+    fn json_roundtrip() {
+        let msg = ChatMessage::new_user_message(
+            "u1".into(),
+            "Alice".into(),
+            "#ff0000".into(),
+            "hello\nworld".into(),
+            "s1".into(),
+            None,
+        );
+        let json = serde_json::to_string(&msg).unwrap();
+        let parsed: ChatMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.id, msg.id);
+        assert_eq!(parsed.content, "hello\nworld");
+        assert_eq!(parsed.message_type, MessageType::User);
+    }
+
+    #[test]
+    fn message_type_serde() {
+        // Verify snake_case serialization
+        let json = serde_json::to_string(&MessageType::GitCommit).unwrap();
+        assert_eq!(json, "\"git_commit\"");
+        let json = serde_json::to_string(&MessageType::ConflictWarning).unwrap();
+        assert_eq!(json, "\"conflict_warning\"");
+    }
+
+    #[test]
+    fn image_content_format() {
+        // Image messages store "relative_path\nfilename"
+        let mut msg = ChatMessage::new_user_message(
+            "u1".into(), "A".into(), "#000".into(),
+            ".syncvibe/images/abc.png\nphoto.png".into(),
+            "s".into(), None,
+        );
+        msg.message_type = MessageType::Image;
+        let parts: Vec<&str> = msg.content.split('\n').collect();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0], ".syncvibe/images/abc.png");
+        assert_eq!(parts[1], "photo.png");
+    }
+}

@@ -204,3 +204,300 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
     fs::rename(&tmp, path)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{ChatMessage, RoomConfig, TaskBoard};
+    use tempfile::TempDir;
+
+    fn make_storage() -> (TempDir, Storage) {
+        let tmp = TempDir::new().unwrap();
+        let sv = tmp.path().join(".syncvibe");
+        fs::create_dir_all(&sv).unwrap();
+        (tmp, Storage { root: sv })
+    }
+
+    fn make_msg(content: &str) -> ChatMessage {
+        ChatMessage::new_user_message(
+            "u1".into(),
+            "Alice".into(),
+            "#ff0000".into(),
+            content.into(),
+            "sess1".into(),
+            None,
+        )
+    }
+
+    // ── Storage::find ──
+
+    #[test]
+    fn find_walks_up_dirs() {
+        let tmp = TempDir::new().unwrap();
+        let sv = tmp.path().join(".syncvibe");
+        fs::create_dir_all(&sv).unwrap();
+        let deep = tmp.path().join("a/b/c");
+        fs::create_dir_all(&deep).unwrap();
+        let storage = Storage::find(&deep).unwrap();
+        assert_eq!(storage.root(), sv);
+    }
+
+    #[test]
+    fn find_fails_when_no_syncvibe() {
+        let tmp = TempDir::new().unwrap();
+        assert!(Storage::find(tmp.path()).is_err());
+    }
+
+    #[test]
+    fn init_creates_dir() {
+        let tmp = TempDir::new().unwrap();
+        let storage = Storage::init(tmp.path()).unwrap();
+        assert!(storage.root().exists());
+    }
+
+    #[test]
+    fn init_fails_if_already_exists() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".syncvibe")).unwrap();
+        assert!(Storage::init(tmp.path()).is_err());
+    }
+
+    // ── Chat JSONL ──
+
+    #[test]
+    fn chat_roundtrip_basic() {
+        let (_tmp, storage) = make_storage();
+        let msg = make_msg("hello");
+        storage.append_chat_message(&msg).unwrap();
+        let msgs = storage.read_chat_messages().unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].content, "hello");
+        assert_eq!(msgs[0].id, msg.id);
+    }
+
+    #[test]
+    fn chat_empty_file() {
+        let (_tmp, storage) = make_storage();
+        // No chat-log.jsonl → empty vec
+        let msgs = storage.read_chat_messages().unwrap();
+        assert!(msgs.is_empty());
+    }
+
+    #[test]
+    fn chat_skips_corrupt_lines() {
+        let (_tmp, storage) = make_storage();
+        let path = storage.root.join("chat-log.jsonl");
+        let good = make_msg("good");
+        let good_json = serde_json::to_string(&good).unwrap();
+        // Write: good line, corrupt line, empty line, another good line
+        let good2 = make_msg("good2");
+        let good2_json = serde_json::to_string(&good2).unwrap();
+        fs::write(
+            &path,
+            format!("{}\nNOT_JSON_AT_ALL\n\n{}\n", good_json, good2_json),
+        )
+        .unwrap();
+        let msgs = storage.read_chat_messages().unwrap();
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0].content, "good");
+        assert_eq!(msgs[1].content, "good2");
+    }
+
+    #[test]
+    fn chat_handles_unicode() {
+        let (_tmp, storage) = make_storage();
+        let msg = make_msg("你好世界 🌍 café");
+        storage.append_chat_message(&msg).unwrap();
+        let msgs = storage.read_chat_messages().unwrap();
+        assert_eq!(msgs[0].content, "你好世界 🌍 café");
+    }
+
+    #[test]
+    fn chat_handles_empty_content() {
+        let (_tmp, storage) = make_storage();
+        let msg = make_msg("");
+        storage.append_chat_message(&msg).unwrap();
+        let msgs = storage.read_chat_messages().unwrap();
+        assert_eq!(msgs[0].content, "");
+    }
+
+    #[test]
+    fn chat_handles_newlines_in_content() {
+        let (_tmp, storage) = make_storage();
+        // JSON serialization escapes \n, so this should roundtrip fine
+        let msg = make_msg("line1\nline2\nline3");
+        storage.append_chat_message(&msg).unwrap();
+        let msgs = storage.read_chat_messages().unwrap();
+        assert_eq!(msgs[0].content, "line1\nline2\nline3");
+    }
+
+    #[test]
+    fn chat_handles_very_long_content() {
+        let (_tmp, storage) = make_storage();
+        let long = "x".repeat(100_000);
+        let msg = make_msg(&long);
+        storage.append_chat_message(&msg).unwrap();
+        let msgs = storage.read_chat_messages().unwrap();
+        assert_eq!(msgs[0].content.len(), 100_000);
+    }
+
+    #[test]
+    fn chat_multiple_appends() {
+        let (_tmp, storage) = make_storage();
+        for i in 0..50 {
+            storage
+                .append_chat_message(&make_msg(&format!("msg{}", i)))
+                .unwrap();
+        }
+        let msgs = storage.read_chat_messages().unwrap();
+        assert_eq!(msgs.len(), 50);
+        assert_eq!(msgs[0].content, "msg0");
+        assert_eq!(msgs[49].content, "msg49");
+    }
+
+    #[test]
+    fn chat_filter_by_session() {
+        let (_tmp, storage) = make_storage();
+        let mut m1 = make_msg("a");
+        m1.session_id = "s1".into();
+        let mut m2 = make_msg("b");
+        m2.session_id = "s2".into();
+        let mut m3 = make_msg("c");
+        m3.session_id = "s1".into();
+        storage.append_chat_message(&m1).unwrap();
+        storage.append_chat_message(&m2).unwrap();
+        storage.append_chat_message(&m3).unwrap();
+        let filtered = storage.read_chat_by_session("s1").unwrap();
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].content, "a");
+        assert_eq!(filtered[1].content, "c");
+    }
+
+    #[test]
+    fn chat_filter_by_thread() {
+        let (_tmp, storage) = make_storage();
+        let mut m1 = make_msg("task msg");
+        m1.thread_id = Some("task-1".into());
+        let m2 = make_msg("no thread");
+        storage.append_chat_message(&m1).unwrap();
+        storage.append_chat_message(&m2).unwrap();
+        let filtered = storage.read_chat_by_task("task-1").unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].content, "task msg");
+    }
+
+    // ── Room Config ──
+
+    #[test]
+    fn room_config_roundtrip() {
+        let (_tmp, storage) = make_storage();
+        let config = RoomConfig::new();
+        storage.write_room_config(&config).unwrap();
+        let loaded = storage.read_room_config().unwrap();
+        assert_eq!(loaded.room_id, config.room_id);
+        assert_eq!(loaded.room_secret, config.room_secret);
+    }
+
+    #[test]
+    fn room_secret_is_64_hex_chars() {
+        let config = RoomConfig::new();
+        assert_eq!(config.room_secret.len(), 64);
+        assert!(config.room_secret.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn room_secrets_are_unique() {
+        let a = RoomConfig::new();
+        let b = RoomConfig::new();
+        assert_ne!(a.room_secret, b.room_secret);
+        assert_ne!(a.room_id, b.room_id);
+    }
+
+    // ── Plan ──
+
+    #[test]
+    fn plan_empty_when_missing() {
+        let (_tmp, storage) = make_storage();
+        assert_eq!(storage.read_plan().unwrap(), "");
+    }
+
+    #[test]
+    fn plan_roundtrip() {
+        let (_tmp, storage) = make_storage();
+        storage.write_plan("# My Plan\n\n- Step 1").unwrap();
+        assert_eq!(storage.read_plan().unwrap(), "# My Plan\n\n- Step 1");
+    }
+
+    // ── Task Board ──
+
+    #[test]
+    fn taskboard_default_when_missing() {
+        let (_tmp, storage) = make_storage();
+        let board = storage.read_task_board().unwrap();
+        assert!(board.tasks.is_empty());
+    }
+
+    #[test]
+    fn taskboard_roundtrip() {
+        let (_tmp, storage) = make_storage();
+        let mut board = TaskBoard::default();
+        board.version = 3;
+        storage.write_task_board(&board).unwrap();
+        let loaded = storage.read_task_board().unwrap();
+        assert_eq!(loaded.version, 3);
+    }
+
+    // ── Atomic Write ──
+
+    #[test]
+    fn atomic_write_creates_file() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("test.txt");
+        atomic_write(&path, "hello").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "hello");
+    }
+
+    #[test]
+    fn atomic_write_overwrites() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("test.txt");
+        atomic_write(&path, "first").unwrap();
+        atomic_write(&path, "second").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "second");
+    }
+
+    // ── Image Storage ──
+
+    #[test]
+    fn save_image_copies_file() {
+        let (_tmp, storage) = make_storage();
+        // Create a fake image file
+        let src = _tmp.path().join("photo.png");
+        fs::write(&src, b"fake-png-data").unwrap();
+        let relative = storage.save_image(&src).unwrap();
+        assert!(relative.starts_with(".syncvibe/images/"));
+        assert!(relative.ends_with(".png"));
+        // Verify copied file content
+        let abs = storage.image_abs_path(&relative);
+        assert_eq!(fs::read(&abs).unwrap(), b"fake-png-data");
+    }
+
+    #[test]
+    fn save_image_preserves_extension() {
+        let (_tmp, storage) = make_storage();
+        let src = _tmp.path().join("photo.jpg");
+        fs::write(&src, b"fake").unwrap();
+        let relative = storage.save_image(&src).unwrap();
+        assert!(relative.ends_with(".jpg"));
+    }
+
+    #[test]
+    fn save_image_unique_names() {
+        let (_tmp, storage) = make_storage();
+        let src = _tmp.path().join("photo.png");
+        fs::write(&src, b"fake").unwrap();
+        let a = storage.save_image(&src).unwrap();
+        let b = storage.save_image(&src).unwrap();
+        assert_ne!(a, b); // UUID-based names
+    }
+}

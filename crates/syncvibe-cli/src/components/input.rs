@@ -11,7 +11,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
     let border_color = if is_focused { Color::Cyan } else { Color::DarkGray };
 
     let block = Block::default()
-        .borders(Borders::ALL)
+        .borders(Borders::LEFT | Borders::TOP | Borders::BOTTOM)
         .border_style(Style::default().fg(border_color));
 
     let (display_text, style) = if is_focused {

@@ -12,7 +12,7 @@ use syncvibe_core::storage::Storage;
 
 use crate::components;
 use crate::config;
-use crate::network::ws_client::WsClient;
+use crate::network::ws_client;
 use crate::tui;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -29,6 +29,7 @@ pub struct AppState {
     // UI state
     pub focus: Panel,
     pub should_quit: bool,
+    pub show_picker: bool,
 
     // Data
     pub chat_messages: Vec<ChatMessage>,
@@ -45,7 +46,7 @@ pub struct AppState {
     pub project_name: String,
 
     // WebSocket
-    pub ws_client: Option<WsClient>,
+    pub ws_client: Option<ws_client::WsClient>,
     pub is_online: bool,
 }
 
@@ -68,6 +69,7 @@ impl AppState {
             session_id,
             focus: Panel::Input,
             should_quit: false,
+            show_picker: false,
             chat_messages,
             presence,
             chat_selected: None,
@@ -85,9 +87,64 @@ impl AppState {
         }
     }
 
+    /// Push a system message (persisted to disk, not broadcast)
+    fn system_msg(&mut self, text: &str) {
+        let msg = ChatMessage::new_system_message(text.to_string(), self.session_id.clone());
+        let _ = self.storage.append_chat_message(&msg);
+        self.chat_messages.push(msg);
+    }
+
+    /// Handle slash commands. Returns true if input was a command (don't send as chat).
+    pub fn handle_command(&mut self) -> bool {
+        let content = self.input_buffer.trim().to_string();
+
+        // Intercept /commands and "syncvibe ..." inputs
+        let is_slash = content.starts_with('/');
+        let is_syncvibe_cmd = content.starts_with("syncvibe ");
+        if !is_slash && !is_syncvibe_cmd {
+            return false;
+        }
+
+        // Normalize: "syncvibe switch" → "/switch"
+        let normalized = if is_syncvibe_cmd {
+            format!("/{}", content.strip_prefix("syncvibe ").unwrap())
+        } else {
+            content.clone()
+        };
+
+        self.input_buffer.clear();
+        self.input_cursor = 0;
+
+        let parts: Vec<&str> = normalized.splitn(2, ' ').collect();
+        let cmd = parts[0];
+        let _arg = parts.get(1).map(|s| s.trim()).unwrap_or("");
+
+        match cmd {
+            "/switch" | "/projects" | "/p" => {
+                self.show_picker = true;
+            }
+            "/help" => {
+                self.system_msg("/projects — switch between projects");
+                self.system_msg("/quit — exit");
+            }
+            "/quit" | "/q" => {
+                self.should_quit = true;
+            }
+            _ => {
+                self.system_msg(&format!("Unknown command: {}. Type /help", cmd));
+            }
+        }
+        true
+    }
+
     pub fn send_chat_message(&mut self) -> Result<()> {
         let content = self.input_buffer.trim().to_string();
         if content.is_empty() {
+            return Ok(());
+        }
+
+        // Handle slash commands locally (not sent as chat)
+        if self.handle_command() {
             return Ok(());
         }
 
@@ -197,10 +254,16 @@ pub async fn run() -> Result<()> {
 
     let mut state = AppState::new(storage, user)?;
 
-    // Try to connect to WebSocket relay
+    // Load room config for WebSocket connections
+    let room_config = state.storage.read_room_config().ok();
+
+    // Try initial WebSocket connection
     let mut ws_rx = None;
-    if let Ok(room) = state.storage.read_room_config() {
-        match WsClient::connect(
+    let mut ws_alive_rx: Option<tokio::sync::watch::Receiver<bool>> = None;
+    let mut reconnect_at: Option<tokio::time::Instant> = None;
+
+    if let Some(ref room) = room_config {
+        match ws_client::connect_ws(
             &room.relay_url,
             &room.room_id,
             &room.room_secret,
@@ -210,18 +273,43 @@ pub async fn run() -> Result<()> {
         )
         .await
         {
-            Ok((client, rx)) => {
+            Ok((client, rx, alive_rx)) => {
                 state.ws_client = Some(client);
                 state.is_online = true;
                 ws_rx = Some(rx);
+                ws_alive_rx = Some(alive_rx);
+                state.system_msg("Connected to relay");
             }
             Err(_) => {
-                let msg = ChatMessage::new_system_message(
-                    "Relay not available — running offline".to_string(),
-                    state.session_id.clone(),
-                );
-                state.chat_messages.push(msg);
+                state.system_msg("Relay not available — running offline");
+                // Schedule reconnect in 10 seconds
+                reconnect_at = Some(tokio::time::Instant::now() + Duration::from_secs(10));
             }
+        }
+    }
+
+    // Show hint if multiple projects are active
+    if let Ok(registry) = config::load_registry() {
+        let active_count = registry
+            .projects
+            .iter()
+            .filter(|p| {
+                let name = std::path::Path::new(&p.path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                std::process::Command::new("tmux")
+                    .args(["has-session", "-t", &format!("sv-{}", name)])
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false)
+            })
+            .count();
+        if active_count > 1 {
+            state.system_msg(&format!(
+                "{} projects active · /projects to see all",
+                active_count
+            ));
         }
     }
 
@@ -252,10 +340,95 @@ pub async fn run() -> Result<()> {
             }
         }
 
+        // Check if WebSocket connection dropped
+        if let Some(ref alive_rx) = ws_alive_rx {
+            if !*alive_rx.borrow() && state.is_online {
+                state.is_online = false;
+                state.ws_client = None;
+                state.system_msg("Disconnected from relay");
+                // Schedule reconnect in 5 seconds
+                reconnect_at = Some(tokio::time::Instant::now() + Duration::from_secs(5));
+                ws_alive_rx = None;
+                ws_rx = None;
+            }
+        }
+
+        // Auto-reconnect
+        if let Some(target) = reconnect_at {
+            if tokio::time::Instant::now() >= target {
+                reconnect_at = None;
+                if let Some(ref room) = room_config {
+                    match ws_client::connect_ws(
+                        &room.relay_url,
+                        &room.room_id,
+                        &room.room_secret,
+                        &state.user.profile.user_id,
+                        &state.user.profile.name,
+                        &state.user.profile.color,
+                    )
+                    .await
+                    {
+                        Ok((client, rx, alive_rx)) => {
+                            state.ws_client = Some(client);
+                            state.is_online = true;
+                            ws_rx = Some(rx);
+                            ws_alive_rx = Some(alive_rx);
+                            state.system_msg("Reconnected to relay");
+                        }
+                        Err(_) => {
+                            // Retry again in 15 seconds
+                            reconnect_at = Some(
+                                tokio::time::Instant::now() + Duration::from_secs(15),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         // File system changes
         if fs_rx.try_recv().is_ok() {
             while fs_rx.try_recv().is_ok() {}
             state.reload_data();
+        }
+
+        // Handle project picker request
+        if state.show_picker {
+            state.show_picker = false;
+            tui::teardown(&mut terminal)?;
+
+            let current_path = state
+                .storage
+                .project_root()
+                .to_string_lossy()
+                .to_string();
+            if let Ok(Some(entry)) = crate::picker::pick_project(Some(&current_path)) {
+                if entry.path != current_path {
+                    // Switch to different project
+                    let name = std::path::Path::new(&entry.path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    let session = format!("sv-{}", name);
+                    let has_session = std::process::Command::new("tmux")
+                        .args(["has-session", "-t", &session])
+                        .output()
+                        .map(|o| o.status.success())
+                        .unwrap_or(false);
+                    if has_session {
+                        let _ = std::process::Command::new("tmux")
+                            .args(["switch-client", "-t", &session])
+                            .status();
+                    } else {
+                        // Create the session then switch
+                        let _ = crate::launch_or_attach(&entry.path);
+                    }
+                }
+            }
+
+            // Resume TUI (for when user switches back, or cancelled)
+            terminal = tui::setup()?;
+            continue;
         }
 
         if state.should_quit {

@@ -32,7 +32,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
     };
 
     let block = Block::default()
-        .borders(Borders::ALL)
+        .borders(Borders::LEFT | Borders::TOP | Borders::BOTTOM)
         .border_style(Style::default().fg(border_color))
         .title(Span::styled(
             title,

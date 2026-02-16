@@ -2,6 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use syncvibe_core::models::UserConfig;
 
 fn config_dir() -> Result<PathBuf> {
@@ -32,4 +33,59 @@ pub fn save_user_config(config: &UserConfig) -> Result<()> {
 
 pub fn user_config_exists() -> bool {
     config_path().map(|p| p.exists()).unwrap_or(false)
+}
+
+// --- Project Registry ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectEntry {
+    pub name: String,
+    pub path: String,
+    pub last_opened: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct ProjectRegistry {
+    pub projects: Vec<ProjectEntry>,
+}
+
+fn registry_path() -> Result<PathBuf> {
+    Ok(config_dir()?.join("projects.json"))
+}
+
+pub fn load_registry() -> Result<ProjectRegistry> {
+    let path = registry_path()?;
+    if !path.exists() {
+        return Ok(ProjectRegistry::default());
+    }
+    let content = fs::read_to_string(&path)?;
+    Ok(serde_json::from_str(&content).unwrap_or_default())
+}
+
+pub fn save_registry(registry: &ProjectRegistry) -> Result<()> {
+    let dir = config_dir()?;
+    fs::create_dir_all(&dir)?;
+    fs::write(registry_path()?, serde_json::to_string_pretty(registry)?)?;
+    Ok(())
+}
+
+/// Register or update a project in the registry
+pub fn register_project(name: &str, path: &str) -> Result<()> {
+    // Canonicalize to avoid duplicates (e.g. /tmp vs /private/tmp on macOS)
+    let canonical = std::fs::canonicalize(path)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| path.to_string());
+
+    let mut registry = load_registry()?;
+    if let Some(entry) = registry.projects.iter_mut().find(|p| p.path == canonical) {
+        entry.name = name.to_string();
+        entry.last_opened = chrono::Utc::now();
+    } else {
+        registry.projects.push(ProjectEntry {
+            name: name.to_string(),
+            path: canonical,
+            last_opened: chrono::Utc::now(),
+        });
+    }
+    save_registry(&registry)
 }

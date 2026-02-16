@@ -5,6 +5,7 @@ mod components;
 mod git;
 mod mcp;
 mod network;
+mod picker;
 mod tui;
 
 use std::env;
@@ -26,6 +27,7 @@ fn main() -> Result<()> {
         Some(Command::Invite) => cmd_invite()?,
         Some(Command::McpServer) => cmd_mcp_server()?,
         Some(Command::Dashboard) => cmd_dashboard()?,
+        Some(Command::Switch) => cmd_switch()?,
         None => cmd_session()?,
     }
 
@@ -244,12 +246,172 @@ fn cmd_dashboard() -> Result<()> {
     rt.block_on(app::run())
 }
 
+/// Interactive project switcher
+fn cmd_switch() -> Result<()> {
+    let selected = picker::pick_project(None)?;
+    match selected {
+        Some(entry) => launch_or_attach(&entry.path)?,
+        None => {}
+    }
+    Ok(())
+}
+
+/// Launch a new tmux session for a project or attach/switch to an existing one
+pub fn launch_or_attach(project_path: &str) -> Result<()> {
+    let project_dir = std::path::Path::new(project_path);
+    let project_name = project_dir
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "project".into());
+    let session_name = format!("sv-{}", project_name);
+
+    let has_session = std::process::Command::new("tmux")
+        .args(["has-session", "-t", &session_name])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    let inside_tmux = env::var("TMUX").is_ok();
+
+    let syncvibe_bin = env::current_exe()?;
+    let bin_str = syncvibe_bin.to_string_lossy().to_string();
+
+    if !has_session {
+        // Create the session (clear TMUX env so tmux allows nested creation)
+        let status = std::process::Command::new("tmux")
+            .args([
+                "new-session", "-d",
+                "-s", &session_name,
+                "-c", project_path,
+                "claude",
+            ])
+            .env_remove("TMUX")
+            .status()?;
+
+        if !status.success() {
+            anyhow::bail!("Failed to create tmux session for {}", project_name);
+        }
+
+        // Split: SyncVibe Chat on the left (30%)
+        let _ = std::process::Command::new("tmux")
+            .args([
+                "split-window", "-t", &session_name,
+                "-hb", "-l", "30%",
+                "-c", project_path,
+                &format!("{} dashboard", bin_str),
+            ])
+            .env_remove("TMUX")
+            .status();
+
+        // Focus Claude Code pane
+        let _ = std::process::Command::new("tmux")
+            .args(["select-pane", "-t", &format!("{}.1", session_name)])
+            .env_remove("TMUX")
+            .status();
+
+        // Apply style and keybindings
+        apply_tmux_config(&session_name)?;
+    } else {
+        // Session exists — check if the dashboard pane is still alive
+        let pane_count = std::process::Command::new("tmux")
+            .args(["list-panes", "-t", &session_name])
+            .env_remove("TMUX")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).lines().count())
+            .unwrap_or(0);
+
+        if pane_count < 2 {
+            // Dashboard pane died (e.g. /quit), re-create it on the left
+            let _ = std::process::Command::new("tmux")
+                .args([
+                    "split-window", "-t", &format!("{}:0", session_name),
+                    "-hb", "-l", "30%",
+                    "-c", project_path,
+                    &format!("{} dashboard", bin_str),
+                ])
+                .env_remove("TMUX")
+                .status();
+
+            // Re-focus the right pane (Claude Code)
+            let _ = std::process::Command::new("tmux")
+                .args(["select-pane", "-t", &format!("{}:0.1", session_name)])
+                .env_remove("TMUX")
+                .status();
+
+            // Re-apply style (pane titles need resetting)
+            apply_tmux_config(&session_name)?;
+        }
+    }
+
+    if inside_tmux {
+        // Switch to the session (stay inside tmux)
+        let _ = std::process::Command::new("tmux")
+            .args(["switch-client", "-t", &session_name])
+            .status();
+    } else {
+        // Attach from outside
+        let _ = std::process::Command::new("tmux")
+            .args(["attach-session", "-t", &session_name])
+            .status();
+    }
+
+    Ok(())
+}
+
+/// Apply tmux keybindings and styling to a session
+fn apply_tmux_config(session_name: &str) -> Result<()> {
+    let tmux_cmds = [
+        "bind -n C-g select-pane -t :.+",
+        "bind z resize-pane -Z",
+    ];
+    for cmd in &tmux_cmds {
+        let parts: Vec<&str> = cmd.split_whitespace().collect();
+        let _ = std::process::Command::new("tmux")
+            .args(parts)
+            .env_remove("TMUX")
+            .status();
+    }
+
+    let border_cmds: &[(&str, &str)] = &[
+        ("pane-border-style", "fg=#333333"),
+        ("pane-active-border-style", "fg=#333333"),
+        ("pane-border-status", "top"),
+        ("pane-border-format", "#{?pane_active,#[fg=#888888] #{pane_title} ,#[fg=#555555] Ctrl+G → #{pane_title} }"),
+        ("status", "off"),
+    ];
+    for (key, val) in border_cmds {
+        let _ = std::process::Command::new("tmux")
+            .args(["set-option", "-t", session_name, key, val])
+            .env_remove("TMUX")
+            .status();
+    }
+
+    // Set pane titles
+    let _ = std::process::Command::new("tmux")
+        .args(["select-pane", "-t", &format!("{}:0.0", session_name), "-T", "SyncVibe Chat"])
+        .env_remove("TMUX")
+        .status();
+    let _ = std::process::Command::new("tmux")
+        .args(["select-pane", "-t", &format!("{}:0.1", session_name), "-T", "Claude Code"])
+        .env_remove("TMUX")
+        .status();
+
+    Ok(())
+}
+
 /// Default command: launch tmux session with dashboard + Claude Code side by side
 fn cmd_session() -> Result<()> {
     let cwd = env::current_dir()?;
 
     // Verify .syncvibe exists
     let _storage = Storage::find(&cwd)?;
+
+    // Register this project
+    let project_name = cwd
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "project".to_string());
+    let _ = config::register_project(&project_name, &cwd.to_string_lossy());
 
     // Verify user profile exists
     if !config::user_config_exists() {
@@ -273,105 +435,5 @@ fn cmd_session() -> Result<()> {
         return cmd_dashboard();
     }
 
-    let syncvibe_bin = env::current_exe()?;
-    let project_name = cwd
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "syncvibe".to_string());
-    let session_name = format!("sv-{}", project_name);
-
-    // Check if session already exists
-    let existing = std::process::Command::new("tmux")
-        .args(["has-session", "-t", &session_name])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-
-    if !existing {
-        let cwd_str = cwd.to_string_lossy();
-        let bin_str = syncvibe_bin.to_string_lossy();
-
-        // Create session with Claude Code as the main (right) pane
-        let status = std::process::Command::new("tmux")
-            .args([
-                "new-session",
-                "-d",
-                "-s", &session_name,
-                "-c", &cwd_str,
-                "claude",  // main pane runs Claude Code
-            ])
-            .status()?;
-        if !status.success() {
-            anyhow::bail!("Failed to create tmux session");
-        }
-
-        // Split: push dashboard to the left (30%)
-        let _ = std::process::Command::new("tmux")
-            .args([
-                "split-window",
-                "-t", &session_name,
-                "-hb",                // horizontal split, put new pane before (left)
-                "-l", "30%",          // dashboard gets 30%
-                "-c", &cwd_str,
-                &format!("{} dashboard", bin_str),
-            ])
-            .status();
-
-        // Focus the right pane (Claude Code) — pane index 1
-        let _ = std::process::Command::new("tmux")
-            .args(["select-pane", "-t", &format!("{}.1", session_name)])
-            .status();
-    }
-
-    // Always apply keybindings + style (even on re-attach)
-    let tmux_cmds = [
-        // Ctrl+G to toggle panes directly (no prefix, left hand, easy reach)
-        "bind -n C-g select-pane -t :.+",
-        // Prefix → Ctrl+A (fallback)
-        "set-option -g prefix C-a",
-        "unbind C-b",
-        "bind C-a send-prefix",
-        "bind Left select-pane -L",
-        "bind Right select-pane -R",
-        "bind z resize-pane -Z",
-    ];
-    for cmd in &tmux_cmds {
-        let parts: Vec<&str> = cmd.split_whitespace().collect();
-        let _ = std::process::Command::new("tmux")
-            .args(parts)
-            .status();
-    }
-
-    // Pane borders: simple, clear active indicator
-    let border_cmds: &[(&str, &str)] = &[
-        ("pane-border-style", "fg=#333333"),
-        ("pane-active-border-style", "fg=#00dddd"),
-        ("pane-border-status", "top"),
-        ("pane-border-format", "#{?pane_active,#[fg=#00dddd]  #{pane_title} ,#[fg=#555555]  #{pane_title} }"),
-        ("status", "off"),
-    ];
-    for (key, val) in border_cmds {
-        let _ = std::process::Command::new("tmux")
-            .args(["set-option", "-t", &session_name, key, val])
-            .status();
-    }
-
-    // Set pane titles
-    let _ = std::process::Command::new("tmux")
-        .args(["select-pane", "-t", &format!("{}:0.0", session_name), "-T", "Dashboard"])
-        .status();
-    let _ = std::process::Command::new("tmux")
-        .args(["select-pane", "-t", &format!("{}:0.1", session_name), "-T", "Claude Code"])
-        .status();
-
-    // Attach
-    let status = std::process::Command::new("tmux")
-        .args(["attach-session", "-t", &session_name])
-        .status()?;
-
-    if !status.success() {
-        anyhow::bail!("Failed to attach to tmux session");
-    }
-
-    Ok(())
+    launch_or_attach(&cwd.to_string_lossy())
 }

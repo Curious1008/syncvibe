@@ -14,7 +14,7 @@ impl RoomConfig {
         Self {
             room_id: uuid::Uuid::new_v4().to_string(),
             room_secret: hex_encode(&secret_bytes),
-            relay_url: "wss://syncvibe-relay.workers.dev".to_string(),
+            relay_url: "wss://syncvibe-relay.business-a9e.workers.dev".to_string(),
         }
     }
 }
