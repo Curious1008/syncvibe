@@ -28,7 +28,9 @@ pub async fn connect_ws(
     user_color: &str,
 ) -> Result<(WsClient, mpsc::Receiver<WsMessage>, watch::Receiver<bool>)> {
     let url = format!("{}/ws/{}", relay_url, room_id);
-    let (ws_stream, _) = connect_async(&url).await?;
+    let (ws_stream, _) = time::timeout(Duration::from_secs(5), connect_async(&url))
+        .await
+        .map_err(|_| anyhow::anyhow!("Connection timed out"))??;
     let (mut write, mut read) = ws_stream.split();
 
     // Channel for outgoing messages
@@ -53,7 +55,7 @@ pub async fn connect_ws(
     // Spawn ping task
     let ping_tx = out_tx.clone();
     let ping_handle: JoinHandle<()> = tokio::spawn(async move {
-        let mut interval = time::interval(Duration::from_secs(30));
+        let mut interval = time::interval(Duration::from_secs(25));
         loop {
             interval.tick().await;
             let ping = serde_json::to_string(&WsMessage::Ping).unwrap_or_default();
@@ -96,6 +98,7 @@ pub async fn connect_ws(
 
 impl WsClient {
     /// Connect to the relay and return a client + receiver for incoming messages
+    #[allow(dead_code)]
     pub async fn connect(
         relay_url: &str,
         room_id: &str,

@@ -18,10 +18,8 @@ Thumbs.db
 .env
 .env.local
 
-# SyncVibe local data (per-project, not repo config)
-.syncvibe/chat-log.jsonl
-.syncvibe/images/
-.syncvibe/room.json
+# SyncVibe local data (stays local, shared via invite codes)
+.syncvibe/
 
 # Claude Code local state
 .claude/

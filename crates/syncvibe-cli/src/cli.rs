@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 
 #[derive(Parser)]
 #[command(name = "syncvibe", about = "Terminal-native collaboration for vibe coding")]
@@ -23,13 +24,24 @@ pub enum Command {
         color: Option<String>,
     },
 
+    /// View or update your profile (name, color)
+    Profile {
+        /// New display name
+        #[arg(long)]
+        name: Option<String>,
+
+        /// New color (hex, e.g. #FF6B6B)
+        #[arg(long)]
+        color: Option<String>,
+    },
+
     /// Send a chat message without opening TUI
     Chat {
         /// The message to send
         message: String,
     },
 
-    /// Print invite instructions
+    /// Show room invite code
     Invite,
 
     /// Start the MCP server (for AI agents)
@@ -40,4 +52,11 @@ pub enum Command {
 
     /// Switch between SyncVibe projects
     Switch,
+
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: Shell,
+    },
 }

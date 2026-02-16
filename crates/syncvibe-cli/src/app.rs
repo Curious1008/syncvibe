@@ -30,6 +30,7 @@ pub struct AppState {
     pub focus: Panel,
     pub should_quit: bool,
     pub show_picker: bool,
+    pub want_reconnect: bool,
 
     // Data
     pub chat_messages: Vec<ChatMessage>,
@@ -70,6 +71,7 @@ impl AppState {
             focus: Panel::Input,
             should_quit: false,
             show_picker: false,
+            want_reconnect: false,
             chat_messages,
             presence,
             chat_selected: None,
@@ -123,7 +125,28 @@ impl AppState {
             "/switch" | "/projects" | "/p" => {
                 self.show_picker = true;
             }
+            "/invite" => {
+                match self.storage.read_room_config() {
+                    Ok(room) => {
+                        self.system_msg("Share this invite code with your team:");
+                        self.system_msg(&room.to_invite_code());
+                    }
+                    Err(_) => {
+                        self.system_msg("No room config found.");
+                    }
+                }
+            }
+            "/rc" | "/reconnect" => {
+                if self.is_online {
+                    self.system_msg("Already connected.");
+                } else {
+                    self.system_msg("Reconnecting...");
+                    self.want_reconnect = true;
+                }
+            }
             "/help" => {
+                self.system_msg("/rc — reconnect to relay");
+                self.system_msg("/invite — show room invite code");
                 self.system_msg("/projects — switch between projects");
                 self.system_msg("/quit — exit");
             }
@@ -261,6 +284,8 @@ pub async fn run() -> Result<()> {
     let mut ws_rx = None;
     let mut ws_alive_rx: Option<tokio::sync::watch::Receiver<bool>> = None;
     let mut reconnect_at: Option<tokio::time::Instant> = None;
+    let mut reconnect_attempts: u32 = 0;
+    const MAX_AUTO_RECONNECTS: u32 = 3;
 
     if let Some(ref room) = room_config {
         match ws_client::connect_ws(
@@ -282,7 +307,7 @@ pub async fn run() -> Result<()> {
             }
             Err(_) => {
                 state.system_msg("Relay not available — running offline");
-                // Schedule reconnect in 10 seconds
+                reconnect_attempts = 1;
                 reconnect_at = Some(tokio::time::Instant::now() + Duration::from_secs(10));
             }
         }
@@ -322,9 +347,25 @@ pub async fn run() -> Result<()> {
     watcher.watch(&watch_path, RecursiveMode::NonRecursive)?;
 
     let mut terminal = tui::setup()?;
+    let mut last_loop = tokio::time::Instant::now();
 
     // Main event loop
     loop {
+        // Detect sleep/wake: if loop was paused > 30s, connection is likely dead
+        let now = tokio::time::Instant::now();
+        let loop_gap = now.duration_since(last_loop);
+        last_loop = now;
+
+        if loop_gap > Duration::from_secs(30) && state.is_online {
+            state.is_online = false;
+            state.ws_client = None;
+            ws_alive_rx = None;
+            ws_rx = None;
+            state.system_msg("Woke from sleep — reconnecting...");
+            reconnect_attempts = 0;
+            reconnect_at = Some(tokio::time::Instant::now());
+        }
+
         terminal.draw(|frame| draw_ui(frame, &state))?;
 
         if event::poll(Duration::from_millis(100))? {
@@ -346,14 +387,21 @@ pub async fn run() -> Result<()> {
                 state.is_online = false;
                 state.ws_client = None;
                 state.system_msg("Disconnected from relay");
-                // Schedule reconnect in 5 seconds
+                reconnect_attempts = 1;
                 reconnect_at = Some(tokio::time::Instant::now() + Duration::from_secs(5));
                 ws_alive_rx = None;
                 ws_rx = None;
             }
         }
 
-        // Auto-reconnect
+        // Manual reconnect via /rc
+        if state.want_reconnect {
+            state.want_reconnect = false;
+            reconnect_attempts = 0;
+            reconnect_at = Some(tokio::time::Instant::now()); // immediate
+        }
+
+        // Auto-reconnect (with retry limit)
         if let Some(target) = reconnect_at {
             if tokio::time::Instant::now() >= target {
                 reconnect_at = None;
@@ -373,13 +421,18 @@ pub async fn run() -> Result<()> {
                             state.is_online = true;
                             ws_rx = Some(rx);
                             ws_alive_rx = Some(alive_rx);
+                            reconnect_attempts = 0;
                             state.system_msg("Reconnected to relay");
                         }
                         Err(_) => {
-                            // Retry again in 15 seconds
-                            reconnect_at = Some(
-                                tokio::time::Instant::now() + Duration::from_secs(15),
-                            );
+                            reconnect_attempts += 1;
+                            if reconnect_attempts < MAX_AUTO_RECONNECTS {
+                                reconnect_at = Some(
+                                    tokio::time::Instant::now() + Duration::from_secs(15),
+                                );
+                            } else {
+                                state.system_msg("Relay unreachable — /rc to retry");
+                            }
                         }
                     }
                 }
