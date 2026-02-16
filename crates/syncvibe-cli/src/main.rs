@@ -487,7 +487,7 @@ fn cmd_session() -> Result<()> {
 
     // Step 2: If room exists in cwd, launch directly
     if Storage::find(&cwd).is_ok() {
-        return launch_project(&cwd)?;
+        return launch_project(&cwd);
     }
 
     // Step 3: No room in cwd — show home screen
