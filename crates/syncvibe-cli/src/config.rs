@@ -28,7 +28,7 @@ pub fn save_user_config(config: &UserConfig) -> Result<()> {
     fs::create_dir_all(&dir)?;
     let path = config_path()?;
     let content = toml::to_string_pretty(config)?;
-    fs::write(&path, content)?;
+    atomic_write(&path, &content)?;
     set_private_permissions(&path);
     Ok(())
 }
@@ -71,13 +71,34 @@ pub fn load_registry() -> Result<ProjectRegistry> {
         return Ok(ProjectRegistry::default());
     }
     let content = fs::read_to_string(&path)?;
-    Ok(serde_json::from_str(&content).unwrap_or_default())
+    match serde_json::from_str(&content) {
+        Ok(registry) => Ok(registry),
+        Err(_) => {
+            // Backup corrupt file before returning empty default
+            let backup = path.with_extension("json.bak");
+            let _ = fs::copy(&path, &backup);
+            eprintln!(
+                "Warning: {} is corrupt (backed up to {}). Starting fresh.",
+                path.display(),
+                backup.display()
+            );
+            Ok(ProjectRegistry::default())
+        }
+    }
 }
 
 pub fn save_registry(registry: &ProjectRegistry) -> Result<()> {
     let dir = config_dir()?;
     fs::create_dir_all(&dir)?;
-    fs::write(registry_path()?, serde_json::to_string_pretty(registry)?)?;
+    atomic_write(&registry_path()?, &serde_json::to_string_pretty(registry)?)?;
+    Ok(())
+}
+
+/// Write to a temp file then rename — prevents partial writes on crash
+fn atomic_write(path: &std::path::Path, content: &str) -> Result<()> {
+    let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
+    fs::write(&tmp, content)?;
+    fs::rename(&tmp, path)?;
     Ok(())
 }
 

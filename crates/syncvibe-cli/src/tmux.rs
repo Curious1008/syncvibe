@@ -4,6 +4,17 @@ use anyhow::Result;
 
 use crate::config;
 
+/// Generate a unique tmux session name from project name + full path hash.
+/// Prevents collisions between projects with the same folder basename.
+pub fn session_name_for(project_name: &str, project_path: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    project_path.hash(&mut hasher);
+    let hash = hasher.finish();
+    format!("sv-{}-{:08x}", project_name, hash as u32)
+}
+
 /// Register project and launch TUI (tmux or standalone)
 pub fn launch_project(project_path: &std::path::Path) -> Result<()> {
     let project_name = project_path
@@ -39,7 +50,7 @@ pub fn launch_or_attach(project_path: &str) -> Result<()> {
     // Ensure project is in the registry
     let _ = config::register_project(&project_name, project_path);
 
-    let session_name = format!("sv-{}", project_name);
+    let session_name = session_name_for(&project_name, project_path);
 
     let has_session = std::process::Command::new("tmux")
         .args(["has-session", "-t", &session_name])
@@ -97,7 +108,7 @@ fn create_session(session_name: &str, project_path: &str, bin_str: &str) -> Resu
             "30%",
             "-c",
             project_path,
-            &format!("{} dashboard", bin_str),
+            &format!("'{}' dashboard", bin_str),
         ])
         .env_remove("TMUX")
         .status();
@@ -133,7 +144,7 @@ fn ensure_split(session_name: &str, project_path: &str, bin_str: &str) -> Result
             "30%",
             "-c",
             project_path,
-            &format!("{} dashboard", bin_str),
+            &format!("'{}' dashboard", bin_str),
         ])
         .env_remove("TMUX")
         .status();

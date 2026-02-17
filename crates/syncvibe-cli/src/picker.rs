@@ -215,8 +215,9 @@ fn has_tmux_session(project_path: &str) -> bool {
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
+    let session = crate::tmux::session_name_for(&name, project_path);
     std::process::Command::new("tmux")
-        .args(["has-session", "-t", &format!("sv-{}", name)])
+        .args(["has-session", "-t", &session])
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)

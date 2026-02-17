@@ -76,8 +76,17 @@ impl Storage {
         if created {
             set_private_permissions(&path);
         }
-        // Advisory file lock to prevent concurrent write corruption
-        file.lock_exclusive()?;
+        // Advisory file lock with bounded retry to prevent blocking async runtime
+        let mut locked = false;
+        for _ in 0..100 {
+            match file.try_lock_exclusive() {
+                Ok(()) => { locked = true; break; }
+                Err(_) => std::thread::sleep(std::time::Duration::from_millis(10)),
+            }
+        }
+        if !locked {
+            file.lock_exclusive()?; // final attempt, may block briefly
+        }
         writeln!(file, "{}", line)?;
         file.unlock()?;
         Ok(())
@@ -162,10 +171,14 @@ impl Storage {
         let images_dir = self.root.join("images");
         fs::create_dir_all(&images_dir)?;
 
-        let ext = source_path
+        let raw_ext = source_path
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("png");
+        let ext = match raw_ext.to_lowercase().as_str() {
+            "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" => raw_ext,
+            _ => "png",
+        };
         let filename = format!("{}.{}", uuid::Uuid::new_v4(), ext);
         let dest = images_dir.join(&filename);
         fs::copy(source_path, &dest)?;
@@ -173,9 +186,19 @@ impl Storage {
         Ok(format!(".syncvibe/images/{}", filename))
     }
 
-    /// Get absolute path for a .syncvibe/ relative image path
+    /// Get absolute path for a .syncvibe/ relative image path.
+    /// Validates the path stays within the project root to prevent path traversal.
     pub fn image_abs_path(&self, relative: &str) -> PathBuf {
-        self.project_root().join(relative)
+        let candidate = self.project_root().join(relative);
+        // Normalize and verify the path doesn't escape project root
+        let root = self.project_root().canonicalize().unwrap_or_else(|_| self.project_root().to_path_buf());
+        let resolved = candidate.canonicalize().unwrap_or(candidate);
+        if resolved.starts_with(&root) {
+            resolved
+        } else {
+            // Path traversal attempt — return a safe fallback
+            root.join(".syncvibe").join("images").join("invalid")
+        }
     }
 }
 

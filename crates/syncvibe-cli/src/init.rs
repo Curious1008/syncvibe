@@ -7,10 +7,28 @@ use syncvibe_core::storage::Storage;
 
 use crate::onboarding::{self, SetupItem};
 
+/// Validate that a room name is safe for use as a directory name.
+fn validate_room_name(name: &str) -> Result<()> {
+    if name.is_empty() {
+        anyhow::bail!("Room name cannot be empty");
+    }
+    if name.contains('/') || name.contains('\\') || name.contains('\0') {
+        anyhow::bail!("Room name cannot contain / or \\");
+    }
+    if name == "." || name == ".." || name.starts_with("..") {
+        anyhow::bail!("Room name cannot be '.' or '..'");
+    }
+    if name.len() > 255 {
+        anyhow::bail!("Room name too long (max 255 characters)");
+    }
+    Ok(())
+}
+
 /// Prepare a project directory: create it, git init, show clear feedback.
 /// On failure, offers fallback to pick a different path.
 /// Returns the final usable path.
 pub fn prepare_project_dir(name: &str) -> Result<PathBuf> {
+    validate_room_name(name)?;
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     let mut path = home.join(name);
 
@@ -41,7 +59,13 @@ pub fn prepare_project_dir(name: &str) -> Result<PathBuf> {
                 }
                 // Support both absolute and relative-to-home paths
                 if alt.starts_with('/') || alt.starts_with('~') {
-                    path = PathBuf::from(alt.replace("~", &home.to_string_lossy()));
+                    path = if let Some(rest) = alt.strip_prefix("~/") {
+                        home.join(rest)
+                    } else if alt == "~" {
+                        home.clone()
+                    } else {
+                        PathBuf::from(alt)
+                    };
                 } else {
                     path = home.join(alt);
                 }

@@ -36,6 +36,12 @@ pub struct SyncVibeMcp {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+struct SendChatParams {
+    /// The message content to send
+    content: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 struct ReadChatParams {
     /// Return all messages across all sessions, not just current session
     all: Option<bool>,
@@ -271,6 +277,46 @@ impl SyncVibeMcp {
         }
     }
 
+    #[tool(description = "Send a chat message to the room. Use this instead of writing to the chat log file directly.")]
+    async fn send_chat(
+        &self,
+        Parameters(params): Parameters<SendChatParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let content = params.content.trim().to_string();
+        if content.is_empty() {
+            return Err(ErrorData::invalid_params("Message content cannot be empty", None));
+        }
+        if content.len() > 10_000 {
+            return Err(ErrorData::invalid_params("Message too long (max 10,000 chars)", None));
+        }
+
+        let storage = self.storage.lock().await;
+        let state = self.state.lock().await;
+
+        let session_id = state
+            .session_id
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+        let msg = ChatMessage::new_user_message(
+            self.user.profile.user_id.clone(),
+            self.user.profile.name.clone(),
+            self.user.profile.color.clone(),
+            content.clone(),
+            session_id,
+            None,
+        );
+
+        storage
+            .append_chat_message(&msg)
+            .map_err(|e| err(e.to_string()))?;
+
+        Ok(CallToolResult::success(vec![Content::text(format!(
+            "Message sent: {}",
+            content
+        ))]))
+    }
+
     #[tool(description = "Read chat messages. Call with no parameters for smart defaults: returns current session messages, then only new messages on subsequent calls. For large conversations, full content is written to .syncvibe/chat-digest.md — use Read tool to access it. Use 'all: true' for full history, 'since' for time-based filtering.")]
     async fn read_chat(
         &self,
@@ -420,9 +466,8 @@ impl ServerHandler for SyncVibeMcp {
                  When read_chat shows ⚡ TASKS FOR YOU, these are direct requests from\n\
                  team members. Prioritize completing these tasks and reply in chat when done.\n\
                  \n\
-                 To send chat: append a single JSONL line to .syncvibe/chat-log.jsonl.\n\
-                 Format: {\"id\":\"<uuid>\",\"user_id\":\"...\",\"user_name\":\"...\",\"user_color\":\"...\",\"content\":\"...\",\"message_type\":\"user\",\"thread_id\":null,\"session_id\":\"...\",\"timestamp\":\"...\"}\n\
-                 Only use message_type \"user\". Never use \"system\", \"git_commit\", or other types."
+                 To send chat: use the send_chat tool with your message content.\n\
+                 Never write directly to .syncvibe/chat-log.jsonl."
                     .to_string(),
             ),
             capabilities: ServerCapabilities::builder()
