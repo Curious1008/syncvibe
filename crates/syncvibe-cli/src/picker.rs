@@ -1,12 +1,13 @@
-use std::io::{self, Write};
 use std::path::Path;
-use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode};
-use crossterm::terminal::{self, ClearType};
-use crossterm::{cursor, execute};
+use crossterm::event::{Event, KeyCode};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::config::{load_registry, ProjectEntry};
+use crate::tui;
 
 /// Interactive project picker. Returns the selected project entry, or None if cancelled.
 /// `current_path` is used to mark the current project.
@@ -33,118 +34,181 @@ pub fn pick_project(current_path: Option<&str>) -> anyhow::Result<Option<Project
         .map(|p| has_tmux_session(&p.path))
         .collect();
 
-    let active_count = session_status.iter().filter(|&&s| s).count();
-
-    terminal::enable_raw_mode()?;
-    let mut stdout = io::stdout();
+    let mut terminal = tui::setup()?;
     let mut selected: usize = 0;
     let result;
 
     loop {
-        execute!(
-            stdout,
-            cursor::MoveTo(0, 0),
-            terminal::Clear(ClearType::All)
-        )?;
+        terminal.draw(|frame| {
+            draw_picker(
+                frame,
+                frame.area(),
+                &projects,
+                &session_status,
+                current_path,
+                selected,
+            );
+        })?;
 
-        // Header
-        write!(stdout, "\r\n")?;
-        write!(stdout, "  \x1b[1;36m SyncVibe \x1b[0m  ")?;
-        write!(
-            stdout,
-            "\x1b[90m{} project{}  ·  {} running\x1b[0m\r\n",
-            projects.len(),
-            if projects.len() == 1 { "" } else { "s" },
-            active_count,
-        )?;
-        write!(stdout, "\r\n")?;
-
-        // Project list
-        for (i, project) in projects.iter().enumerate() {
-            let is_selected = i == selected;
-            let has_session = session_status[i];
-            let is_current = current_path
-                .map(|cp| cp == project.path)
-                .unwrap_or(false);
-
-            // Selection arrow
-            if is_selected {
-                write!(stdout, "  \x1b[36m▸ \x1b[0m")?;
-            } else {
-                write!(stdout, "    ")?;
-            }
-
-            // Status dot
-            if has_session {
-                write!(stdout, "\x1b[32m●\x1b[0m ")?;
-            } else {
-                write!(stdout, "\x1b[90m○\x1b[0m ")?;
-            }
-
-            // Project name
-            if is_selected {
-                write!(stdout, "\x1b[1;37m{}\x1b[0m", project.name)?;
-            } else {
-                write!(stdout, "\x1b[37m{}\x1b[0m", project.name)?;
-            }
-
-            // Current marker
-            if is_current {
-                write!(stdout, " \x1b[90m(here)\x1b[0m")?;
-            }
-
-            // Status label
-            if has_session {
-                write!(stdout, "  \x1b[32mrunning\x1b[0m")?;
-            }
-
-            write!(stdout, "\r\n")?;
-
-            // Path on second line (indented)
-            write!(stdout, "      \x1b[90m{}\x1b[0m\r\n", project.path)?;
-        }
-
-        // Footer
-        write!(stdout, "\r\n")?;
-        write!(
-            stdout,
-            "  \x1b[90m↑↓ select · Enter open · Esc back\x1b[0m\r\n"
-        )?;
-        stdout.flush()?;
-
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Up => {
-                        selected = selected.saturating_sub(1);
-                    }
-                    KeyCode::Down => {
-                        if selected + 1 < projects.len() {
-                            selected += 1;
-                        }
-                    }
-                    KeyCode::Enter => {
-                        result = Some(projects[selected].clone());
-                        break;
-                    }
-                    KeyCode::Esc | KeyCode::Char('q') => {
-                        result = None;
-                        break;
-                    }
-                    _ => {}
+        if let Event::Key(key) = crossterm::event::read()? {
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    selected = selected.saturating_sub(1);
                 }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if selected + 1 < projects.len() {
+                        selected += 1;
+                    }
+                }
+                KeyCode::Enter => {
+                    result = Some(projects[selected].clone());
+                    break;
+                }
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    result = None;
+                    break;
+                }
+                _ => {}
             }
         }
     }
 
-    terminal::disable_raw_mode()?;
-    execute!(
-        stdout,
-        terminal::Clear(ClearType::All),
-        cursor::MoveTo(0, 0)
-    )?;
-
+    tui::teardown(&mut terminal)?;
     Ok(result)
+}
+
+fn draw_picker(
+    frame: &mut ratatui::Frame,
+    area: Rect,
+    projects: &[ProjectEntry],
+    session_status: &[bool],
+    current_path: Option<&str>,
+    selected: usize,
+) {
+    let active_count = session_status.iter().filter(|&&s| s).count();
+
+    // Outer layout with padding
+    let outer = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .split(area);
+
+    let inner = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Min(0),
+            Constraint::Length(2),
+        ])
+        .split(outer[1]);
+
+    let content_area = inner[1];
+
+    // Build lines
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Header
+    lines.push(Line::from(vec![
+        Span::styled(
+            " SyncVibe ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(
+                "  {} project{}  ·  {} running",
+                projects.len(),
+                if projects.len() == 1 { "" } else { "s" },
+                active_count,
+            ),
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]));
+    lines.push(Line::from(""));
+
+    // Project list
+    for (i, project) in projects.iter().enumerate() {
+        let is_selected = i == selected;
+        let has_session = session_status[i];
+        let is_current = current_path
+            .map(|cp| cp == project.path)
+            .unwrap_or(false);
+
+        // Main line: arrow + dot + name + markers
+        let mut spans = Vec::new();
+
+        // Selection arrow
+        if is_selected {
+            spans.push(Span::styled("▸ ", Style::default().fg(Color::Cyan)));
+        } else {
+            spans.push(Span::raw("  "));
+        }
+
+        // Status dot
+        if has_session {
+            spans.push(Span::styled("● ", Style::default().fg(Color::Green)));
+        } else {
+            spans.push(Span::styled("○ ", Style::default().fg(Color::DarkGray)));
+        }
+
+        // Project name
+        if is_selected {
+            spans.push(Span::styled(
+                project.name.clone(),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        } else {
+            spans.push(Span::styled(
+                project.name.clone(),
+                Style::default().fg(Color::White),
+            ));
+        }
+
+        // Current marker
+        if is_current {
+            spans.push(Span::styled(" (here)", Style::default().fg(Color::DarkGray)));
+        }
+
+        // Running label
+        if has_session {
+            spans.push(Span::styled("  running", Style::default().fg(Color::Green)));
+        }
+
+        lines.push(Line::from(spans));
+
+        // Path on second line
+        lines.push(Line::from(Span::styled(
+            format!("    {}", project.path),
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    // Footer
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "↑↓/jk select · Enter open · Esc back",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title(Span::styled(
+            " Projects ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+
+    let paragraph = Paragraph::new(lines).block(block);
+    frame.render_widget(paragraph, content_area);
 }
 
 fn has_tmux_session(project_path: &str) -> bool {

@@ -23,7 +23,6 @@ use crate::config;
 pub struct SyncVibeMcp {
     storage: Arc<Mutex<Storage>>,
     user: UserConfig,
-    session_id: Arc<Mutex<String>>,
     last_read_index: Arc<Mutex<usize>>,
     tool_router: ToolRouter<Self>,
 }
@@ -51,12 +50,9 @@ fn err(msg: String) -> ErrorData {
 #[tool_router]
 impl SyncVibeMcp {
     fn new(storage: Storage, user: UserConfig) -> Self {
-        let messages = storage.read_chat_messages().unwrap_or_default();
-        let session_id = crate::get_or_create_session_id(&messages, &user.profile.user_id);
         Self {
             storage: Arc::new(Mutex::new(storage)),
             user,
-            session_id: Arc::new(Mutex::new(session_id)),
             last_read_index: Arc::new(Mutex::new(0)),
             tool_router: Self::tool_router(),
         }
@@ -140,7 +136,11 @@ impl SyncVibeMcp {
             }
         } else {
             // Default: current session, incremental reads
-            let session_id = self.session_id.lock().await.clone();
+            // Recompute session_id each time so it tracks session rollovers
+            let session_id = crate::get_or_create_session_id(
+                &all_messages,
+                &self.user.profile.user_id,
+            );
             let mut last_idx = self.last_read_index.lock().await;
             let filtered: Vec<&ChatMessage> = all_messages
                 .iter()

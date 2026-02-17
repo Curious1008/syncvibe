@@ -26,9 +26,6 @@ pub enum SyncVibeError {
     #[error("User config not found. Run `syncvibe join` first.")]
     NoUserConfig,
 
-    #[error("Task not found: {0}")]
-    TaskNotFound(String),
-
     #[error("{0}")]
     Other(String),
 }

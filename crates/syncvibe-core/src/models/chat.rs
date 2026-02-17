@@ -10,6 +10,7 @@ pub enum MessageType {
     GitCommit,
     TaskUpdate,
     ConflictWarning,
+    Tip,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

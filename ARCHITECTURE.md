@@ -4,7 +4,7 @@ Terminal-native collaboration tool for multi-person vibe coding.
 
 ## Design Philosophy
 
-SyncVibe is a **coordination layer, not an AI layer**. Zero LLM API calls, zero token costs. It leverages existing AI agent capabilities (Claude Code's native file reading, task system, and hooks) rather than duplicating them.
+SyncVibe is a **coordination layer, not an AI layer**. Zero LLM API calls, zero token costs. It leverages existing AI agent capabilities (Claude Code's native file reading and hooks) rather than duplicating them.
 
 **Key principle**: Only build MCP tools for capabilities that agents can't do natively. Everything else uses direct file access guided by CLAUDE.md instructions.
 
@@ -16,23 +16,27 @@ syncvibe/
 ├── crates/
 │   ├── syncvibe-cli/              # Main binary
 │   │   └── src/
-│   │       ├── main.rs            # Entry point, clap CLI dispatch
-│   │       ├── app.rs             # TUI app state + event loop
+│   │       ├── main.rs            # Entry point, clap CLI dispatch, simple commands
+│   │       ├── init.rs            # Room init (.syncvibe/, .mcp.json, .claude, CLAUDE.md)
+│   │       ├── session.rs         # Interactive onboarding + project launch
+│   │       ├── tmux.rs            # tmux session management, layout, keybindings
+│   │       ├── app.rs             # TUI app state + async event loop
+│   │       ├── picker.rs          # Project switcher (ratatui)
 │   │       ├── cli.rs             # Clap command definitions
-│   │       ├── config.rs          # ~/.syncvibe/config.toml management
+│   │       ├── config.rs          # ~/.syncvibe/ config + project registry
+│   │       ├── onboarding.rs      # Interactive prompts + input validation
 │   │       ├── tui.rs             # Terminal setup/teardown (crossterm)
-│   │       ├── components/        # TUI panels (ratatui)
+│   │       ├── components/        # TUI rendering (ratatui)
 │   │       │   ├── status_bar.rs  # Top bar: project name + presence
 │   │       │   ├── chat.rs        # Chat message display
 │   │       │   ├── input.rs       # Input bar with cursor
-│   │       │   └── util.rs        # Shared helpers
+│   │       │   └── util.rs        # Color parsing helpers
 │   │       ├── network/
-│   │       │   ├── ws_client.rs   # WebSocket client (tokio-tungstenite)
-│   │       │   └── sync.rs        # (future: git sync)
+│   │       │   └── ws_client.rs   # WebSocket client (tokio-tungstenite)
 │   │       ├── mcp/
 │   │       │   └── server.rs      # MCP server: 3 tools, 1 resource
 │   │       └── git/
-│   │           └── ops.rs         # Git operations (branch, commits, conflicts)
+│   │           └── ops.rs         # Git repo name detection
 │   │
 │   └── syncvibe-core/             # Shared library
 │       └── src/
@@ -40,7 +44,7 @@ syncvibe/
 │           ├── error.rs           # SyncVibeError enum
 │           ├── models/            # Data types (chat, plan, room, user)
 │           ├── protocol.rs        # WsMessage enum (WebSocket types)
-│           └── storage.rs         # .syncvibe/ file I/O (atomic writes)
+│           └── storage.rs         # .syncvibe/ file I/O (atomic writes, file locking)
 │
 └── worker/                        # Cloudflare Worker (TypeScript)
     └── src/
@@ -48,6 +52,34 @@ syncvibe/
         ├── room.ts                # Durable Object: WS relay + presence
         └── types.ts
 ```
+
+## Features
+
+### Interactive Onboarding
+- `syncvibe` with no args: profile setup, project list, create/join room
+- `syncvibe://` invite codes: base64-encoded room_id + room_secret
+- Auto-detects git user.name for profile defaults
+
+### TUI Chat
+- Real-time chat with presence indicators
+- Slash commands: `/help` (`/?`), `/invite` (`/i`), `/projects` (`/p`), `/name`, `/color`, `/mute` (`/m`), `/clear`, `/rc`, `/quit` (`/q`)
+- Image sharing (drag path into input)
+- Message grouping by user, bell notifications with debounce
+- Chat truncation for performance (>5000 msgs → keep last 2000 in memory)
+
+### tmux Integration
+- Auto-creates split layout: SyncVibe Chat (30%) | Claude Code (70%)
+- Ctrl+G to switch panes, styled pane borders
+- Project switching between tmux sessions
+
+### MCP Server
+- 3 tools: `read_plan`, `update_plan`, `read_chat`
+- 1 resource: `syncvibe://plan`
+- Injected via `.mcp.json` at init time
+
+### Project Registry
+- `~/.syncvibe/projects.json` tracks all initialized projects
+- Canonical paths to avoid duplicates (macOS `/tmp` vs `/private/tmp`)
 
 ## AI Agent Integration Strategy
 
@@ -98,20 +130,22 @@ Agent A → Updates plan.md → Agent B reads via MCP read_plan
 
 ```
 .syncvibe/
-├── room.json            # Room config (relay URL, secret)
+├── room.json            # Room config (room_id, room_secret, relay_url)
 ├── plan.md              # Shared plan (raw markdown)
 ├── plan-meta.json       # Who edited, when, version
-└── chat-log.jsonl       # Append-only, one JSON per line
+├── chat-log.jsonl       # Append-only, one JSON per line
+└── images/              # Shared images (UUID-named)
 ```
 
-All files committed to git = primary persistence + sync.
+`.syncvibe/` is gitignored. The WebSocket relay provides real-time sync; local files are the source of truth.
 
 ## Key Design Decisions
 
-1. **Git as source of truth**: All state in `.syncvibe/`, committed to repo. WebSocket relay is ephemeral.
-2. **JSONL for chat**: Append-only, git-friendly (line-based diffs), no merge conflicts.
+1. **Local-first**: All state in `.syncvibe/`, gitignored. WebSocket relay is ephemeral for real-time sync.
+2. **JSONL for chat**: Append-only, no merge conflicts, advisory file locking for concurrent writes.
 3. **Atomic file writes**: Write to `.tmp`, then rename. Prevents partial reads.
 4. **3 MCP tools, not 7**: Only tools that add value beyond native file access. Chat sending handled via direct file append.
 5. **Session auto-segmentation**: 30min silence → new session ID. MCP `read_chat` defaults to current session.
 6. **Offline-first**: TUI works fully with local files. WebSocket is optional.
 7. **Hooks integration**: `PostToolUse` hook signals TUI when agents modify `.syncvibe/` files.
+8. **Security**: room.json and config.toml use 0600 permissions. Room secret is 32 random bytes (64 hex chars).

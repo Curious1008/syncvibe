@@ -24,16 +24,18 @@ impl RoomConfig {
 
     /// Encode room config as a shareable invite code: `syncvibe://BASE64`
     /// Format: base64(uuid_raw_16_bytes + secret_raw_32_bytes)
-    pub fn to_invite_code(&self) -> String {
-        let uuid = uuid::Uuid::parse_str(&self.room_id).expect("invalid room_id UUID");
+    pub fn to_invite_code(&self) -> Result<String, String> {
+        let uuid = uuid::Uuid::parse_str(&self.room_id)
+            .map_err(|e| format!("Invalid room_id UUID: {}", e))?;
         let uuid_bytes = uuid.as_bytes(); // 16 bytes
-        let secret_bytes = hex_decode(&self.room_secret);
+        let secret_bytes = hex_decode(&self.room_secret)
+            .map_err(|e| format!("Invalid room_secret: {}", e))?;
 
         let mut payload = Vec::with_capacity(48);
         payload.extend_from_slice(uuid_bytes);
         payload.extend_from_slice(&secret_bytes);
 
-        format!("{}{}", INVITE_PREFIX, URL_SAFE_NO_PAD.encode(&payload))
+        Ok(format!("{}{}", INVITE_PREFIX, URL_SAFE_NO_PAD.encode(&payload)))
     }
 
     /// Decode an invite code back into a RoomConfig (uses default relay URL)
@@ -69,10 +71,16 @@ fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
-fn hex_decode(hex: &str) -> Vec<u8> {
+fn hex_decode(hex: &str) -> Result<Vec<u8>, String> {
+    if hex.len() % 2 != 0 {
+        return Err("odd-length hex string".to_string());
+    }
     (0..hex.len())
         .step_by(2)
-        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).expect("invalid hex"))
+        .map(|i| {
+            u8::from_str_radix(&hex[i..i + 2], 16)
+                .map_err(|e| format!("invalid hex at position {}: {}", i, e))
+        })
         .collect()
 }
 
@@ -83,7 +91,7 @@ mod tests {
     #[test]
     fn invite_code_roundtrip() {
         let room = RoomConfig::new();
-        let code = room.to_invite_code();
+        let code = room.to_invite_code().unwrap();
         assert!(code.starts_with("syncvibe://"));
 
         let decoded = RoomConfig::from_invite_code(&code).unwrap();

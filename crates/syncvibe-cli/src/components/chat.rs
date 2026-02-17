@@ -259,6 +259,10 @@ fn format_message(msg: &ChatMessage, selected: bool, grouped: bool) -> Line<'sta
                     .fg(Color::Red)
                     .add_modifier(Modifier::BOLD),
             )),
+            MessageType::Tip => Line::from(Span::styled(
+                format!("{}   {}", prefix, msg.content),
+                Style::default().fg(Color::Rgb(100, 120, 130)),
+            )),
         }
     };
 

@@ -13,7 +13,7 @@ clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 tokio = { version = "1", features = ["full"] }
 ratatui = "0.29"
-crossterm = "0.28"
+crossterm = { version = "0.28", features = ["event-stream"] }
 tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
 notify = "7"
 serde = { version = "1", features = ["derive"] }

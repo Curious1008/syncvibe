@@ -3,37 +3,26 @@ use std::io::{self, BufRead, Write};
 const MAX_NAME_LEN: usize = 32;
 
 /// Prompt the user for input, returning their trimmed response.
-pub fn prompt(msg: &str) -> String {
+pub fn prompt(msg: &str) -> io::Result<String> {
     print!("{}", msg);
-    io::stdout().flush().unwrap();
+    io::stdout().flush()?;
     let mut buf = String::new();
-    io::stdin().lock().read_line(&mut buf).unwrap();
-    buf.trim().to_string()
+    io::stdin().lock().read_line(&mut buf)?;
+    Ok(buf.trim().to_string())
 }
 
 /// Prompt with a default value shown in brackets. Empty input returns the default.
-pub fn prompt_with_default(msg: &str, default: &str) -> String {
+pub fn prompt_with_default(msg: &str, default: &str) -> io::Result<String> {
     print!("{} [{}]: ", msg, default);
-    io::stdout().flush().unwrap();
+    io::stdout().flush()?;
     let mut buf = String::new();
-    io::stdin().lock().read_line(&mut buf).unwrap();
+    io::stdin().lock().read_line(&mut buf)?;
     let input = buf.trim();
     if input.is_empty() {
-        default.to_string()
+        Ok(default.to_string())
     } else {
-        input.to_string()
+        Ok(input.to_string())
     }
-}
-
-/// Ask a yes/no question. Empty input = yes.
-#[allow(dead_code)]
-pub fn confirm(msg: &str) -> bool {
-    print!("{} [Y/n]: ", msg);
-    io::stdout().flush().unwrap();
-    let mut buf = String::new();
-    io::stdin().lock().read_line(&mut buf).unwrap();
-    let input = buf.trim().to_lowercase();
-    input.is_empty() || input == "y" || input == "yes"
 }
 
 /// Sanitize a display name: strip control chars, trim, enforce max length.

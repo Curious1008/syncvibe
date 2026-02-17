@@ -1,7 +1,8 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
+use futures_util::StreamExt;
 use notify::{RecursiveMode, Watcher};
 use ratatui::layout::{Constraint, Direction, Layout};
 use tokio::sync::mpsc;
@@ -23,6 +24,21 @@ pub enum Panel {
 
 /// Max messages to keep in memory (older messages stay on disk)
 const MAX_DISPLAY_MESSAGES: usize = 2000;
+
+/// "Did you know?" tips — shown once per session, not persisted to disk
+const TIPS: &[&str] = &[
+    "Tip: /invite (/i) shows your room's invite code — share it to add teammates",
+    "Tip: /projects (/p) lets you switch between SyncVibe rooms",
+    "Tip: /mute (/m) toggles the notification bell — handy in meetings",
+    "Tip: Drop a file path into chat to share images with your team",
+    "Tip: /clear wipes the chat view — messages stay safe on disk",
+    "Tip: AI agents can read your chat via MCP — just talk and they'll follow along",
+    "Tip: /rc reconnects to the relay if you go offline — or it auto-retries for you",
+    "Tip: Ctrl+G switches between panes in tmux — no mouse needed",
+    "Tip: /name <new> changes your display name without leaving the TUI",
+    "Tip: /color #RRGGBB changes your chat color — try #4ECDC4",
+    "Tip: /help (/?) lists all available commands",
+];
 
 pub struct AppState {
     pub storage: Storage,
@@ -100,7 +116,15 @@ impl AppState {
             if msgs.len() > MAX_DISPLAY_MESSAGES {
                 msgs = msgs.split_off(msgs.len() - MAX_DISPLAY_MESSAGES);
             }
+            // Preserve in-memory-only messages (tips) that aren't on disk
+            let tips: Vec<ChatMessage> = self
+                .chat_messages
+                .iter()
+                .filter(|m| m.message_type == MessageType::Tip)
+                .cloned()
+                .collect();
             self.chat_messages = msgs;
+            self.chat_messages.extend(tips);
         }
     }
 
@@ -127,6 +151,21 @@ impl AppState {
         self.chat_messages.push(msg);
     }
 
+    /// Push a system message with a custom message type
+    fn system_msg_typed(&mut self, text: &str, msg_type: MessageType) {
+        let mut msg = ChatMessage::new_system_message(text.to_string(), self.session_id.clone());
+        msg.message_type = msg_type;
+        let _ = self.storage.append_chat_message(&msg);
+        self.chat_messages.push(msg);
+    }
+
+    /// Push a tip message (in-memory only, not persisted to disk)
+    fn tip_msg(&mut self, text: &str) {
+        let mut msg = ChatMessage::new_system_message(text.to_string(), self.session_id.clone());
+        msg.message_type = MessageType::Tip;
+        self.chat_messages.push(msg);
+    }
+
     /// Handle slash commands. Returns true if input was a command (don't send as chat).
     pub fn handle_command(&mut self) -> bool {
         let content = self.input_buffer.trim().to_string();
@@ -150,22 +189,83 @@ impl AppState {
 
         let parts: Vec<&str> = normalized.splitn(2, ' ').collect();
         let cmd = parts[0];
-        let _arg = parts.get(1).map(|s| s.trim()).unwrap_or("");
+
+        let arg = parts.get(1).map(|s| s.trim()).unwrap_or("");
 
         match cmd {
-            "/switch" | "/projects" | "/p" => {
-                self.show_picker = true;
+            "/help" | "/h" | "/?" => {
+                self.system_msg("/invite   — show room invite code  (/i)");
+                self.system_msg("/projects — switch between rooms   (/p)");
+                self.system_msg("/name <n> — change display name");
+                self.system_msg("/color <#hex> — change your color");
+                self.system_msg("/mute     — toggle notification bell  (/m)");
+                self.system_msg("/clear    — clear chat view");
+                self.system_msg("/rc       — reconnect to relay");
+                self.system_msg("/quit     — exit SyncVibe  (/q)");
             }
-            "/invite" => {
+            "/invite" | "/i" => {
                 match self.storage.read_room_config() {
                     Ok(room) => {
-                        self.system_msg("Share this invite code with your team:");
-                        self.system_msg(&room.to_invite_code());
+                        if let Ok(code) = room.to_invite_code() {
+                            self.system_msg("Share this invite code with your team:");
+                            self.system_msg(&code);
+                        } else {
+                            self.system_msg("Error generating invite code.");
+                        }
                     }
                     Err(_) => {
                         self.system_msg("No room config found.");
                     }
                 }
+            }
+            "/projects" | "/p" => {
+                self.show_picker = true;
+            }
+            "/name" => {
+                if arg.is_empty() {
+                    self.system_msg(&format!("Name: {}", self.user.profile.name));
+                    return true;
+                }
+                let new_name = crate::onboarding::sanitize_name(arg);
+                if new_name.is_empty() {
+                    self.system_msg("Name cannot be empty.");
+                    return true;
+                }
+                self.user.profile.name = new_name.clone();
+                if let Some(p) = self.presence.iter_mut().find(|p| p.user_id == self.user.profile.user_id) {
+                    p.user_name = new_name.clone();
+                }
+                let _ = config::save_user_config(&self.user);
+                self.system_msg(&format!("Name changed to {}", new_name));
+            }
+            "/color" => {
+                if arg.is_empty() {
+                    self.system_msg(&format!("Color: {}", self.user.profile.color));
+                    return true;
+                }
+                if !crate::onboarding::is_valid_color(arg) {
+                    self.system_msg("Invalid color. Use #RRGGBB format (e.g. #4ECDC4).");
+                    return true;
+                }
+                let new_color = arg.to_string();
+                self.user.profile.color = new_color.clone();
+                if let Some(p) = self.presence.iter_mut().find(|p| p.user_id == self.user.profile.user_id) {
+                    p.user_color = new_color.clone();
+                }
+                let _ = config::save_user_config(&self.user);
+                self.system_msg(&format!("Color changed to {}", new_color));
+            }
+            "/mute" | "/m" => {
+                self.muted = !self.muted;
+                if self.muted {
+                    self.system_msg("Notifications muted");
+                } else {
+                    self.system_msg("Notifications unmuted");
+                }
+            }
+            "/clear" => {
+                self.chat_messages.clear();
+                self.chat_selected = None;
             }
             "/rc" | "/reconnect" => {
                 if self.is_online {
@@ -175,31 +275,11 @@ impl AppState {
                     self.want_reconnect = true;
                 }
             }
-            "/clear" => {
-                self.chat_messages.clear();
-                self.chat_selected = None;
-            }
-            "/mute" => {
-                self.muted = !self.muted;
-                if self.muted {
-                    self.system_msg("Notifications muted");
-                } else {
-                    self.system_msg("Notifications unmuted");
-                }
-            }
-            "/help" => {
-                self.system_msg("/rc — reconnect");
-                self.system_msg("/invite — show invite code");
-                self.system_msg("/projects — switch projects");
-                self.system_msg("/clear — clear chat view");
-                self.system_msg("/mute — toggle notification sound");
-                self.system_msg("/quit — exit");
-            }
             "/quit" | "/q" => {
                 self.should_quit = true;
             }
             _ => {
-                self.system_msg(&format!("Unknown command: {}. Type /help", cmd));
+                self.system_msg(&format!("Unknown command: {} — type /help", cmd));
             }
         }
         true
@@ -391,64 +471,61 @@ pub async fn run() -> Result<()> {
     })?;
     watcher.watch(&watch_path, RecursiveMode::NonRecursive)?;
 
+    // Schedule a "Did you know?" tip after 5 seconds
+    let tip_at = tokio::time::Instant::now() + Duration::from_secs(5);
+    let mut tip_pending = true;
+
     let mut terminal = tui::setup()?;
-    let mut last_loop = tokio::time::Instant::now();
+    let mut event_stream = EventStream::new();
+    let mut last_draw = tokio::time::Instant::now();
 
-    // Main event loop
+    // Tick interval for sleep detection and periodic checks
+    let mut tick = tokio::time::interval(Duration::from_millis(100));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    // Main event loop — fully async, no blocking
     loop {
-        // Detect sleep/wake: if loop was paused > 30s, connection is likely dead
+        // Draw at most every 16ms (60fps cap) to avoid busy-loop redraws
         let now = tokio::time::Instant::now();
-        let loop_gap = now.duration_since(last_loop);
-        last_loop = now;
-
-        if loop_gap > Duration::from_secs(30) && state.is_online {
-            state.is_online = false;
-            state.ws_client = None;
-            ws_alive_rx = None;
-            ws_rx = None;
-            state.system_msg("Woke from sleep — reconnecting...");
-            reconnect_attempts = 0;
-            reconnect_at = Some(tokio::time::Instant::now());
+        if now.duration_since(last_draw) >= Duration::from_millis(16) {
+            terminal.draw(|frame| draw_ui(frame, &state))?;
+            last_draw = now;
         }
 
-        terminal.draw(|frame| draw_ui(frame, &state))?;
-
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                handle_key_event(&mut state, key)?;
+        tokio::select! {
+            // Terminal key events (async, non-blocking)
+            maybe_event = event_stream.next() => {
+                if let Some(Ok(Event::Key(key))) = maybe_event {
+                    handle_key_event(&mut state, key)?;
+                }
             }
-        }
 
-        // WebSocket messages
-        if let Some(ref mut rx) = ws_rx {
-            while let Ok(msg) = rx.try_recv() {
-                handle_ws_message(&mut state, msg);
+            // WebSocket incoming messages
+            msg = async {
+                match ws_rx.as_mut() {
+                    Some(rx) => rx.recv().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                if let Some(msg) = msg {
+                    handle_ws_message(&mut state, msg);
+                }
             }
-        }
 
-        // Check if WebSocket connection dropped
-        if let Some(ref alive_rx) = ws_alive_rx {
-            if !*alive_rx.borrow() && state.is_online {
-                state.is_online = false;
-                state.ws_client = None;
-                state.system_msg("Disconnected");
-                reconnect_attempts = 1;
-                reconnect_at = Some(tokio::time::Instant::now() + Duration::from_secs(5));
-                ws_alive_rx = None;
-                ws_rx = None;
+            // File system changes
+            _ = fs_rx.recv() => {
+                // Drain any queued events
+                while fs_rx.try_recv().is_ok() {}
+                state.reload_data();
             }
-        }
 
-        // Manual reconnect via /rc
-        if state.want_reconnect {
-            state.want_reconnect = false;
-            reconnect_attempts = 0;
-            reconnect_at = Some(tokio::time::Instant::now()); // immediate
-        }
-
-        // Auto-reconnect (with retry limit)
-        if let Some(target) = reconnect_at {
-            if tokio::time::Instant::now() >= target {
+            // Reconnect timer
+            _ = async {
+                match reconnect_at {
+                    Some(target) => tokio::time::sleep_until(target).await,
+                    None => std::future::pending().await,
+                }
+            } => {
                 reconnect_at = None;
                 if let Some(ref room) = room_config {
                     match ws_client::connect_ws(
@@ -482,15 +559,46 @@ pub async fn run() -> Result<()> {
                     }
                 }
             }
+
+            // "Did you know?" tip — fires once, 5s after startup
+            _ = async {
+                if tip_pending {
+                    tokio::time::sleep_until(tip_at).await
+                } else {
+                    std::future::pending().await
+                }
+            } => {
+                tip_pending = false;
+                // Simple deterministic pick: use process ID to vary across sessions
+                let idx = (std::process::id() as usize) % TIPS.len();
+                state.tip_msg(TIPS[idx]);
+            }
+
+            // Periodic tick for connection health checks
+            _ = tick.tick() => {
+                // Check if WebSocket connection dropped
+                if let Some(ref alive_rx) = ws_alive_rx {
+                    if !*alive_rx.borrow() && state.is_online {
+                        state.is_online = false;
+                        state.ws_client = None;
+                        state.system_msg("Disconnected");
+                        reconnect_attempts = 1;
+                        reconnect_at = Some(tokio::time::Instant::now() + Duration::from_secs(5));
+                        ws_alive_rx = None;
+                        ws_rx = None;
+                    }
+                }
+
+                // Manual reconnect via /rc
+                if state.want_reconnect {
+                    state.want_reconnect = false;
+                    reconnect_attempts = 0;
+                    reconnect_at = Some(tokio::time::Instant::now());
+                }
+            }
         }
 
-        // File system changes
-        if fs_rx.try_recv().is_ok() {
-            while fs_rx.try_recv().is_ok() {}
-            state.reload_data();
-        }
-
-        // Handle project picker request
+        // Handle project picker request (requires leaving TUI temporarily)
         if state.show_picker {
             state.show_picker = false;
             tui::teardown(&mut terminal)?;
@@ -502,7 +610,6 @@ pub async fn run() -> Result<()> {
                 .to_string();
             if let Ok(Some(entry)) = crate::picker::pick_project(Some(&current_path)) {
                 if entry.path != current_path {
-                    // Switch to different project
                     let name = std::path::Path::new(&entry.path)
                         .file_name()
                         .map(|n| n.to_string_lossy().to_string())
@@ -518,14 +625,13 @@ pub async fn run() -> Result<()> {
                             .args(["switch-client", "-t", &session])
                             .status();
                     } else {
-                        // Create the session then switch
-                        let _ = crate::launch_or_attach(&entry.path);
+                        let _ = crate::tmux::launch_or_attach(&entry.path);
                     }
                 }
             }
 
-            // Resume TUI (for when user switches back, or cancelled)
             terminal = tui::setup()?;
+            event_stream = EventStream::new();
             continue;
         }
 
@@ -536,12 +642,6 @@ pub async fn run() -> Result<()> {
 
     tui::teardown(&mut terminal)?;
     Ok(())
-}
-
-/// Helper to persist a system message and push to state
-fn persist_system_msg(state: &mut AppState, msg: ChatMessage) {
-    let _ = state.storage.append_chat_message(&msg);
-    state.chat_messages.push(msg);
 }
 
 fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
@@ -562,11 +662,7 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
         }
         WsMessage::UserJoined(info) => {
             if !state.presence.iter().any(|p| p.user_id == info.user_id) {
-                let system_msg = ChatMessage::new_system_message(
-                    format!("{} joined", info.user_name),
-                    state.session_id.clone(),
-                );
-                persist_system_msg(state, system_msg);
+                state.system_msg(&format!("{} joined", info.user_name));
                 state.presence.push(info);
             }
         }
@@ -578,11 +674,7 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
                 .map(|p| p.user_name.clone())
                 .unwrap_or_else(|| "Someone".to_string());
             state.presence.retain(|p| p.user_id != user_id);
-            let system_msg = ChatMessage::new_system_message(
-                format!("{} left", name),
-                state.session_id.clone(),
-            );
-            persist_system_msg(state, system_msg);
+            state.system_msg(&format!("{} left", name));
         }
         WsMessage::ChatMessage(msg) => {
             // Deduplicate by message ID
@@ -596,19 +688,13 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
         WsMessage::PlanUpdated {
             edited_name, ..
         } => {
-            let system_msg = ChatMessage::new_system_message(
-                format!("{} updated the plan", edited_name),
-                state.session_id.clone(),
-            );
-            persist_system_msg(state, system_msg);
+            state.system_msg(&format!("{} updated the plan", edited_name));
         }
         WsMessage::ConflictWarning { file, users } => {
-            let mut msg = ChatMessage::new_system_message(
-                format!("Conflict: {} edited by {}", file, users.join(" and ")),
-                state.session_id.clone(),
+            state.system_msg_typed(
+                &format!("Conflict: {} edited by {}", file, users.join(" and ")),
+                MessageType::ConflictWarning,
             );
-            msg.message_type = MessageType::ConflictWarning;
-            persist_system_msg(state, msg);
         }
         WsMessage::GitStatus {
             user_name,
@@ -617,24 +703,22 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
             ..
         } => {
             if !recent_commits.is_empty() {
-                let mut msg = ChatMessage::new_system_message(
-                    format!(
+                state.system_msg_typed(
+                    &format!(
                         "{} pushed {} commits to {}",
                         user_name,
                         recent_commits.len(),
                         branch
                     ),
-                    state.session_id.clone(),
+                    MessageType::GitCommit,
                 );
-                msg.message_type = MessageType::GitCommit;
-                persist_system_msg(state, msg);
             }
         }
         _ => {}
     }
 }
 
-fn handle_key_event(state: &mut AppState, key: event::KeyEvent) -> Result<()> {
+fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
     // Ctrl+C to quit
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
         state.should_quit = true;

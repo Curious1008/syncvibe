@@ -97,23 +97,6 @@ pub async fn connect_ws(
 }
 
 impl WsClient {
-    /// Connect to the relay and return a client + receiver for incoming messages
-    #[allow(dead_code)]
-    pub async fn connect(
-        relay_url: &str,
-        room_id: &str,
-        room_secret: &str,
-        user_id: &str,
-        user_name: &str,
-        user_color: &str,
-    ) -> Result<(Self, mpsc::Receiver<WsMessage>)> {
-        let (client, rx, _alive_rx) = connect_ws(
-            relay_url, room_id, room_secret, user_id, user_name, user_color,
-        )
-        .await?;
-        Ok((client, rx))
-    }
-
     /// Send a WebSocket message to the relay
     pub async fn send(&self, msg: WsMessage) -> Result<()> {
         let json = serde_json::to_string(&msg)?;
