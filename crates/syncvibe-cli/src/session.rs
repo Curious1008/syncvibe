@@ -76,16 +76,38 @@ pub fn cmd_session() -> Result<()> {
             let answer = onboarding::prompt("")?;
             if answer.is_empty() || answer.starts_with('y') || answer.starts_with('Y') {
                 let room = crate::invite::resolve_short_invite(trimmed)?;
-                if let Some(ref name) = room.room_name {
+                let name = room.room_name.clone().unwrap_or_else(|| "syncvibe-room".to_string());
+                println!(
+                    "  \x1b[38;2;80;200;120m✓\x1b[0m Code accepted — \x1b[1m{}\x1b[0m\n",
+                    name
+                );
+                let home = dirs::home_dir()
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                let path = home.join(&name);
+                // Already joined — just launch
+                if path.join(".syncvibe").is_dir() {
                     println!(
-                        "  \x1b[38;2;80;200;120m✓\x1b[0m Code accepted — \x1b[1m{}\x1b[0m\n",
-                        name
+                        "  \x1b[38;2;100;100;115m→ {} (already set up)\x1b[0m\n",
+                        path.display()
                     );
-                } else {
-                    println!("  \x1b[38;2;80;200;120m✓\x1b[0m Code accepted\n");
+                    return tmux::launch_project(&path);
                 }
-                init::perform_init(&cwd, Some(room))?;
-                return tmux::launch_project(&cwd);
+                println!(
+                    "  \x1b[38;2;100;100;115m→ {}\x1b[0m\n",
+                    path.display()
+                );
+                if !path.exists() {
+                    std::fs::create_dir_all(&path)?;
+                }
+                if !path.join(".git").exists() {
+                    std::process::Command::new("git")
+                        .args(["init"])
+                        .current_dir(&path)
+                        .stdout(std::process::Stdio::null())
+                        .status()?;
+                }
+                init::perform_init(&path, Some(room))?;
+                return tmux::launch_project(&path);
             }
         }
     }
@@ -163,18 +185,38 @@ pub fn cmd_session() -> Result<()> {
                     "  \x1b[38;2;78;205;196mInvite code:\x1b[0m ",
                 )?;
                 let room = crate::invite::resolve_short_invite(&code)?;
-                if let Some(ref name) = room.room_name {
+                let name = room.room_name.clone().unwrap_or_else(|| "syncvibe-room".to_string());
+                println!(
+                    "  \x1b[38;2;80;200;120m✓\x1b[0m Code accepted — \x1b[1m{}\x1b[0m\n",
+                    name
+                );
+                let home = dirs::home_dir()
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                let path = home.join(&name);
+                // Already joined — just launch
+                if path.join(".syncvibe").is_dir() {
                     println!(
-                        "  \x1b[38;2;80;200;120m✓\x1b[0m Code accepted — \x1b[1m{}\x1b[0m\n",
-                        name
+                        "  \x1b[38;2;100;100;115m→ {} (already set up)\x1b[0m\n",
+                        path.display()
                     );
-                } else {
-                    println!(
-                        "  \x1b[38;2;80;200;120m✓\x1b[0m Code accepted\n"
-                    );
+                    return tmux::launch_project(&path);
                 }
-                init::perform_init(&cwd, Some(room))?;
-                tmux::launch_project(&cwd)
+                println!(
+                    "  \x1b[38;2;100;100;115m→ {}\x1b[0m\n",
+                    path.display()
+                );
+                if !path.exists() {
+                    std::fs::create_dir_all(&path)?;
+                }
+                if !path.join(".git").exists() {
+                    std::process::Command::new("git")
+                        .args(["init"])
+                        .current_dir(&path)
+                        .stdout(std::process::Stdio::null())
+                        .status()?;
+                }
+                init::perform_init(&path, Some(room))?;
+                tmux::launch_project(&path)
             }
         }
     }

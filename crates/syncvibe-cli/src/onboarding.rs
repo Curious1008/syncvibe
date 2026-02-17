@@ -290,6 +290,7 @@ fn render_checklist(
     prev_lines: usize,
 ) -> io::Result<usize> {
     let mut out = io::stdout();
+    let (term_width, _) = terminal::size().unwrap_or((80, 24));
     clear_up(&mut out, prev_lines)?;
 
     let mut lines = 0;
@@ -333,16 +334,25 @@ fn render_checklist(
             String::new()
         };
 
+        // Truncate description to fit terminal width
+        let prefix_len = 9 + 16; // "  › [✓] " + file pad
+        let suffix_len = 12; // " required ✦" / " optional"
+        let max_desc = (term_width as usize).saturating_sub(prefix_len + suffix_len);
+        let desc: String = item.description.chars().take(max_desc).collect();
+
         write!(
             out,
             "  {} [{}] {} {} {}{}\r\n",
-            arrow, check, file, item.description, tag, lock
+            arrow, check, file, desc, tag, lock
         )?;
         lines += 1;
 
-        // Show reason on hover
+        // Show reason on hover (truncated to fit terminal width)
         if selected {
-            write!(out, "        {DIM}└ {}{R}\r\n", item.reason)?;
+            let (tw, _) = terminal::size().unwrap_or((80, 24));
+            let max_reason = (tw as usize).saturating_sub(12); // 8 indent + "└ " + margin
+            let reason: String = item.reason.chars().take(max_reason).collect();
+            write!(out, "        {DIM}└ {reason}{R}\r\n")?;
             lines += 1;
         }
     }
@@ -383,13 +393,13 @@ fn reserve_lines(count: usize) -> io::Result<()> {
     out.flush()
 }
 
-/// Move cursor up N lines, clearing each line. Used before re-rendering.
+/// Move cursor up N lines, then erase everything below. Used before re-rendering.
 fn clear_up(out: &mut io::Stdout, count: usize) -> io::Result<()> {
     for _ in 0..count {
-        write!(out, "\x1b[A\x1b[2K")?;
+        write!(out, "\x1b[A")?;
     }
     if count > 0 {
-        write!(out, "\r")?;
+        write!(out, "\r\x1b[J")?; // move to column 0, erase to end of screen
     }
     Ok(())
 }

@@ -1056,12 +1056,12 @@ fn handle_join_project() -> bool {
         }
     };
 
-    let default_name = room.room_name.clone().unwrap_or_else(|| "syncvibe-room".to_string());
+    let name = room.room_name.clone().unwrap_or_else(|| "syncvibe-room".to_string());
 
     if room.room_name.is_some() {
         println!(
             "  \x1b[38;2;80;200;120m✓\x1b[0m Code accepted — \x1b[1m{}\x1b[0m\n",
-            default_name
+            name
         );
     } else {
         println!(
@@ -1069,20 +1069,21 @@ fn handle_join_project() -> bool {
         );
     }
 
-    // Ask for a room name — auto-creates ~/name
     let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-    let name = match onboarding::prompt_with_default(
-        "  \x1b[38;2;78;205;196mRoom name\x1b[0m",
-        &default_name,
-    ) {
-        Ok(n) if !n.is_empty() => n,
-        _ => {
-            println!("  Cancelled.");
-            return false;
-        }
-    };
-
     let path = home.join(&name);
+
+    // Already joined — just launch
+    if path.join(".syncvibe").is_dir() {
+        println!(
+            "  \x1b[38;2;100;100;115m→ {} (already set up)\x1b[0m\n",
+            path.display()
+        );
+        if tmux::launch_or_attach(&path.to_string_lossy()).is_err() {
+            println!("  \x1b[38;2;255;100;100mError:\x1b[0m Failed to launch tmux session.");
+        }
+        return true;
+    }
+
     println!(
         "  \x1b[38;2;100;100;115m→ {}\x1b[0m\n",
         path.display()

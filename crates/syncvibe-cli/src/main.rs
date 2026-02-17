@@ -189,20 +189,23 @@ fn cmd_connect(code: String) -> Result<()> {
 
     let _user = session::ensure_user_profile()?;
 
-    let default_name = room
+    let name = room
         .room_name
         .clone()
         .unwrap_or_else(|| "syncvibe-room".to_string());
-    let name = crate::onboarding::prompt_with_default(
-        "  \x1b[38;2;78;205;196mRoom name\x1b[0m",
-        &default_name,
-    )?;
-    if name.is_empty() {
-        anyhow::bail!("Cancelled.");
-    }
 
     let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
     let path = home.join(&name);
+
+    // Already joined — just launch
+    if path.join(".syncvibe").is_dir() {
+        println!(
+            "  \x1b[38;2;100;100;115m→ {} (already set up)\x1b[0m\n",
+            path.display()
+        );
+        return tmux::launch_project(&path);
+    }
+
     println!(
         "  \x1b[38;2;100;100;115m→ {}\x1b[0m\n",
         path.display()
