@@ -885,13 +885,61 @@ pub async fn run() -> Result<()> {
     Ok(())
 }
 
+/// Resolve a user-provided path: expand ~ and convert to absolute.
+fn resolve_path(input: &str) -> std::path::PathBuf {
+    if input.starts_with("~/") {
+        match dirs::home_dir() {
+            Some(home) => home.join(&input[2..]),
+            None => std::path::PathBuf::from(input),
+        }
+    } else {
+        std::path::PathBuf::from(input)
+    }
+}
+
+/// Ensure a path exists, is a directory, and has a git repo. Returns false on failure.
+fn ensure_project_dir(path: &std::path::Path) -> bool {
+    if !path.exists() {
+        if let Err(e) = std::fs::create_dir_all(path) {
+            println!("  \x1b[38;2;255;100;100mError:\x1b[0m {}", e);
+            return false;
+        }
+    }
+    if !path.is_dir() {
+        println!(
+            "  \x1b[38;2;255;100;100mError:\x1b[0m {} is not a directory.",
+            path.display()
+        );
+        return false;
+    }
+    if !path.join(".git").exists() {
+        let status = std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(path)
+            .stdout(std::process::Stdio::null())
+            .status();
+        match status {
+            Ok(s) if s.success() => {}
+            _ => {
+                println!("  \x1b[38;2;255;100;100mError:\x1b[0m Failed to initialize git repo.");
+                return false;
+            }
+        }
+    }
+    true
+}
+
 /// Handle /new command: prompt for path, init, launch new tmux session.
 /// Returns true if we switched to a new tmux session.
 fn handle_new_project() -> bool {
     use crate::{init, onboarding, session, tmux};
 
-    println!("\n  Create a new SyncVibe room\n");
-    let path_str = match onboarding::prompt("  Project path: ") {
+    println!();
+    onboarding::print_section("New Room");
+    println!();
+    let path_str = match onboarding::prompt(
+        "  \x1b[38;2;78;205;196mProject path:\x1b[0m ",
+    ) {
         Ok(p) if !p.is_empty() => p,
         _ => {
             println!("  Cancelled.");
@@ -899,75 +947,39 @@ fn handle_new_project() -> bool {
         }
     };
 
-    let path = std::path::Path::new(&path_str);
-
-    // Expand ~ to home directory
-    let path = if path_str.starts_with("~/") {
-        match dirs::home_dir() {
-            Some(home) => home.join(&path_str[2..]),
-            None => path.to_path_buf(),
-        }
-    } else {
-        path.to_path_buf()
-    };
-
-    // Create directory if it doesn't exist
-    if !path.exists() {
-        println!("  Directory doesn't exist. Creating...");
-        if let Err(e) = std::fs::create_dir_all(&path) {
-            println!("  Error: {}", e);
-            return false;
-        }
-    }
-
-    if !path.is_dir() {
-        println!("  Error: {} is not a directory.", path.display());
+    let path = resolve_path(&path_str);
+    if !ensure_project_dir(&path) {
         return false;
     }
 
-    // Ensure git repo
-    if !path.join(".git").exists() {
-        println!("  Initializing git repository...");
-        let status = std::process::Command::new("git")
-            .args(["init"])
-            .current_dir(&path)
-            .status();
-        match status {
-            Ok(s) if s.success() => {}
-            _ => {
-                println!("  Error: Failed to initialize git repo.");
-                return false;
-            }
-        }
-    }
-
-    // Ensure user profile
     if session::ensure_user_profile().is_err() {
         return false;
     }
 
-    // Run init with checklist
     if init::perform_init(&path, None).is_err() {
         println!("  Setup cancelled or failed.");
         return false;
     }
 
-    // Launch new tmux session and switch to it
     if tmux::launch_or_attach(&path.to_string_lossy()).is_err() {
-        println!("  Error: Failed to launch tmux session.");
+        println!("  \x1b[38;2;255;100;100mError:\x1b[0m Failed to launch tmux session.");
         return false;
     }
 
     true
 }
 
-/// Handle /join command: prompt for invite code + path, init, launch new tmux session.
+/// Handle /join command: prompt for invite code + room name, init, launch.
 fn handle_join_project() -> bool {
     use crate::{init, onboarding, session, tmux};
     use syncvibe_core::models::RoomConfig;
 
-    println!("\n  Join a SyncVibe room\n");
-    let code = match onboarding::prompt("  Paste invite code: ") {
+    println!();
+    onboarding::print_section("Join Room");
+    println!();
+    let code = match onboarding::prompt(
+        "  \x1b[38;2;78;205;196mInvite code:\x1b[0m ",
+    ) {
         Ok(c) if !c.is_empty() => c,
         _ => {
             println!("  Cancelled.");
@@ -978,55 +990,35 @@ fn handle_join_project() -> bool {
     let room = match RoomConfig::from_invite_code(&code) {
         Ok(r) => r,
         Err(e) => {
-            println!("  Invalid invite code: {}", e);
+            println!("  \x1b[38;2;255;100;100mInvalid invite code:\x1b[0m {}", e);
             return false;
         }
     };
+    println!(
+        "  \x1b[38;2;80;200;120m✓\x1b[0m Code accepted\n"
+    );
 
-    let path_str = match onboarding::prompt("  Project path: ") {
-        Ok(p) if !p.is_empty() => p,
+    // Ask for a room name — auto-creates ~/name
+    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    let name = match onboarding::prompt_with_default(
+        "  \x1b[38;2;78;205;196mRoom name\x1b[0m",
+        "syncvibe-room",
+    ) {
+        Ok(n) if !n.is_empty() => n,
         _ => {
             println!("  Cancelled.");
             return false;
         }
     };
 
-    let path = std::path::Path::new(&path_str);
-    let path = if path_str.starts_with("~/") {
-        match dirs::home_dir() {
-            Some(home) => home.join(&path_str[2..]),
-            None => path.to_path_buf(),
-        }
-    } else {
-        path.to_path_buf()
-    };
+    let path = home.join(&name);
+    println!(
+        "  \x1b[38;2;100;100;115m→ {}\x1b[0m\n",
+        path.display()
+    );
 
-    if !path.exists() {
-        println!("  Directory doesn't exist. Creating...");
-        if let Err(e) = std::fs::create_dir_all(&path) {
-            println!("  Error: {}", e);
-            return false;
-        }
-    }
-
-    if !path.is_dir() {
-        println!("  Error: {} is not a directory.", path.display());
+    if !ensure_project_dir(&path) {
         return false;
-    }
-
-    if !path.join(".git").exists() {
-        println!("  Initializing git repository...");
-        let status = std::process::Command::new("git")
-            .args(["init"])
-            .current_dir(&path)
-            .status();
-        match status {
-            Ok(s) if s.success() => {}
-            _ => {
-                println!("  Error: Failed to initialize git repo.");
-                return false;
-            }
-        }
     }
 
     if session::ensure_user_profile().is_err() {
@@ -1039,7 +1031,7 @@ fn handle_join_project() -> bool {
     }
 
     if tmux::launch_or_attach(&path.to_string_lossy()).is_err() {
-        println!("  Error: Failed to launch tmux session.");
+        println!("  \x1b[38;2;255;100;100mError:\x1b[0m Failed to launch tmux session.");
         return false;
     }
 
