@@ -66,21 +66,37 @@ pub fn cmd_session() -> Result<()> {
         return tmux::launch_project(&cwd);
     }
 
-    // Step 3: No room in cwd — build interactive menu
+    // Step 3: Check clipboard for invite code
+    if let Some(clip) = crate::invite::read_clipboard() {
+        let trimmed = clip.trim();
+        if crate::invite::looks_like_short_code(trimmed) || trimmed.starts_with("syncvibe://") {
+            println!(
+                "  \x1b[38;2;78;205;196m?\x1b[0m Found invite code in clipboard — join this room? [Y/n] ",
+            );
+            let answer = onboarding::prompt("")?;
+            if answer.is_empty() || answer.starts_with('y') || answer.starts_with('Y') {
+                let room = crate::invite::resolve_short_invite(trimmed)?;
+                if let Some(ref name) = room.room_name {
+                    println!(
+                        "  \x1b[38;2;80;200;120m✓\x1b[0m Code accepted — \x1b[1m{}\x1b[0m\n",
+                        name
+                    );
+                } else {
+                    println!("  \x1b[38;2;80;200;120m✓\x1b[0m Code accepted\n");
+                }
+                init::perform_init(&cwd, Some(room))?;
+                return tmux::launch_project(&cwd);
+            }
+        }
+    }
+
+    // Step 4: No room in cwd — build interactive menu
     let registry = config::load_registry().unwrap_or_default();
     let valid_projects: Vec<_> = registry
         .projects
         .iter()
         .filter(|p| std::path::Path::new(&p.path).join(".syncvibe").is_dir())
         .collect();
-
-    let in_git_repo = cwd.join(".git").exists();
-
-    if valid_projects.is_empty() && !in_git_repo {
-        anyhow::bail!(
-            "No SyncVibe rooms found.\n  cd into a git repo and run `syncvibe` to get started."
-        );
-    }
 
     // Build menu items
     let mut menu_items = Vec::new();
@@ -90,16 +106,14 @@ pub fn cmd_session() -> Result<()> {
             hint: format!("({})", p.path),
         });
     }
-    if in_git_repo {
-        menu_items.push(onboarding::MenuItem {
-            label: "Create a new room".to_string(),
-            hint: String::new(),
-        });
-        menu_items.push(onboarding::MenuItem {
-            label: "Join with invite code".to_string(),
-            hint: String::new(),
-        });
-    }
+    menu_items.push(onboarding::MenuItem {
+        label: "Create a new room".to_string(),
+        hint: String::new(),
+    });
+    menu_items.push(onboarding::MenuItem {
+        label: "Join with invite code".to_string(),
+        hint: String::new(),
+    });
 
     onboarding::print_section("Choose a Room");
     println!();
@@ -114,16 +128,41 @@ pub fn cmd_session() -> Result<()> {
         Some(idx) => {
             let action = idx - valid_projects.len();
             if action == 0 {
-                // Create new room
-                init::perform_init(&cwd, None)?;
-                tmux::launch_project(&cwd)
+                // Create new room — prompt for name, create ~/name
+                println!();
+                let name = onboarding::prompt(
+                    "  \x1b[38;2;78;205;196mRoom name:\x1b[0m ",
+                )?;
+                if name.is_empty() {
+                    anyhow::bail!("Cancelled.");
+                }
+                let home = dirs::home_dir()
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                let path = home.join(&name);
+                println!(
+                    "  \x1b[38;2;100;100;115m→ {}\x1b[0m\n",
+                    path.display()
+                );
+                if !path.exists() {
+                    std::fs::create_dir_all(&path)?;
+                }
+                if !path.join(".git").exists() {
+                    std::process::Command::new("git")
+                        .args(["init"])
+                        .current_dir(&path)
+                        .stdout(std::process::Stdio::null())
+                        .status()?;
+                }
+                let mut room = RoomConfig::new();
+                room.room_name = Some(name);
+                init::perform_init(&path, Some(room))?;
+                tmux::launch_project(&path)
             } else {
                 // Join with invite code
                 let code = onboarding::prompt(
                     "  \x1b[38;2;78;205;196mInvite code:\x1b[0m ",
                 )?;
-                let room =
-                    RoomConfig::from_invite_code(&code).map_err(|e| anyhow::anyhow!(e))?;
+                let room = crate::invite::resolve_short_invite(&code)?;
                 if let Some(ref name) = room.room_name {
                     println!(
                         "  \x1b[38;2;80;200;120m✓\x1b[0m Code accepted — \x1b[1m{}\x1b[0m\n",

@@ -254,11 +254,29 @@ impl AppState {
             "/invite" | "/i" => {
                 match self.storage.read_room_config() {
                     Ok(room) => {
-                        if let Ok(code) = room.to_invite_code() {
-                            self.system_msg("Share this invite code with your team:");
-                            self.system_msg(&code);
-                        } else {
-                            self.system_msg("Error generating invite code.");
+                        let code = crate::invite::create_short_invite(&room)
+                            .or_else(|_| room.to_invite_code().map_err(|e| anyhow::anyhow!(e)));
+                        match code {
+                            Ok(code) => {
+                                let msg = crate::invite::share_message(
+                                    &code,
+                                    &self.user.profile.name,
+                                    room.room_name.as_deref(),
+                                );
+                                if copy_to_clipboard(&msg) {
+                                    self.system_msg(&format!("Invite copied: {}", code));
+                                } else {
+                                    let path = self.storage.root().join("invite.txt");
+                                    let _ = std::fs::write(&path, &msg);
+                                    self.system_msg(&format!(
+                                        "Invite saved to {}",
+                                        path.display()
+                                    ));
+                                }
+                            }
+                            Err(_) => {
+                                self.system_msg("Error generating invite code.");
+                            }
                         }
                     }
                     Err(_) => {
@@ -534,6 +552,40 @@ fn open_file(path: &std::path::Path) {
     let _ = std::process::Command::new("cmd").args(["/C", "start", ""]).arg(path).spawn();
 }
 
+/// Copy text to system clipboard. Returns true on success.
+fn copy_to_clipboard(text: &str) -> bool {
+    use std::io::Write;
+    #[cfg(target_os = "macos")]
+    let mut child = match std::process::Command::new("pbcopy")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    #[cfg(target_os = "linux")]
+    let mut child = match std::process::Command::new("xclip")
+        .args(["-selection", "clipboard"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    #[cfg(target_os = "windows")]
+    let mut child = match std::process::Command::new("clip")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(text.as_bytes());
+    }
+    child.wait().map(|s| s.success()).unwrap_or(false)
+}
+
 pub async fn run() -> Result<()> {
     let cwd = std::env::current_dir()?;
     let storage = Storage::find(&cwd)?;
@@ -585,13 +637,25 @@ pub async fn run() -> Result<()> {
         }
     }
 
-    // New room: show invite code so user can share it
+    // New room: copy invite message to clipboard
     if is_new_room {
         if let Some(ref room) = room_config {
-            if let Ok(code) = room.to_invite_code() {
-                state.system_msg(&format!("Invite code: {}", code));
-                state.system_msg("Share it with your team — they run `syncvibe` and paste it.");
-                state.system_msg("You can always get it again with /invite");
+            let code = crate::invite::create_short_invite(room)
+                .or_else(|_| room.to_invite_code().map_err(|e| anyhow::anyhow!(e)));
+            if let Ok(code) = code {
+                let msg = crate::invite::share_message(
+                    &code,
+                    &state.user.profile.name,
+                    room.room_name.as_deref(),
+                );
+                if copy_to_clipboard(&msg) {
+                    state.system_msg(&format!("Invite copied: {} — share with your team", code));
+                } else {
+                    let path = state.storage.root().join("invite.txt");
+                    let _ = std::fs::write(&path, &msg);
+                    state.system_msg(&format!("Invite saved to {}", path.display()));
+                }
+                state.system_msg("/invite to copy again");
             }
         }
     }
@@ -970,7 +1034,6 @@ fn handle_new_project() -> bool {
 /// Handle /join command: prompt for invite code + room name, init, launch.
 fn handle_join_project() -> bool {
     use crate::{init, onboarding, session, tmux};
-    use syncvibe_core::models::RoomConfig;
 
     println!();
     onboarding::print_section("Join Room");
@@ -985,7 +1048,7 @@ fn handle_join_project() -> bool {
         }
     };
 
-    let room = match RoomConfig::from_invite_code(&code) {
+    let room = match crate::invite::resolve_short_invite(&code) {
         Ok(r) => r,
         Err(e) => {
             println!("  \x1b[38;2;255;100;100mInvalid invite code:\x1b[0m {}", e);

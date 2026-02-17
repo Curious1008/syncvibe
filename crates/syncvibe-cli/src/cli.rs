@@ -41,6 +41,12 @@ pub enum Command {
         message: String,
     },
 
+    /// Join a room with an invite code (short or legacy)
+    Connect {
+        /// Invite code (e.g. HKPT-3NWV or syncvibe://...)
+        code: String,
+    },
+
     /// Show room invite code
     Invite,
 

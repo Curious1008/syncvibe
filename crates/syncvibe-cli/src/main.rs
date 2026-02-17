@@ -4,6 +4,7 @@ mod components;
 mod config;
 mod git;
 mod init;
+mod invite;
 mod mcp;
 mod network;
 mod onboarding;
@@ -30,6 +31,7 @@ fn main() -> Result<()> {
         Some(Command::Join { name, color }) => cmd_join(name, color)?,
         Some(Command::Profile { name, color }) => cmd_profile(name, color)?,
         Some(Command::Chat { message }) => cmd_chat(message)?,
+        Some(Command::Connect { code }) => cmd_connect(code)?,
         Some(Command::Invite) => cmd_invite()?,
         Some(Command::Status) => cmd_status()?,
         Some(Command::McpServer) => cmd_mcp_server()?,
@@ -158,13 +160,67 @@ fn cmd_invite() -> Result<()> {
     let cwd = env::current_dir()?;
     let storage = Storage::find(&cwd)?;
     let room = storage.read_room_config()?;
+    let user = config::load_user_config()?;
 
-    let code = room.to_invite_code().map_err(|e| anyhow::anyhow!(e))?;
-    println!("\n  Share this invite code with your team:\n");
-    println!("  {}\n", code);
-    println!("  They just run `syncvibe` and paste it.");
+    let code = invite::create_short_invite(&room)
+        .or_else(|_| room.to_invite_code().map_err(|e| anyhow::anyhow!(e)))?;
+
+    let msg = invite::share_message(&code, &user.profile.name, room.room_name.as_deref());
+    println!("\n  Share this with your team:\n");
+    for line in msg.lines() {
+        println!("  {}", line);
+    }
+    println!();
 
     Ok(())
+}
+
+fn cmd_connect(code: String) -> Result<()> {
+    let room = invite::resolve_short_invite(&code)?;
+
+    if let Some(ref name) = room.room_name {
+        println!(
+            "  \x1b[38;2;80;200;120m✓\x1b[0m Code accepted — \x1b[1m{}\x1b[0m\n",
+            name
+        );
+    } else {
+        println!("  \x1b[38;2;80;200;120m✓\x1b[0m Code accepted\n");
+    }
+
+    let _user = session::ensure_user_profile()?;
+
+    let default_name = room
+        .room_name
+        .clone()
+        .unwrap_or_else(|| "syncvibe-room".to_string());
+    let name = crate::onboarding::prompt_with_default(
+        "  \x1b[38;2;78;205;196mRoom name\x1b[0m",
+        &default_name,
+    )?;
+    if name.is_empty() {
+        anyhow::bail!("Cancelled.");
+    }
+
+    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    let path = home.join(&name);
+    println!(
+        "  \x1b[38;2;100;100;115m→ {}\x1b[0m\n",
+        path.display()
+    );
+
+    if !path.exists() {
+        std::fs::create_dir_all(&path)?;
+    }
+    if !path.join(".git").exists() {
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(&path)
+            .stdout(std::process::Stdio::null())
+            .status()?;
+    }
+
+    init::perform_init(&path, Some(room))?;
+    tmux::launch_project(&path)
 }
 
 fn cmd_status() -> Result<()> {
