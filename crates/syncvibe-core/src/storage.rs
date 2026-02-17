@@ -100,6 +100,42 @@ impl Storage {
         Ok(messages)
     }
 
+    /// Read only new messages appended after `offset` bytes.
+    /// Returns (new_messages, new_byte_offset).
+    pub fn read_chat_from_offset(&self, offset: u64) -> Result<(Vec<ChatMessage>, u64)> {
+        let path = self.root.join("chat-log.jsonl");
+        if !path.exists() {
+            return Ok((Vec::new(), 0));
+        }
+        let file = fs::File::open(&path)?;
+        let file_len = file.metadata()?.len();
+        if offset >= file_len {
+            return Ok((Vec::new(), file_len));
+        }
+        let mut file = file;
+        use std::io::Seek;
+        file.seek(std::io::SeekFrom::Start(offset))?;
+        let reader = std::io::BufReader::new(file);
+        let mut messages = Vec::new();
+        for line in reader.lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            match serde_json::from_str(&line) {
+                Ok(msg) => messages.push(msg),
+                Err(_) => continue,
+            }
+        }
+        Ok((messages, file_len))
+    }
+
+    /// Get the current byte size of the chat log file.
+    pub fn chat_log_size(&self) -> u64 {
+        let path = self.root.join("chat-log.jsonl");
+        fs::metadata(&path).map(|m| m.len()).unwrap_or(0)
+    }
+
     // --- Images ---
 
     /// Save an image file into .syncvibe/images/, return the relative path
@@ -290,6 +326,55 @@ mod tests {
         assert_eq!(msgs.len(), 50);
         assert_eq!(msgs[0].content, "msg0");
         assert_eq!(msgs[49].content, "msg49");
+    }
+
+    // ── Incremental Read ──
+
+    #[test]
+    fn chat_from_offset_reads_only_new() {
+        let (_tmp, storage) = make_storage();
+        storage.append_chat_message(&make_msg("first")).unwrap();
+        storage.append_chat_message(&make_msg("second")).unwrap();
+        let offset = storage.chat_log_size();
+
+        storage.append_chat_message(&make_msg("third")).unwrap();
+        storage.append_chat_message(&make_msg("fourth")).unwrap();
+
+        let (new_msgs, new_offset) = storage.read_chat_from_offset(offset).unwrap();
+        assert_eq!(new_msgs.len(), 2);
+        assert_eq!(new_msgs[0].content, "third");
+        assert_eq!(new_msgs[1].content, "fourth");
+        assert!(new_offset > offset);
+    }
+
+    #[test]
+    fn chat_from_offset_empty_when_caught_up() {
+        let (_tmp, storage) = make_storage();
+        storage.append_chat_message(&make_msg("msg")).unwrap();
+        let offset = storage.chat_log_size();
+
+        let (new_msgs, new_offset) = storage.read_chat_from_offset(offset).unwrap();
+        assert!(new_msgs.is_empty());
+        assert_eq!(new_offset, offset);
+    }
+
+    #[test]
+    fn chat_from_offset_zero_reads_all() {
+        let (_tmp, storage) = make_storage();
+        storage.append_chat_message(&make_msg("a")).unwrap();
+        storage.append_chat_message(&make_msg("b")).unwrap();
+
+        let (msgs, offset) = storage.read_chat_from_offset(0).unwrap();
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(offset, storage.chat_log_size());
+    }
+
+    #[test]
+    fn chat_from_offset_no_file() {
+        let (_tmp, storage) = make_storage();
+        let (msgs, offset) = storage.read_chat_from_offset(0).unwrap();
+        assert!(msgs.is_empty());
+        assert_eq!(offset, 0);
     }
 
     // ── Room Config ──
