@@ -119,7 +119,8 @@ fn ensure_split(session_name: &str, project_path: &str, bin_str: &str) -> Result
         .unwrap_or(0);
 
     if pane_count >= 2 {
-        return Ok(());
+        // Both panes exist — just enforce ratio and config
+        return apply_tmux_config(session_name);
     }
 
     let _ = std::process::Command::new("tmux")
@@ -175,6 +176,18 @@ fn apply_tmux_config(session_name: &str) -> Result<()> {
             .env_remove("TMUX")
             .status();
     }
+
+    // Enforce pane ratio: left (Chat) = 30%, right (Claude) = 70%
+    let _ = std::process::Command::new("tmux")
+        .args([
+            "resize-pane",
+            "-t",
+            &format!("{}:0.0", session_name),
+            "-x",
+            "30%",
+        ])
+        .env_remove("TMUX")
+        .status();
 
     // Pane titles
     let _ = std::process::Command::new("tmux")
