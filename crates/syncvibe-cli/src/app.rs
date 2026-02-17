@@ -303,6 +303,10 @@ impl AppState {
                     self.system_msg("Name cannot be empty.");
                     return true;
                 }
+                if crate::onboarding::is_reserved_name(&new_name) {
+                    self.system_msg("That name is reserved for the AI agent.");
+                    return true;
+                }
                 self.user.profile.name = new_name.clone();
                 if let Some(p) = self.presence.iter_mut().find(|p| p.user_id == self.user.profile.user_id) {
                     p.user_name = new_name.clone();
@@ -317,6 +321,10 @@ impl AppState {
                 }
                 if !crate::onboarding::is_valid_color(arg) {
                     self.system_msg("Invalid color. Use #RRGGBB format (e.g. #4ECDC4).");
+                    return true;
+                }
+                if crate::onboarding::is_agent_color(arg) {
+                    self.system_msg("That color is reserved for the AI agent.");
                     return true;
                 }
                 let new_color = arg.to_string();
@@ -471,50 +479,21 @@ impl AppState {
         Ok(())
     }
 
-    /// If message contains @agent, extract the instruction and send it to the
-    /// Claude Code tmux pane via send-keys.
-    fn handle_agent_mention(&self, msg: &ChatMessage) {
-        // Only process @agent mentions from the local user — never from remote peers
+    /// If message contains @agent, show confirmation.
+    /// The task is already saved to chat-log.jsonl — Claude Code picks it up
+    /// via read_chat MCP tool which highlights @agent mentions as pending tasks.
+    fn handle_agent_mention(&mut self, msg: &ChatMessage) {
         if msg.user_id != self.user.profile.user_id {
             return;
         }
 
-        let content = &msg.content;
-        // Match @agent, @claude, @claude-code (case insensitive)
-        let agent_patterns = ["@agent", "@claude-code", "@claude"];
-        let content_lower = content.to_lowercase();
-        let mut instruction = None;
+        let content_lower = msg.content.to_lowercase();
+        let has_agent = ["@agent", "@claude-code", "@claude"]
+            .iter()
+            .any(|p| content_lower.contains(p));
 
-        for pattern in &agent_patterns {
-            if let Some(pos) = content_lower.find(pattern) {
-                let after = content_lower[pos + pattern.len()..].trim();
-                if !after.is_empty() {
-                    instruction = Some(after.to_string());
-                } else {
-                    instruction = Some(
-                        "Read .syncvibe/chat-digest.md to understand the team's current discussion"
-                            .to_string(),
-                    );
-                }
-                break;
-            }
-        }
-
-        if let Some(text) = instruction {
-            // Sanitize: strip shell metacharacters to prevent command injection
-            let safe_text: String = text
-                .chars()
-                .filter(|c| !matches!(c, ';' | '&' | '|' | '`' | '$' | '(' | ')' | '{' | '}' | '<' | '>' | '!' | '\\'))
-                .collect();
-            if safe_text.trim().is_empty() {
-                return;
-            }
-            let session_name = format!("sv-{}", self.project_name);
-            let agent_pane = format!("{}:0.1", session_name);
-            let _ = std::process::Command::new("tmux")
-                .args(["send-keys", "-t", &agent_pane, &safe_text, "Enter"])
-                .env_remove("TMUX")
-                .spawn();
+        if has_agent {
+            self.system_msg("Highlighted for agent — Claude will prioritize this message");
         }
     }
 
@@ -1225,16 +1204,44 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
             _ => {}
         },
         Panel::Input => {
-            let ac_matches = components::autocomplete::filter(&state.input_buffer);
-            let ac_active = !ac_matches.is_empty();
+            let cmd_matches = components::autocomplete::filter(&state.input_buffer);
+            let mentions = components::autocomplete::build_mentions(
+                &state.presence,
+                &state.user.profile.user_id,
+            );
+            let (mention_matches, mention_word_start) =
+                components::autocomplete::filter_mentions(
+                    &state.input_buffer,
+                    state.input_cursor,
+                    &mentions,
+                );
+            let mention_active = !mention_matches.is_empty();
+            let cmd_active = !cmd_matches.is_empty() && !mention_active;
+            let ac_active = cmd_active || mention_active;
+            let ac_len = if mention_active {
+                mention_matches.len()
+            } else {
+                cmd_matches.len()
+            };
 
             match key.code {
-                // Autocomplete: Tab completes selected command
+                // Autocomplete: Tab completes selected item
                 KeyCode::Tab if ac_active => {
-                    let idx = state.autocomplete_idx.min(ac_matches.len() - 1);
-                    let (cmd, _) = components::autocomplete::COMMANDS[ac_matches[idx]];
-                    state.input_buffer = format!("{} ", cmd);
-                    state.input_cursor = state.input_buffer.chars().count();
+                    if mention_active {
+                        let idx = state.autocomplete_idx % mention_matches.len();
+                        let item = &mentions[mention_matches[idx]];
+                        let chars: Vec<char> = state.input_buffer.chars().collect();
+                        let before: String = chars[..mention_word_start].iter().collect();
+                        let after: String = chars[state.input_cursor..].iter().collect();
+                        state.input_buffer = format!("{}{} {}", before, item.handle, after);
+                        state.input_cursor =
+                            before.chars().count() + item.handle.chars().count() + 1;
+                    } else {
+                        let idx = state.autocomplete_idx.min(cmd_matches.len() - 1);
+                        let (cmd, _) = components::autocomplete::COMMANDS[cmd_matches[idx]];
+                        state.input_buffer = format!("{} ", cmd);
+                        state.input_cursor = state.input_buffer.chars().count();
+                    }
                     state.autocomplete_idx = 0;
                 }
                 // Autocomplete: ↑↓ navigate
@@ -1242,11 +1249,11 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
                     if state.autocomplete_idx > 0 {
                         state.autocomplete_idx -= 1;
                     } else {
-                        state.autocomplete_idx = ac_matches.len() - 1;
+                        state.autocomplete_idx = ac_len - 1;
                     }
                 }
                 KeyCode::Down if ac_active => {
-                    state.autocomplete_idx = (state.autocomplete_idx + 1) % ac_matches.len();
+                    state.autocomplete_idx = (state.autocomplete_idx + 1) % ac_len;
                 }
                 KeyCode::Enter => {
                     state.send_chat_message()?;
@@ -1342,11 +1349,30 @@ fn draw_ui(frame: &mut ratatui::Frame, state: &AppState) {
 
     // Autocomplete overlay (rendered last, on top)
     if state.focus == Panel::Input {
-        components::autocomplete::draw(
-            frame,
-            chunks[2],
-            &state.input_buffer,
-            state.autocomplete_idx,
+        let mentions = components::autocomplete::build_mentions(
+            &state.presence,
+            &state.user.profile.user_id,
         );
+        let (mention_matches, _) = components::autocomplete::filter_mentions(
+            &state.input_buffer,
+            state.input_cursor,
+            &mentions,
+        );
+        if !mention_matches.is_empty() {
+            components::autocomplete::draw_mentions(
+                frame,
+                chunks[2],
+                &mentions,
+                &mention_matches,
+                state.autocomplete_idx,
+            );
+        } else {
+            components::autocomplete::draw(
+                frame,
+                chunks[2],
+                &state.input_buffer,
+                state.autocomplete_idx,
+            );
+        }
     }
 }

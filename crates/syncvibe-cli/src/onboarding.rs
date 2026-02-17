@@ -96,6 +96,37 @@ pub fn is_valid_color(color: &str) -> bool {
         && color[1..].chars().all(|c| c.is_ascii_hexdigit())
 }
 
+/// Names reserved for the AI agent — users cannot pick these.
+const RESERVED_NAMES: &[&str] = &[
+    "agent",
+    "claude",
+    "claude code",
+    "claude-code",
+    "claudecode",
+    "bot",
+    "system",
+    "syncvibe",
+    "assistant",
+];
+
+/// Check whether a display name collides with reserved agent/system names.
+pub fn is_reserved_name(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    RESERVED_NAMES.iter().any(|r| lower == *r)
+}
+
+/// Check whether a hex color is too close to the agent's cyan (#00FFFF).
+/// Blocks colors where R < 60, G > 200, B > 200 — visually indistinguishable from agent.
+pub fn is_agent_color(hex: &str) -> bool {
+    if hex.len() != 7 || !hex.starts_with('#') {
+        return false;
+    }
+    let r = u8::from_str_radix(&hex[1..3], 16).unwrap_or(128);
+    let g = u8::from_str_radix(&hex[3..5], 16).unwrap_or(128);
+    let b = u8::from_str_radix(&hex[5..7], 16).unwrap_or(128);
+    r < 60 && g > 200 && b > 200
+}
+
 // ── Interactive menu ──────────────────────────────────────────────
 
 /// A menu item for the interactive selector.

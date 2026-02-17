@@ -52,6 +52,32 @@ fn err(msg: String) -> ErrorData {
     ErrorData::internal_error(msg, None)
 }
 
+/// Check if a message is directed at the AI agent.
+fn is_agent_task(m: &ChatMessage) -> bool {
+    if m.message_type != MessageType::User {
+        return false;
+    }
+    let lower = m.content.to_lowercase();
+    ["@agent", "@claude-code", "@claude"]
+        .iter()
+        .any(|p| lower.contains(p))
+}
+
+/// Collect @agent task messages and format a prominent header section.
+fn agent_task_header(msgs: &[&ChatMessage]) -> String {
+    let tasks: Vec<&ChatMessage> = msgs.iter().copied().filter(|m| is_agent_task(m)).collect();
+    if tasks.is_empty() {
+        return String::new();
+    }
+    let mut lines = vec![format!("⚡ TASKS FOR YOU ({}):", tasks.len())];
+    for t in &tasks {
+        let time = t.timestamp.with_timezone(&Local).format("%H:%M");
+        lines.push(format!("  [{}] {}: {}", time, t.user_name, t.content));
+    }
+    lines.push(String::new()); // blank separator
+    lines.join("\n")
+}
+
 /// Format a single message line (without name/time prefix, for grouped output).
 fn format_message_body(m: &ChatMessage) -> String {
     let quote_prefix = if let Some(ref q) = m.quote {
@@ -60,7 +86,13 @@ fn format_message_body(m: &ChatMessage) -> String {
         String::new()
     };
     let body = match m.message_type {
-        MessageType::User => m.content.clone(),
+        MessageType::User => {
+            if is_agent_task(m) {
+                format!("⚡ {}", m.content)
+            } else {
+                m.content.clone()
+            }
+        }
         MessageType::Image => {
             let filename = m.content.split('\n').nth(1).unwrap_or("image");
             format!("[Image: {}]", filename)
@@ -190,15 +222,17 @@ fn build_response(
     is_json: bool,
     storage: &Storage,
 ) -> std::result::Result<String, ErrorData> {
+    let task_header = agent_task_header(msgs);
+
     if msgs.len() < DIGEST_THRESHOLD {
         // Small: inline everything
         let body = format_output(msgs, is_json)?;
-        return Ok(format!("{}{}", header, body));
+        return Ok(format!("{}{}{}", task_header, header, body));
     }
 
     // Large: write full content to digest file, return brief response
     let body = format_output(msgs, is_json)?;
-    let digest_content = format!("{}{}", header, body);
+    let digest_content = format!("{}{}{}", task_header, header, body);
     storage
         .write_chat_digest(&digest_content)
         .map_err(|e| err(e.to_string()))?;
@@ -212,7 +246,8 @@ fn build_response(
     let range = time_range(msgs);
 
     Ok(format!(
-        "── {} msgs · {} · {} ──\nFull conversation: {}\nUse Read tool on the file above to understand the full context.",
+        "{}── {} msgs · {} · {} ──\nFull conversation: {}\nUse Read tool on the file above to understand the full context.",
+        task_header,
         msgs.len(),
         participants,
         range,
@@ -354,11 +389,12 @@ impl SyncVibeMcp {
 
             // Incremental reads are typically small, always inline
             let body = format_output(&filtered, is_json)?;
+            let task_header = agent_task_header(&filtered);
             let header = format!("── {} new ──\n", filtered.len());
 
             Ok(CallToolResult::success(vec![Content::text(format!(
-                "{}{}",
-                header, body
+                "{}{}{}",
+                task_header, header, body
             ))]))
         }
     }
@@ -380,6 +416,9 @@ impl ServerHandler for SyncVibeMcp {
                  - Small conversations: messages returned inline.\n\
                  - Large conversations (30+): full content in .syncvibe/chat-digest.md.\n\
                  - Subsequent calls: only new messages (incremental).\n\
+                 \n\
+                 When read_chat shows ⚡ TASKS FOR YOU, these are direct requests from\n\
+                 team members. Prioritize completing these tasks and reply in chat when done.\n\
                  \n\
                  To send chat: append a single JSONL line to .syncvibe/chat-log.jsonl.\n\
                  Format: {\"id\":\"<uuid>\",\"user_id\":\"...\",\"user_name\":\"...\",\"user_color\":\"...\",\"content\":\"...\",\"message_type\":\"user\",\"thread_id\":null,\"session_id\":\"...\",\"timestamp\":\"...\"}\n\

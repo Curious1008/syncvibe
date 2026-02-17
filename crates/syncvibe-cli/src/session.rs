@@ -3,7 +3,6 @@ use std::env;
 use anyhow::Result;
 
 use syncvibe_core::models::{RoomConfig, UserConfig};
-use syncvibe_core::storage::Storage;
 
 use crate::{config, init, onboarding, tmux};
 
@@ -37,6 +36,9 @@ pub fn ensure_user_profile() -> Result<UserConfig> {
     if name.is_empty() {
         anyhow::bail!("Name cannot be empty.");
     }
+    if onboarding::is_reserved_name(&name) {
+        anyhow::bail!("That name is reserved for the AI agent. Please choose another.");
+    }
 
     let colors = [
         "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEAA7", "#DDA0DD", "#98D8C8", "#F7DC6F",
@@ -62,7 +64,8 @@ pub fn cmd_session() -> Result<()> {
     let _user = ensure_user_profile()?;
 
     // Step 2: If room exists in cwd, launch directly
-    if Storage::find(&cwd).is_ok() {
+    // Check cwd itself (not parents) to avoid treating ~/.syncvibe/ (global config) as a room
+    if cwd.join(".syncvibe").join("room.json").exists() {
         return tmux::launch_project(&cwd);
     }
 
