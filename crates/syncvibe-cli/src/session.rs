@@ -101,7 +101,7 @@ pub fn cmd_session() -> Result<()> {
         });
     }
 
-    onboarding::print_section("Choose a room");
+    onboarding::print_section("Choose a Room");
     println!();
     let choice = onboarding::select_menu(&menu_items)?;
 
@@ -120,10 +120,20 @@ pub fn cmd_session() -> Result<()> {
             } else {
                 // Join with invite code
                 let code = onboarding::prompt(
-                    "  \x1b[38;2;78;205;196mPaste invite code:\x1b[0m ",
+                    "  \x1b[38;2;78;205;196mInvite code:\x1b[0m ",
                 )?;
                 let room =
                     RoomConfig::from_invite_code(&code).map_err(|e| anyhow::anyhow!(e))?;
+                if let Some(ref name) = room.room_name {
+                    println!(
+                        "  \x1b[38;2;80;200;120m✓\x1b[0m Code accepted — \x1b[1m{}\x1b[0m\n",
+                        name
+                    );
+                } else {
+                    println!(
+                        "  \x1b[38;2;80;200;120m✓\x1b[0m Code accepted\n"
+                    );
+                }
                 init::perform_init(&cwd, Some(room))?;
                 tmux::launch_project(&cwd)
             }

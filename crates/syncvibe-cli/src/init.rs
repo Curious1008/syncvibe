@@ -64,12 +64,15 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
     if !has_work {
         // Everything already set up — just ensure room config
         let storage = find_or_init_storage(cwd)?;
-        let room = match room {
+        let mut room = match room {
             Some(r) => r,
             None => storage
                 .read_room_config()
                 .unwrap_or_else(|_| RoomConfig::new()),
         };
+        if room.room_name.is_none() {
+            room.room_name = cwd.file_name().map(|n| n.to_string_lossy().to_string());
+        }
         storage.write_room_config(&room)?;
         return Ok(room);
     }
@@ -86,12 +89,15 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
 
     // Execute confirmed items
     let storage = find_or_init_storage(cwd)?;
-    let room = match room {
+    let mut room = match room {
         Some(r) => r,
         None => storage
             .read_room_config()
             .unwrap_or_else(|_| RoomConfig::new()),
     };
+    if room.room_name.is_none() {
+        room.room_name = cwd.file_name().map(|n| n.to_string_lossy().to_string());
+    }
     storage.write_room_config(&room)?;
 
     // Always do required items (gitignore)

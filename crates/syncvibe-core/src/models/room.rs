@@ -9,6 +9,8 @@ pub struct RoomConfig {
     pub room_id: String,
     pub room_secret: String,
     pub relay_url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub room_name: Option<String>,
 }
 
 impl RoomConfig {
@@ -25,6 +27,7 @@ impl RoomConfig {
             room_id: uuid::Uuid::new_v4().to_string(),
             room_secret: hex_encode(&secret_bytes),
             relay_url: DEFAULT_RELAY_URL.to_string(),
+            room_name: None,
         }
     }
 
@@ -37,9 +40,16 @@ impl RoomConfig {
         let secret_bytes = hex_decode(&self.room_secret)
             .map_err(|e| format!("Invalid room_secret: {}", e))?;
 
-        let mut payload = Vec::with_capacity(48);
+        let mut payload = Vec::with_capacity(48 + 64);
         payload.extend_from_slice(uuid_bytes);
         payload.extend_from_slice(&secret_bytes);
+
+        // Append room name (truncated to 64 bytes) after the 48-byte header
+        if let Some(ref name) = self.room_name {
+            let name_bytes = name.as_bytes();
+            let len = name_bytes.len().min(64);
+            payload.extend_from_slice(&name_bytes[..len]);
+        }
 
         Ok(format!("{}{}", INVITE_PREFIX, URL_SAFE_NO_PAD.encode(&payload)))
     }
@@ -54,21 +64,29 @@ impl RoomConfig {
             .decode(b64.trim())
             .map_err(|e| format!("Invalid invite code: {}", e))?;
 
-        if payload.len() != 48 {
+        if payload.len() < 48 {
             return Err(format!(
-                "Invalid invite code: expected 48 bytes, got {}",
+                "Invalid invite code: expected >= 48 bytes, got {}",
                 payload.len()
             ));
         }
 
         let uuid = uuid::Uuid::from_slice(&payload[..16])
             .map_err(|e| format!("Invalid UUID in invite code: {}", e))?;
-        let secret = hex_encode(&payload[16..]);
+        let secret = hex_encode(&payload[16..48]);
+
+        // Extract room name from bytes after the 48-byte header
+        let room_name = if payload.len() > 48 {
+            String::from_utf8(payload[48..].to_vec()).ok().filter(|s| !s.is_empty())
+        } else {
+            None
+        };
 
         Ok(Self {
             room_id: uuid.to_string(),
             room_secret: secret,
             relay_url: DEFAULT_RELAY_URL.to_string(),
+            room_name,
         })
     }
 }
@@ -115,5 +133,35 @@ mod tests {
     fn invite_code_rejects_bad_length() {
         let short = format!("syncvibe://{}", URL_SAFE_NO_PAD.encode(&[0u8; 10]));
         assert!(RoomConfig::from_invite_code(&short).is_err());
+    }
+
+    #[test]
+    fn invite_code_roundtrip_with_name() {
+        let mut room = RoomConfig::new();
+        room.room_name = Some("my-project".to_string());
+        let code = room.to_invite_code().unwrap();
+
+        let decoded = RoomConfig::from_invite_code(&code).unwrap();
+        assert_eq!(decoded.room_id, room.room_id);
+        assert_eq!(decoded.room_secret, room.room_secret);
+        assert_eq!(decoded.room_name, Some("my-project".to_string()));
+    }
+
+    #[test]
+    fn invite_code_without_name_compat() {
+        // Old codes without name should still work
+        let room = RoomConfig::new();
+        // Manually create a 48-byte-only code (no name)
+        let uuid = uuid::Uuid::parse_str(&room.room_id).unwrap();
+        let secret_bytes = hex_decode(&room.room_secret).unwrap();
+        let mut payload = Vec::with_capacity(48);
+        payload.extend_from_slice(uuid.as_bytes());
+        payload.extend_from_slice(&secret_bytes);
+        let code = format!("syncvibe://{}", URL_SAFE_NO_PAD.encode(&payload));
+
+        let decoded = RoomConfig::from_invite_code(&code).unwrap();
+        assert_eq!(decoded.room_id, room.room_id);
+        assert_eq!(decoded.room_secret, room.room_secret);
+        assert_eq!(decoded.room_name, None);
     }
 }

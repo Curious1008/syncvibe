@@ -885,18 +885,6 @@ pub async fn run() -> Result<()> {
     Ok(())
 }
 
-/// Resolve a user-provided path: expand ~ and convert to absolute.
-fn resolve_path(input: &str) -> std::path::PathBuf {
-    if input.starts_with("~/") {
-        match dirs::home_dir() {
-            Some(home) => home.join(&input[2..]),
-            None => std::path::PathBuf::from(input),
-        }
-    } else {
-        std::path::PathBuf::from(input)
-    }
-}
-
 /// Ensure a path exists, is a directory, and has a git repo. Returns false on failure.
 fn ensure_project_dir(path: &std::path::Path) -> bool {
     if !path.exists() {
@@ -933,21 +921,28 @@ fn ensure_project_dir(path: &std::path::Path) -> bool {
 /// Returns true if we switched to a new tmux session.
 fn handle_new_project() -> bool {
     use crate::{init, onboarding, session, tmux};
+    use syncvibe_core::models::RoomConfig;
 
     println!();
     onboarding::print_section("New Room");
     println!();
-    let path_str = match onboarding::prompt(
-        "  \x1b[38;2;78;205;196mProject path:\x1b[0m ",
+    let name = match onboarding::prompt(
+        "  \x1b[38;2;78;205;196mRoom name:\x1b[0m ",
     ) {
-        Ok(p) if !p.is_empty() => p,
+        Ok(n) if !n.is_empty() => n,
         _ => {
             println!("  Cancelled.");
             return false;
         }
     };
 
-    let path = resolve_path(&path_str);
+    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    let path = home.join(&name);
+    println!(
+        "  \x1b[38;2;100;100;115m→ {}\x1b[0m\n",
+        path.display()
+    );
+
     if !ensure_project_dir(&path) {
         return false;
     }
@@ -956,7 +951,10 @@ fn handle_new_project() -> bool {
         return false;
     }
 
-    if init::perform_init(&path, None).is_err() {
+    let mut room = RoomConfig::new();
+    room.room_name = Some(name);
+
+    if init::perform_init(&path, Some(room)).is_err() {
         println!("  Setup cancelled or failed.");
         return false;
     }
@@ -994,15 +992,25 @@ fn handle_join_project() -> bool {
             return false;
         }
     };
-    println!(
-        "  \x1b[38;2;80;200;120m✓\x1b[0m Code accepted\n"
-    );
+
+    let default_name = room.room_name.clone().unwrap_or_else(|| "syncvibe-room".to_string());
+
+    if room.room_name.is_some() {
+        println!(
+            "  \x1b[38;2;80;200;120m✓\x1b[0m Code accepted — \x1b[1m{}\x1b[0m\n",
+            default_name
+        );
+    } else {
+        println!(
+            "  \x1b[38;2;80;200;120m✓\x1b[0m Code accepted\n"
+        );
+    }
 
     // Ask for a room name — auto-creates ~/name
     let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
     let name = match onboarding::prompt_with_default(
         "  \x1b[38;2;78;205;196mRoom name\x1b[0m",
-        "syncvibe-room",
+        &default_name,
     ) {
         Ok(n) if !n.is_empty() => n,
         _ => {
@@ -1041,7 +1049,12 @@ fn handle_join_project() -> bool {
 fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
     match msg {
         WsMessage::AuthOk { users } => {
-            state.presence = users;
+            // Dedup by user_id (same user may have multiple connections)
+            let mut seen = std::collections::HashSet::new();
+            state.presence = users
+                .into_iter()
+                .filter(|p| seen.insert(p.user_id.clone()))
+                .collect();
             if !state
                 .presence
                 .iter()
@@ -1061,6 +1074,10 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
             }
         }
         WsMessage::UserLeft { user_id } => {
+            // Don't remove own presence (self-join from another terminal)
+            if user_id == state.user.profile.user_id {
+                return;
+            }
             let name = state
                 .presence
                 .iter()
