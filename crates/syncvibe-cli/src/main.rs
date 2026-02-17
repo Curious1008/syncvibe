@@ -28,6 +28,7 @@ fn main() -> Result<()> {
         Some(Command::Profile { name, color }) => cmd_profile(name, color)?,
         Some(Command::Chat { message }) => cmd_chat(message)?,
         Some(Command::Invite) => cmd_invite()?,
+        Some(Command::Status) => cmd_status()?,
         Some(Command::McpServer) => cmd_mcp_server()?,
         Some(Command::Dashboard) => cmd_dashboard()?,
         Some(Command::Switch) => cmd_switch()?,
@@ -45,12 +46,19 @@ fn main() -> Result<()> {
 /// Also adds .syncvibe/ to the project's .gitignore if one exists.
 /// Returns the RoomConfig used.
 fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<RoomConfig> {
-    let storage = Storage::init(cwd)?;
+    // Use existing .syncvibe/ if present, otherwise create new
+    let storage = match Storage::find(cwd) {
+        Ok(s) if s.project_root() == cwd => s,
+        _ => Storage::init(cwd)?,
+    };
     let room = room.unwrap_or_else(RoomConfig::new);
     storage.write_room_config(&room)?;
-    storage.write_plan("")?;
+    // Only write blank plan if it doesn't exist yet
+    if storage.read_plan().unwrap_or_default().is_empty() {
+        storage.write_plan("")?;
+    }
 
-    // Add .syncvibe/ to project .gitignore if it exists and doesn't already have it
+    // Add .syncvibe/ to project .gitignore (create if needed)
     let gitignore_path = cwd.join(".gitignore");
     if gitignore_path.exists() {
         let content = std::fs::read_to_string(&gitignore_path)?;
@@ -58,12 +66,13 @@ fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<RoomC
             let mut file = std::fs::OpenOptions::new()
                 .append(true)
                 .open(&gitignore_path)?;
-            // Add newline before if file doesn't end with one
             if !content.ends_with('\n') {
                 std::io::Write::write_all(&mut file, b"\n")?;
             }
             std::io::Write::write_all(&mut file, b".syncvibe/\n")?;
         }
+    } else if cwd.join(".git").exists() {
+        std::fs::write(&gitignore_path, ".syncvibe/\n")?;
     }
 
     // Create .mcp.json for AI agent discovery
@@ -118,14 +127,7 @@ This project uses SyncVibe for team coordination. All shared state lives in `.sy
 
 ### Before starting work
 - Read `.syncvibe/plan.md` for the shared project plan.
-- Read `.syncvibe/tasks.json` for current task assignments and status.
 - Read `.syncvibe/chat-log.jsonl` (last 20 lines) for recent team discussions.
-
-### Tasks
-- Tasks are stored in `.syncvibe/tasks.json` as a JSON object with `tasks` array and `version` counter.
-- To create a task: read the file, append to the `tasks` array, increment `version`, write back.
-- Each task has: `id` (UUID), `title`, `status` (pending/in_progress/completed), `assigned_to`, `assigned_name`, `created_by`, `created_name`, `created_at`, `updated_at`.
-- To claim a task: set `status` to `in_progress` and fill `assigned_to`/`assigned_name`.
 
 ### Chat
 - Chat is append-only JSONL in `.syncvibe/chat-log.jsonl`. One JSON object per line.
@@ -167,11 +169,12 @@ fn ensure_user_profile() -> Result<UserConfig> {
 
     println!("\n  Welcome to SyncVibe! \u{2728}\n");
 
-    let name = if git_name.is_empty() {
+    let raw_name = if git_name.is_empty() {
         onboarding::prompt("  Your name: ")
     } else {
         onboarding::prompt_with_default("  Your name", &git_name)
     };
+    let name = onboarding::sanitize_name(&raw_name);
 
     if name.is_empty() {
         anyhow::bail!("Name cannot be empty.");
@@ -261,9 +264,16 @@ fn cmd_profile(name: Option<String>, color: Option<String>) -> Result<()> {
     }
 
     if let Some(n) = name {
+        let n = onboarding::sanitize_name(&n);
+        if n.is_empty() {
+            anyhow::bail!("Name cannot be empty.");
+        }
         user.profile.name = n;
     }
     if let Some(c) = color {
+        if !onboarding::is_valid_color(&c) {
+            anyhow::bail!("Invalid color. Use #RRGGBB format (e.g. #4ECDC4).");
+        }
         user.profile.color = c;
     }
     config::save_user_config(&user)?;
@@ -311,6 +321,24 @@ fn get_or_create_session_id(messages: &[ChatMessage], user_id: &str) -> String {
         }
     }
     uuid::Uuid::new_v4().to_string()
+}
+
+fn cmd_status() -> Result<()> {
+    let cwd = env::current_dir()?;
+    let storage = Storage::find(&cwd)?;
+    let room = storage.read_room_config()?;
+    let messages = storage.read_chat_messages().unwrap_or_default();
+    let project_name = crate::git::ops::repo_name().unwrap_or_else(|_| "project".to_string());
+
+    let short_id = &room.room_id[..8];
+    println!(
+        "  {} · room:{} · {} messages",
+        project_name,
+        short_id,
+        messages.len()
+    );
+
+    Ok(())
 }
 
 fn cmd_invite() -> Result<()> {

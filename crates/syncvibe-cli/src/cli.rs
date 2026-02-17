@@ -44,6 +44,9 @@ pub enum Command {
     /// Show room invite code
     Invite,
 
+    /// Show current room status
+    Status,
+
     /// Start the MCP server (for AI agents)
     McpServer,
 

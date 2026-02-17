@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::models::{ChatMessage, Task};
+use crate::models::ChatMessage;
 
 /// WebSocket message types exchanged between client and relay
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,13 +35,6 @@ pub enum WsMessage {
         user_id: String,
     },
 
-    // Tasks
-    TaskCreated(Task),
-    TaskUpdated(Task),
-    TaskDeleted {
-        task_id: String,
-    },
-
     // Plan
     PlanUpdated {
         content: String,
@@ -72,5 +65,4 @@ pub struct PresenceInfo {
     pub user_id: String,
     pub user_name: String,
     pub user_color: String,
-    pub active_task: Option<String>,
 }

@@ -57,7 +57,9 @@ impl Storage {
 
     pub fn write_room_config(&self, config: &RoomConfig) -> Result<()> {
         let path = self.root.join("room.json");
-        atomic_write(&path, &serde_json::to_string_pretty(config)?)
+        atomic_write(&path, &serde_json::to_string_pretty(config)?)?;
+        set_private_permissions(&path);
+        Ok(())
     }
 
     // --- Plan ---
@@ -87,22 +89,6 @@ impl Storage {
     pub fn write_plan_meta(&self, meta: &PlanMeta) -> Result<()> {
         let path = self.root.join("plan-meta.json");
         atomic_write(&path, &serde_json::to_string_pretty(meta)?)
-    }
-
-    // --- Tasks ---
-
-    pub fn read_task_board(&self) -> Result<TaskBoard> {
-        let path = self.root.join("tasks.json");
-        if !path.exists() {
-            return Ok(TaskBoard::default());
-        }
-        let content = fs::read_to_string(&path)?;
-        Ok(serde_json::from_str(&content)?)
-    }
-
-    pub fn write_task_board(&self, board: &TaskBoard) -> Result<()> {
-        let path = self.root.join("tasks.json");
-        atomic_write(&path, &serde_json::to_string_pretty(board)?)
     }
 
     // --- Chat Log (JSONL) ---
@@ -152,15 +138,6 @@ impl Storage {
             .collect())
     }
 
-    /// Read messages filtered by thread_id (task)
-    pub fn read_chat_by_task(&self, task_id: &str) -> Result<Vec<ChatMessage>> {
-        Ok(self
-            .read_chat_messages()?
-            .into_iter()
-            .filter(|m| m.thread_id.as_deref() == Some(task_id))
-            .collect())
-    }
-
     /// Read messages since a given timestamp
     pub fn read_chat_since(
         &self,
@@ -205,10 +182,20 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
     Ok(())
 }
 
+/// Set file to owner-only read/write (0600) on Unix
+fn set_private_permissions(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+    }
+    let _ = path;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{ChatMessage, RoomConfig, TaskBoard};
+    use crate::models::{ChatMessage, RoomConfig};
     use tempfile::TempDir;
 
     fn make_storage() -> (TempDir, Storage) {
@@ -373,19 +360,6 @@ mod tests {
         assert_eq!(filtered[1].content, "c");
     }
 
-    #[test]
-    fn chat_filter_by_thread() {
-        let (_tmp, storage) = make_storage();
-        let mut m1 = make_msg("task msg");
-        m1.thread_id = Some("task-1".into());
-        let m2 = make_msg("no thread");
-        storage.append_chat_message(&m1).unwrap();
-        storage.append_chat_message(&m2).unwrap();
-        let filtered = storage.read_chat_by_task("task-1").unwrap();
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].content, "task msg");
-    }
-
     // ── Room Config ──
 
     #[test]
@@ -426,25 +400,6 @@ mod tests {
         let (_tmp, storage) = make_storage();
         storage.write_plan("# My Plan\n\n- Step 1").unwrap();
         assert_eq!(storage.read_plan().unwrap(), "# My Plan\n\n- Step 1");
-    }
-
-    // ── Task Board ──
-
-    #[test]
-    fn taskboard_default_when_missing() {
-        let (_tmp, storage) = make_storage();
-        let board = storage.read_task_board().unwrap();
-        assert!(board.tasks.is_empty());
-    }
-
-    #[test]
-    fn taskboard_roundtrip() {
-        let (_tmp, storage) = make_storage();
-        let mut board = TaskBoard::default();
-        board.version = 3;
-        storage.write_task_board(&board).unwrap();
-        let loaded = storage.read_task_board().unwrap();
-        assert_eq!(loaded.version, 3);
     }
 
     // ── Atomic Write ──

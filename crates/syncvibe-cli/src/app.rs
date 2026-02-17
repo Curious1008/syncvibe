@@ -21,6 +21,9 @@ pub enum Panel {
     Input,
 }
 
+/// Max messages to keep in memory (older messages stay on disk)
+const MAX_DISPLAY_MESSAGES: usize = 2000;
+
 pub struct AppState {
     pub storage: Storage,
     pub user: UserConfig,
@@ -31,6 +34,7 @@ pub struct AppState {
     pub should_quit: bool,
     pub show_picker: bool,
     pub want_reconnect: bool,
+    pub muted: bool,
 
     // Data
     pub chat_messages: Vec<ChatMessage>,
@@ -49,11 +53,18 @@ pub struct AppState {
     // WebSocket
     pub ws_client: Option<ws_client::WsClient>,
     pub is_online: bool,
+
+    // Notification bell debounce
+    last_bell: Option<std::time::Instant>,
 }
 
 impl AppState {
     pub fn new(storage: Storage, user: UserConfig) -> Result<Self> {
-        let chat_messages = storage.read_chat_messages().unwrap_or_default();
+        let mut chat_messages = storage.read_chat_messages().unwrap_or_default();
+        // Silently truncate to keep TUI snappy
+        if chat_messages.len() > MAX_DISPLAY_MESSAGES {
+            chat_messages = chat_messages.split_off(chat_messages.len() - MAX_DISPLAY_MESSAGES);
+        }
         let session_id = crate::get_or_create_session_id(&chat_messages, &user.profile.user_id);
         let project_name = crate::git::ops::repo_name().unwrap_or_else(|_| "project".to_string());
 
@@ -61,7 +72,6 @@ impl AppState {
             user_id: user.profile.user_id.clone(),
             user_name: user.profile.name.clone(),
             user_color: user.profile.color.clone(),
-            active_task: None,
         }];
 
         Ok(Self {
@@ -72,6 +82,7 @@ impl AppState {
             should_quit: false,
             show_picker: false,
             want_reconnect: false,
+            muted: false,
             chat_messages,
             presence,
             chat_selected: None,
@@ -80,12 +91,32 @@ impl AppState {
             project_name,
             ws_client: None,
             is_online: false,
+            last_bell: None,
         })
     }
 
     pub fn reload_data(&mut self) {
-        if let Ok(msgs) = self.storage.read_chat_messages() {
+        if let Ok(mut msgs) = self.storage.read_chat_messages() {
+            if msgs.len() > MAX_DISPLAY_MESSAGES {
+                msgs = msgs.split_off(msgs.len() - MAX_DISPLAY_MESSAGES);
+            }
             self.chat_messages = msgs;
+        }
+    }
+
+    /// Ring terminal bell (debounced: once per 5 seconds)
+    fn ring_bell(&mut self) {
+        if self.muted {
+            return;
+        }
+        let now = std::time::Instant::now();
+        if self
+            .last_bell
+            .map(|t| now.duration_since(t) > Duration::from_secs(5))
+            .unwrap_or(true)
+        {
+            eprint!("\x07");
+            self.last_bell = Some(now);
         }
     }
 
@@ -144,10 +175,24 @@ impl AppState {
                     self.want_reconnect = true;
                 }
             }
+            "/clear" => {
+                self.chat_messages.clear();
+                self.chat_selected = None;
+            }
+            "/mute" => {
+                self.muted = !self.muted;
+                if self.muted {
+                    self.system_msg("Notifications muted");
+                } else {
+                    self.system_msg("Notifications unmuted");
+                }
+            }
             "/help" => {
-                self.system_msg("/rc — reconnect to relay");
-                self.system_msg("/invite — show room invite code");
-                self.system_msg("/projects — switch between projects");
+                self.system_msg("/rc — reconnect");
+                self.system_msg("/invite — show invite code");
+                self.system_msg("/projects — switch projects");
+                self.system_msg("/clear — clear chat view");
+                self.system_msg("/mute — toggle notification sound");
                 self.system_msg("/quit — exit");
             }
             "/quit" | "/q" => {
@@ -303,10 +348,10 @@ pub async fn run() -> Result<()> {
                 state.is_online = true;
                 ws_rx = Some(rx);
                 ws_alive_rx = Some(alive_rx);
-                state.system_msg("Connected to relay");
+                state.system_msg("Connected");
             }
             Err(_) => {
-                state.system_msg("Relay not available — running offline");
+                state.system_msg("Offline — will keep trying");
                 reconnect_attempts = 1;
                 reconnect_at = Some(tokio::time::Instant::now() + Duration::from_secs(10));
             }
@@ -386,7 +431,7 @@ pub async fn run() -> Result<()> {
             if !*alive_rx.borrow() && state.is_online {
                 state.is_online = false;
                 state.ws_client = None;
-                state.system_msg("Disconnected from relay");
+                state.system_msg("Disconnected");
                 reconnect_attempts = 1;
                 reconnect_at = Some(tokio::time::Instant::now() + Duration::from_secs(5));
                 ws_alive_rx = None;
@@ -422,7 +467,7 @@ pub async fn run() -> Result<()> {
                             ws_rx = Some(rx);
                             ws_alive_rx = Some(alive_rx);
                             reconnect_attempts = 0;
-                            state.system_msg("Reconnected to relay");
+                            state.system_msg("Back online");
                         }
                         Err(_) => {
                             reconnect_attempts += 1;
@@ -431,7 +476,7 @@ pub async fn run() -> Result<()> {
                                     tokio::time::Instant::now() + Duration::from_secs(15),
                                 );
                             } else {
-                                state.system_msg("Relay unreachable — /rc to retry");
+                                state.system_msg("Can't connect — /rc to retry");
                             }
                         }
                     }
@@ -512,7 +557,6 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
                     user_id: state.user.profile.user_id.clone(),
                     user_name: state.user.profile.name.clone(),
                     user_color: state.user.profile.color.clone(),
-                    active_task: None,
                 });
             }
         }
@@ -545,6 +589,7 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
             if state.chat_messages.iter().any(|m| m.id == msg.id) {
                 return;
             }
+            state.ring_bell();
             let _ = state.storage.append_chat_message(&msg);
             state.chat_messages.push(msg);
         }

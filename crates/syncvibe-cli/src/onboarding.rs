@@ -1,5 +1,7 @@
 use std::io::{self, BufRead, Write};
 
+const MAX_NAME_LEN: usize = 32;
+
 /// Prompt the user for input, returning their trimmed response.
 pub fn prompt(msg: &str) -> String {
     print!("{}", msg);
@@ -32,4 +34,26 @@ pub fn confirm(msg: &str) -> bool {
     io::stdin().lock().read_line(&mut buf).unwrap();
     let input = buf.trim().to_lowercase();
     input.is_empty() || input == "y" || input == "yes"
+}
+
+/// Sanitize a display name: strip control chars, trim, enforce max length.
+pub fn sanitize_name(name: &str) -> String {
+    let clean: String = name
+        .chars()
+        .filter(|c| !c.is_control())
+        .collect::<String>()
+        .trim()
+        .to_string();
+    if clean.len() > MAX_NAME_LEN {
+        clean.chars().take(MAX_NAME_LEN).collect()
+    } else {
+        clean
+    }
+}
+
+/// Validate a hex color string. Returns true for #RRGGBB format.
+pub fn is_valid_color(color: &str) -> bool {
+    color.len() == 7
+        && color.starts_with('#')
+        && color[1..].chars().all(|c| c.is_ascii_hexdigit())
 }

@@ -40,8 +40,6 @@ struct UpdatePlanParams {
 struct ReadChatParams {
     /// Read all messages (not just current session)
     all: Option<bool>,
-    /// Filter by task ID (thread_id)
-    task_id: Option<String>,
     /// Read messages since this ISO 8601 timestamp
     since: Option<String>,
 }
@@ -115,7 +113,7 @@ impl SyncVibeMcp {
         )]))
     }
 
-    #[tool(description = "Read recent chat messages with smart filtering. Defaults to current session only (incremental — returns only new messages since last read). Use 'all: true' for full history, 'task_id' to filter by task thread, or 'since' for time-based filtering. For tasks and other .syncvibe/ files, read them directly with your file tools.")]
+    #[tool(description = "Read recent chat messages with smart filtering. Defaults to current session only (incremental — returns only new messages since last read). Use 'all: true' for full history, or 'since' for time-based filtering.")]
     async fn read_chat(
         &self,
         Parameters(params): Parameters<ReadChatParams>,
@@ -127,11 +125,6 @@ impl SyncVibeMcp {
 
         let messages: Vec<&ChatMessage> = if params.all.unwrap_or(false) {
             all_messages.iter().collect()
-        } else if let Some(ref task_id) = params.task_id {
-            all_messages
-                .iter()
-                .filter(|m| m.thread_id.as_deref() == Some(task_id.as_str()))
-                .collect()
         } else if let Some(ref since_str) = params.since {
             match since_str.parse::<chrono::DateTime<chrono::Utc>>() {
                 Ok(since) => all_messages
@@ -175,7 +168,6 @@ impl ServerHandler for SyncVibeMcp {
                  \n\
                  Tools: read_plan, update_plan, read_chat (with smart filtering).\n\
                  \n\
-                 For tasks: read/write .syncvibe/tasks.json directly with your file tools.\n\
                  For chat messages: append JSONL to .syncvibe/chat-log.jsonl directly, \
                  or use read_chat for filtered/incremental reads."
                     .to_string(),

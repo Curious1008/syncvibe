@@ -26,9 +26,21 @@ pub fn load_user_config() -> Result<UserConfig> {
 pub fn save_user_config(config: &UserConfig) -> Result<()> {
     let dir = config_dir()?;
     fs::create_dir_all(&dir)?;
+    let path = config_path()?;
     let content = toml::to_string_pretty(config)?;
-    fs::write(config_path()?, content)?;
+    fs::write(&path, content)?;
+    set_private_permissions(&path);
     Ok(())
+}
+
+/// Set file to owner-only read/write (0600) on Unix
+fn set_private_permissions(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+    }
+    let _ = path; // suppress unused warning on non-unix
 }
 
 pub fn user_config_exists() -> bool {
