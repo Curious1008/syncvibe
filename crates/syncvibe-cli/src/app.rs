@@ -24,6 +24,10 @@ pub enum Panel {
 
 /// Max messages to keep in memory (older messages stay on disk)
 const MAX_DISPLAY_MESSAGES: usize = 2000;
+/// How many messages to show on initial load
+const INITIAL_DISPLAY: usize = 50;
+/// How many messages to load when scrolling up
+const LOAD_MORE_BATCH: usize = 50;
 
 /// "Did you know?" tips — shown once per session, not persisted to disk
 const TIPS: &[&str] = &[
@@ -34,7 +38,7 @@ const TIPS: &[&str] = &[
     "Tip: Drop a file path into chat to share images with your team",
     "Tip: /clear wipes the chat view — messages stay safe on disk",
     "Tip: AI agents auto-read this chat before starting work — just discuss here, then assign tasks",
-    "Tip: /rc reconnects to the relay if you go offline — or it auto-retries for you",
+    "Tip: /rc reconnects to chat if you go offline — or it auto-retries for you",
     "Tip: Ctrl+G switches between panes in tmux — no mouse needed",
     "Tip: /name <new> changes your display name without leaving the TUI",
     "Tip: /color #RRGGBB changes your chat color — try #4ECDC4",
@@ -55,6 +59,8 @@ pub struct AppState {
 
     // Data
     pub chat_messages: Vec<ChatMessage>,
+    pub older_messages: Vec<ChatMessage>,
+    disk_msg_count: usize,
     pub presence: Vec<PresenceInfo>,
 
     // Chat selection (index into chat_messages, None = auto-scroll to bottom)
@@ -63,6 +69,8 @@ pub struct AppState {
     // Input
     pub input_buffer: String,
     pub input_cursor: usize,
+    pub pending_quote: Option<Quote>,
+    pub autocomplete_idx: usize,
 
     // Project info
     pub project_name: String,
@@ -84,12 +92,15 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(storage: Storage, user: UserConfig) -> Result<Self> {
-        let mut chat_messages = storage.read_chat_messages().unwrap_or_default();
-        // Silently truncate to keep TUI snappy
-        if chat_messages.len() > MAX_DISPLAY_MESSAGES {
-            chat_messages = chat_messages.split_off(chat_messages.len() - MAX_DISPLAY_MESSAGES);
+        let mut all_msgs = storage.read_chat_messages().unwrap_or_default();
+        if all_msgs.len() > MAX_DISPLAY_MESSAGES {
+            all_msgs = all_msgs.split_off(all_msgs.len() - MAX_DISPLAY_MESSAGES);
         }
-        let session_id = crate::get_or_create_session_id(&chat_messages, &user.profile.user_id);
+        let session_id = crate::get_or_create_session_id(&all_msgs, &user.profile.user_id);
+        let disk_msg_count = all_msgs.len();
+        let split_at = all_msgs.len().saturating_sub(INITIAL_DISPLAY);
+        let older_messages = all_msgs[..split_at].to_vec();
+        let chat_messages = all_msgs[split_at..].to_vec();
         let project_name = crate::git::ops::repo_name().unwrap_or_else(|_| "project".to_string());
 
         let presence = vec![PresenceInfo {
@@ -108,10 +119,14 @@ impl AppState {
             want_reconnect: false,
             muted: false,
             chat_messages,
+            older_messages,
+            disk_msg_count,
             presence,
             chat_selected: None,
             input_buffer: String::new(),
             input_cursor: 0,
+            pending_quote: None,
+            autocomplete_idx: 0,
             project_name,
             ws_client: None,
             is_online: false,
@@ -123,20 +138,26 @@ impl AppState {
     }
 
     pub fn reload_data(&mut self) {
-        if let Ok(mut msgs) = self.storage.read_chat_messages() {
-            if msgs.len() > MAX_DISPLAY_MESSAGES {
-                msgs = msgs.split_off(msgs.len() - MAX_DISPLAY_MESSAGES);
+        if let Ok(all_msgs) = self.storage.read_chat_messages() {
+            if all_msgs.len() > self.disk_msg_count {
+                let new_msgs = all_msgs[self.disk_msg_count..].to_vec();
+                self.disk_msg_count = all_msgs.len();
+                self.chat_messages.extend(new_msgs);
             }
-            // Preserve in-memory-only messages (tips) that aren't on disk
-            let tips: Vec<ChatMessage> = self
-                .chat_messages
-                .iter()
-                .filter(|m| m.message_type == MessageType::Tip)
-                .cloned()
-                .collect();
-            self.chat_messages = msgs;
-            self.chat_messages.extend(tips);
         }
+    }
+
+    /// Load older messages when user scrolls to top. Returns count loaded.
+    pub fn load_more_history(&mut self) -> usize {
+        if self.older_messages.is_empty() {
+            return 0;
+        }
+        let batch = self.older_messages.len().min(LOAD_MORE_BATCH);
+        let start = self.older_messages.len() - batch;
+        let mut loaded: Vec<ChatMessage> = self.older_messages.drain(start..).collect();
+        loaded.append(&mut self.chat_messages);
+        self.chat_messages = loaded;
+        batch
     }
 
     /// Ring terminal bell (debounced: once per 5 seconds)
@@ -159,6 +180,7 @@ impl AppState {
     fn system_msg(&mut self, text: &str) {
         let msg = ChatMessage::new_system_message(text.to_string(), self.session_id.clone());
         let _ = self.storage.append_chat_message(&msg);
+        self.disk_msg_count += 1;
         self.chat_messages.push(msg);
     }
 
@@ -167,6 +189,7 @@ impl AppState {
         let mut msg = ChatMessage::new_system_message(text.to_string(), self.session_id.clone());
         msg.message_type = msg_type;
         let _ = self.storage.append_chat_message(&msg);
+        self.disk_msg_count += 1;
         self.chat_messages.push(msg);
     }
 
@@ -211,7 +234,7 @@ impl AppState {
                 self.system_msg("/color <#hex> — change your color");
                 self.system_msg("/mute     — toggle @mention bell     (/m)");
                 self.system_msg("/clear    — clear chat view");
-                self.system_msg("/rc       — reconnect to relay");
+                self.system_msg("/rc       — reconnect to chat");
                 self.system_msg("/quit     — exit SyncVibe  (/q)");
                 self.system_msg("");
                 self.system_msg("@name     — mention a teammate (highlights + bell)");
@@ -299,8 +322,34 @@ impl AppState {
         true
     }
 
+    fn apply_emoji(text: &str) -> String {
+        let mut r = text.to_string();
+        // Colon-word-colon (longer patterns first)
+        for (k, v) in [
+            (":thumbsup:", "👍"), (":thumbsdown:", "👎"),
+            (":+1:", "👍"), (":-1:", "👎"),
+            (":heart:", "❤️"), (":fire:", "🔥"),
+            (":star:", "⭐"), (":check:", "✅"),
+            (":rocket:", "🚀"), (":eyes:", "👀"),
+            (":think:", "🤔"), (":100:", "💯"),
+            (":party:", "🎉"), (":tada:", "🎉"),
+            (":joy:", "😂"), (":lol:", "😂"),
+            (":cry:", "😢"), (":wave:", "👋"),
+            (":clap:", "👏"), (":ok:", "👌"),
+            (":pray:", "🙏"), (":x:", "❌"),
+            (":cool:", "😎"), (":wink:", "😉"),
+            // Face emojis
+            (":D", "😃"), (":P", "😜"), (":O", "😮"),
+            (";)", "😉"), (":(", "😞"), (":)", "😊"),
+            ("<3", "❤️"),
+        ] {
+            r = r.replace(k, v);
+        }
+        r
+    }
+
     pub fn send_chat_message(&mut self) -> Result<()> {
-        let content = self.input_buffer.trim().to_string();
+        let content = Self::apply_emoji(self.input_buffer.trim());
         if content.is_empty() {
             return Ok(());
         }
@@ -359,12 +408,19 @@ impl AppState {
             )
         };
 
+        // Attach pending quote
+        let mut msg = msg;
+        if self.pending_quote.is_some() {
+            msg.quote = self.pending_quote.take();
+        }
+
         // Detect @agent mention — send message to agent pane via tmux
         if msg.message_type == MessageType::User {
             self.handle_agent_mention(&msg);
         }
 
         self.storage.append_chat_message(&msg)?;
+        self.disk_msg_count += 1;
         self.chat_messages.push(msg.clone());
         self.input_buffer.clear();
         self.input_cursor = 0;
@@ -465,7 +521,12 @@ pub async fn run() -> Result<()> {
     let mut ws_alive_rx: Option<tokio::sync::watch::Receiver<bool>> = None;
     let mut reconnect_at: Option<tokio::time::Instant> = None;
     let mut reconnect_attempts: u32 = 0;
-    const MAX_AUTO_RECONNECTS: u32 = 3;
+    const MAX_AUTO_RECONNECTS: u32 = 5;
+
+    // Non-blocking reconnect: connect attempts run in a spawned task
+    let (reconnect_tx, mut reconnect_rx) = mpsc::channel(1);
+    let mut reconnecting = false;
+    let mut connected_since: Option<tokio::time::Instant> = None;
 
     if let Some(ref room) = room_config {
         match ws_client::connect_ws(
@@ -483,10 +544,10 @@ pub async fn run() -> Result<()> {
                 state.is_online = true;
                 ws_rx = Some(rx);
                 ws_alive_rx = Some(alive_rx);
-                state.system_msg("Connected");
+                state.system_msg("Connected to chat");
             }
             Err(_) => {
-                state.system_msg("Offline — will keep trying");
+                state.system_msg("Chat unavailable — running offline");
                 reconnect_attempts = 1;
                 reconnect_at = Some(tokio::time::Instant::now() + Duration::from_secs(10));
             }
@@ -526,9 +587,10 @@ pub async fn run() -> Result<()> {
     })?;
     watcher.watch(&watch_path, RecursiveMode::NonRecursive)?;
 
-    // Schedule a "Did you know?" tip after 5 seconds
+    // Schedule a "Did you know?" tip after 5 seconds, auto-expire after 10s
     let tip_at = tokio::time::Instant::now() + Duration::from_secs(5);
     let mut tip_pending = true;
+    let mut tip_expire_at: Option<tokio::time::Instant> = None;
 
     let mut terminal = tui::setup()?;
     let mut event_stream = EventStream::new();
@@ -574,7 +636,7 @@ pub async fn run() -> Result<()> {
                 state.reload_data();
             }
 
-            // Reconnect timer
+            // Reconnect timer — spawn non-blocking connect attempt
             _ = async {
                 match reconnect_at {
                     Some(target) => tokio::time::sleep_until(target).await,
@@ -582,24 +644,39 @@ pub async fn run() -> Result<()> {
                 }
             } => {
                 reconnect_at = None;
-                if let Some(ref room) = room_config {
-                    match ws_client::connect_ws(
-                        &room.relay_url,
-                        &room.room_id,
-                        &room.room_secret,
-                        &state.user.profile.user_id,
-                        &state.user.profile.name,
-                        &state.user.profile.color,
-                    )
-                    .await
-                    {
+                if !reconnecting {
+                    if let Some(ref room) = room_config {
+                        reconnecting = true;
+                        let tx = reconnect_tx.clone();
+                        let relay_url = room.relay_url.clone();
+                        let room_id = room.room_id.clone();
+                        let room_secret = room.room_secret.clone();
+                        let user_id = state.user.profile.user_id.clone();
+                        let user_name = state.user.profile.name.clone();
+                        let user_color = state.user.profile.color.clone();
+                        tokio::spawn(async move {
+                            let result = ws_client::connect_ws(
+                                &relay_url, &room_id, &room_secret,
+                                &user_id, &user_name, &user_color,
+                            ).await;
+                            let _ = tx.send(result).await;
+                        });
+                    }
+                }
+            }
+
+            // Reconnect result (non-blocking — doesn't stall the event loop)
+            result = reconnect_rx.recv() => {
+                reconnecting = false;
+                if let Some(result) = result {
+                    match result {
                         Ok((client, rx, alive_rx)) => {
                             state.ws_client = Some(client);
                             state.is_online = true;
                             ws_rx = Some(rx);
                             ws_alive_rx = Some(alive_rx);
-                            reconnect_attempts = 0;
-                            state.system_msg("Back online");
+                            connected_since = Some(tokio::time::Instant::now());
+                            state.system_msg("Reconnected to chat");
                         }
                         Err(_) => {
                             reconnect_attempts += 1;
@@ -608,14 +685,14 @@ pub async fn run() -> Result<()> {
                                     tokio::time::Instant::now() + Duration::from_secs(15),
                                 );
                             } else {
-                                state.system_msg("Can't connect — /rc to retry");
+                                state.system_msg("Chat unavailable — /rc to retry");
                             }
                         }
                     }
                 }
             }
 
-            // "Did you know?" tip — fires once, 5s after startup
+            // "Did you know?" tip — fires once, 5s after startup, expires after 10s
             _ = async {
                 if tip_pending {
                     tokio::time::sleep_until(tip_at).await
@@ -624,9 +701,20 @@ pub async fn run() -> Result<()> {
                 }
             } => {
                 tip_pending = false;
-                // Simple deterministic pick: use process ID to vary across sessions
                 let idx = (std::process::id() as usize) % TIPS.len();
                 state.tip_msg(TIPS[idx]);
+                tip_expire_at = Some(tokio::time::Instant::now() + Duration::from_secs(10));
+            }
+
+            // Tip auto-expire
+            _ = async {
+                match tip_expire_at {
+                    Some(t) => tokio::time::sleep_until(t).await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                tip_expire_at = None;
+                state.chat_messages.retain(|m| m.message_type != MessageType::Tip);
             }
 
             // Periodic tick for connection health checks
@@ -636,11 +724,24 @@ pub async fn run() -> Result<()> {
                     if !*alive_rx.borrow() && state.is_online {
                         state.is_online = false;
                         state.ws_client = None;
-                        state.system_msg("Disconnected");
-                        reconnect_attempts = 1;
-                        reconnect_at = Some(tokio::time::Instant::now() + Duration::from_secs(5));
+                        connected_since = None;
+                        state.system_msg("Disconnected from chat");
+                        reconnect_attempts += 1;
+                        if reconnect_attempts < MAX_AUTO_RECONNECTS {
+                            reconnect_at = Some(tokio::time::Instant::now() + Duration::from_secs(5));
+                        } else {
+                            state.system_msg("Chat unavailable — /rc to retry");
+                        }
                         ws_alive_rx = None;
                         ws_rx = None;
+                    }
+                }
+
+                // Reset reconnect counter after 60s of stable connection
+                if let Some(cs) = connected_since {
+                    if state.is_online && cs.elapsed() >= Duration::from_secs(60) {
+                        reconnect_attempts = 0;
+                        connected_since = None;
                     }
                 }
 
@@ -748,6 +849,7 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
                 state.ring_bell();
             }
             let _ = state.storage.append_chat_message(&msg);
+            state.disk_msg_count += 1;
             state.chat_messages.push(msg);
         }
         WsMessage::ConflictWarning { file, users } => {
@@ -792,10 +894,21 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
                 if total == 0 {
                     return Ok(());
                 }
-                state.chat_selected = Some(match state.chat_selected {
-                    None => total.saturating_sub(1),
-                    Some(idx) => idx.saturating_sub(1),
-                });
+                match state.chat_selected {
+                    None => {
+                        state.chat_selected = Some(total.saturating_sub(1));
+                    }
+                    Some(0) => {
+                        // At the top — load more history
+                        let loaded = state.load_more_history();
+                        if loaded > 0 {
+                            state.chat_selected = Some(loaded.saturating_sub(1));
+                        }
+                    }
+                    Some(idx) => {
+                        state.chat_selected = Some(idx - 1);
+                    }
+                }
             }
             KeyCode::Down | KeyCode::Esc => {
                 let total = state.chat_messages.len();
@@ -813,74 +926,115 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
             KeyCode::Enter => {
                 if state.selected_is_image() {
                     state.open_selected_image();
+                } else if let Some(idx) = state.chat_selected {
+                    if let Some(msg) = state.chat_messages.get(idx) {
+                        if msg.message_type == MessageType::User {
+                            state.pending_quote = Some(Quote {
+                                user_name: msg.user_name.clone(),
+                                content: msg.content.clone(),
+                            });
+                            state.chat_selected = None;
+                            state.focus = Panel::Input;
+                        }
+                    }
                 }
             }
             _ => {}
         },
-        Panel::Input => match key.code {
-            KeyCode::Enter => {
-                state.send_chat_message()?;
-            }
-            KeyCode::Esc => {
-                state.focus = Panel::Chat;
-            }
-            KeyCode::Char(c) => {
-                let byte_idx = state
-                    .input_buffer
-                    .char_indices()
-                    .nth(state.input_cursor)
-                    .map(|(i, _)| i)
-                    .unwrap_or(state.input_buffer.len());
-                state.input_buffer.insert(byte_idx, c);
-                state.input_cursor += 1;
-            }
-            KeyCode::Backspace => {
-                if state.input_cursor > 0 {
-                    state.input_cursor -= 1;
+        Panel::Input => {
+            let ac_matches = components::autocomplete::filter(&state.input_buffer);
+            let ac_active = !ac_matches.is_empty();
+
+            match key.code {
+                // Autocomplete: Tab completes selected command
+                KeyCode::Tab if ac_active => {
+                    let idx = state.autocomplete_idx.min(ac_matches.len() - 1);
+                    let (cmd, _) = components::autocomplete::COMMANDS[ac_matches[idx]];
+                    state.input_buffer = format!("{} ", cmd);
+                    state.input_cursor = state.input_buffer.chars().count();
+                    state.autocomplete_idx = 0;
+                }
+                // Autocomplete: ↑↓ navigate
+                KeyCode::Up if ac_active => {
+                    if state.autocomplete_idx > 0 {
+                        state.autocomplete_idx -= 1;
+                    } else {
+                        state.autocomplete_idx = ac_matches.len() - 1;
+                    }
+                }
+                KeyCode::Down if ac_active => {
+                    state.autocomplete_idx = (state.autocomplete_idx + 1) % ac_matches.len();
+                }
+                KeyCode::Enter => {
+                    state.send_chat_message()?;
+                }
+                KeyCode::Esc => {
+                    if state.pending_quote.is_some() {
+                        state.pending_quote = None;
+                    } else {
+                        state.focus = Panel::Chat;
+                    }
+                }
+                KeyCode::Char(c) => {
                     let byte_idx = state
                         .input_buffer
                         .char_indices()
                         .nth(state.input_cursor)
                         .map(|(i, _)| i)
                         .unwrap_or(state.input_buffer.len());
-                    state.input_buffer.remove(byte_idx);
+                    state.input_buffer.insert(byte_idx, c);
+                    state.input_cursor += 1;
+                    state.autocomplete_idx = 0;
                 }
-            }
-            KeyCode::Delete => {
-                let char_count = state.input_buffer.chars().count();
-                if state.input_cursor < char_count {
-                    let byte_idx = state
-                        .input_buffer
-                        .char_indices()
-                        .nth(state.input_cursor)
-                        .map(|(i, _)| i)
-                        .unwrap_or(state.input_buffer.len());
-                    state.input_buffer.remove(byte_idx);
+                KeyCode::Backspace => {
+                    if state.input_cursor > 0 {
+                        state.input_cursor -= 1;
+                        let byte_idx = state
+                            .input_buffer
+                            .char_indices()
+                            .nth(state.input_cursor)
+                            .map(|(i, _)| i)
+                            .unwrap_or(state.input_buffer.len());
+                        state.input_buffer.remove(byte_idx);
+                        state.autocomplete_idx = 0;
+                    }
                 }
-            }
-            KeyCode::Left => {
-                state.input_cursor = state.input_cursor.saturating_sub(1);
-            }
-            KeyCode::Right => {
-                let char_count = state.input_buffer.chars().count();
-                state.input_cursor = (state.input_cursor + 1).min(char_count);
-            }
-            KeyCode::Home => {
-                state.input_cursor = 0;
-            }
-            KeyCode::End => {
-                state.input_cursor = state.input_buffer.chars().count();
-            }
-            KeyCode::Up => {
-                // Up arrow in input → jump to chat selection mode
-                let total = state.chat_messages.len();
-                if total > 0 {
-                    state.focus = Panel::Chat;
-                    state.chat_selected = Some(total.saturating_sub(1));
+                KeyCode::Delete => {
+                    let char_count = state.input_buffer.chars().count();
+                    if state.input_cursor < char_count {
+                        let byte_idx = state
+                            .input_buffer
+                            .char_indices()
+                            .nth(state.input_cursor)
+                            .map(|(i, _)| i)
+                            .unwrap_or(state.input_buffer.len());
+                        state.input_buffer.remove(byte_idx);
+                        state.autocomplete_idx = 0;
+                    }
                 }
+                KeyCode::Left => {
+                    state.input_cursor = state.input_cursor.saturating_sub(1);
+                }
+                KeyCode::Right => {
+                    let char_count = state.input_buffer.chars().count();
+                    state.input_cursor = (state.input_cursor + 1).min(char_count);
+                }
+                KeyCode::Home => {
+                    state.input_cursor = 0;
+                }
+                KeyCode::End => {
+                    state.input_cursor = state.input_buffer.chars().count();
+                }
+                KeyCode::Up => {
+                    let total = state.chat_messages.len();
+                    if total > 0 {
+                        state.focus = Panel::Chat;
+                        state.chat_selected = Some(total.saturating_sub(1));
+                    }
+                }
+                _ => {}
             }
-            _ => {}
-        },
+        }
     }
 
     Ok(())
@@ -902,4 +1056,14 @@ fn draw_ui(frame: &mut ratatui::Frame, state: &AppState) {
     components::status_bar::draw(frame, chunks[0], state);
     components::chat::draw(frame, chunks[1], state);
     components::input::draw(frame, chunks[2], state);
+
+    // Autocomplete overlay (rendered last, on top)
+    if state.focus == Panel::Input {
+        components::autocomplete::draw(
+            frame,
+            chunks[2],
+            &state.input_buffer,
+            state.autocomplete_idx,
+        );
+    }
 }

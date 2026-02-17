@@ -1,5 +1,5 @@
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use unicode_width::UnicodeWidthChar;
@@ -10,13 +10,40 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
     let is_focused = state.focus == Panel::Input;
     let border_color = if is_focused { Color::Cyan } else { Color::DarkGray };
 
-    let block = Block::default()
+    let mut block = Block::default()
         .borders(Borders::LEFT | Borders::TOP | Borders::BOTTOM)
         .border_style(Style::default().fg(border_color));
 
+    // Show quote preview in title
+    if let Some(ref q) = state.pending_quote {
+        let max_len = area.width.saturating_sub(12) as usize;
+        let preview = if q.content.len() > max_len {
+            format!("{}...", &q.content[..max_len.saturating_sub(3)])
+        } else {
+            q.content.clone()
+        };
+        block = block.title(Line::from(vec![
+            Span::styled(
+                format!(" ↩ {}: ", q.user_name),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{} ", preview),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]));
+    }
+
     let (display_text, style) = if is_focused {
         if state.input_buffer.is_empty() {
-            (" Type a message...".to_string(), Style::default().fg(Color::DarkGray))
+            let placeholder = if state.pending_quote.is_some() {
+                " Reply..."
+            } else {
+                " Type a message..."
+            };
+            (placeholder.to_string(), Style::default().fg(Color::DarkGray))
         } else {
             (format!(" {}", state.input_buffer), Style::default().fg(Color::Reset))
         }

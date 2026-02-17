@@ -74,7 +74,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
         if state.selected_is_image() {
             " Chat ↑↓ Enter: open image ".to_string()
         } else {
-            " Chat ↑↓ ".to_string()
+            " Chat ↑↓ Enter: quote ".to_string()
         }
     } else {
         " Chat ".to_string()
@@ -171,19 +171,21 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
     let mut lines: Vec<Line> = Vec::new();
     let visible = &items[start..end];
 
-    // Scroll indicator at top
-    if start > 0 {
-        // Count how many actual messages are above
-        let above = items[..start]
+    // Scroll indicator at top (includes both windowed-out and unloaded messages)
+    let above_in_view = if start > 0 {
+        items[..start]
             .iter()
             .filter(|i| matches!(i, ChatLine::Message { .. }))
-            .count();
-        if above > 0 {
-            lines.push(Line::from(Span::styled(
-                format!("  ↑ {} more", above),
-                Style::default().fg(Color::DarkGray),
-            )));
-        }
+            .count()
+    } else {
+        0
+    };
+    let total_above = above_in_view + state.older_messages.len();
+    if total_above > 0 {
+        lines.push(Line::from(Span::styled(
+            format!("  ↑ {} more", total_above),
+            Style::default().fg(Color::DarkGray),
+        )));
     }
 
     for item in visible.iter() {
@@ -215,7 +217,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
                     false
                 };
 
-                lines.push(format_message(msg, is_selected, is_grouped));
+                lines.extend(format_message(msg, is_selected, is_grouped));
             }
         }
     }
@@ -238,11 +240,35 @@ fn estimate_lines(msg: &ChatMessage, width: usize) -> usize {
         }
         _ => 4 + msg.content.width(),
     };
-    ((text_width as f64) / (width as f64)).ceil().max(1.0) as usize
+    let base = ((text_width as f64) / (width as f64)).ceil().max(1.0) as usize;
+    // Quote adds one line
+    if msg.quote.is_some() { base + 1 } else { base }
 }
 
-fn format_message(msg: &ChatMessage, selected: bool, grouped: bool) -> Line<'static> {
+fn format_message(msg: &ChatMessage, selected: bool, grouped: bool) -> Vec<Line<'static>> {
     let prefix = if selected { "▸" } else { " " };
+    let sel_style = Style::default()
+        .bg(Color::Rgb(20, 40, 60))
+        .add_modifier(Modifier::BOLD);
+
+    let mut result: Vec<Line> = Vec::new();
+
+    // Quote line (above the message)
+    if let Some(ref q) = msg.quote {
+        let truncated = if q.content.len() > 60 {
+            format!("{}...", &q.content[..57])
+        } else {
+            q.content.clone()
+        };
+        let mut quote_line = Line::from(Span::styled(
+            format!("{}        ↩ {}: {}", prefix, q.user_name, truncated),
+            Style::default().fg(Color::Rgb(100, 100, 120)),
+        ));
+        if selected {
+            quote_line = quote_line.style(sel_style);
+        }
+        result.push(quote_line);
+    }
 
     let mut line = if grouped {
         // Grouped: no timestamp/name, just indented content
@@ -312,12 +338,9 @@ fn format_message(msg: &ChatMessage, selected: bool, grouped: bool) -> Line<'sta
     };
 
     if selected {
-        line = line.style(
-            Style::default()
-                .bg(Color::Rgb(20, 40, 60))
-                .add_modifier(Modifier::BOLD),
-        );
+        line = line.style(sel_style);
     }
 
-    line
+    result.push(line);
+    result
 }

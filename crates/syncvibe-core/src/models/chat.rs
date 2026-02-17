@@ -13,6 +13,12 @@ pub enum MessageType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Quote {
+    pub user_name: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub id: String,
     pub user_id: String,
@@ -21,6 +27,8 @@ pub struct ChatMessage {
     pub content: String,
     pub message_type: MessageType,
     pub thread_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quote: Option<Quote>,
     pub session_id: String,
     pub timestamp: DateTime<Utc>,
 }
@@ -42,6 +50,7 @@ impl ChatMessage {
             content,
             message_type: MessageType::User,
             thread_id,
+            quote: None,
             session_id,
             timestamp: Utc::now(),
         }
@@ -56,6 +65,7 @@ impl ChatMessage {
             content,
             message_type: MessageType::System,
             thread_id: None,
+            quote: None,
             session_id,
             timestamp: Utc::now(),
         }

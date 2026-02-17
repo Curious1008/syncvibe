@@ -54,7 +54,12 @@ fn err(msg: String) -> ErrorData {
 
 /// Format a single message line (without name/time prefix, for grouped output).
 fn format_message_body(m: &ChatMessage) -> String {
-    match m.message_type {
+    let quote_prefix = if let Some(ref q) = m.quote {
+        format!("> {}: {}\n", q.user_name, q.content)
+    } else {
+        String::new()
+    };
+    let body = match m.message_type {
         MessageType::User => m.content.clone(),
         MessageType::Image => {
             let filename = m.content.split('\n').nth(1).unwrap_or("image");
@@ -64,7 +69,8 @@ fn format_message_body(m: &ChatMessage) -> String {
         MessageType::GitCommit => format!("* {}", m.content),
         MessageType::ConflictWarning => format!("⚠ {}", m.content),
         MessageType::Tip => format!("💡 {}", m.content),
-    }
+    };
+    format!("{}{}", quote_prefix, body)
 }
 
 /// Format messages in compact grouped form.
