@@ -45,10 +45,13 @@ impl RoomConfig {
         payload.extend_from_slice(&secret_bytes);
 
         // Append room name (truncated to 64 bytes) after the 48-byte header
+        // Truncate on a valid UTF-8 boundary to avoid splitting multi-byte chars
         if let Some(ref name) = self.room_name {
-            let name_bytes = name.as_bytes();
-            let len = name_bytes.len().min(64);
-            payload.extend_from_slice(&name_bytes[..len]);
+            let mut len = name.len().min(64);
+            while len > 0 && !name.is_char_boundary(len) {
+                len -= 1;
+            }
+            payload.extend_from_slice(&name.as_bytes()[..len]);
         }
 
         Ok(format!("{}{}", INVITE_PREFIX, URL_SAFE_NO_PAD.encode(&payload)))
@@ -96,6 +99,9 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 fn hex_decode(hex: &str) -> Result<Vec<u8>, String> {
+    if !hex.is_ascii() {
+        return Err("hex string contains non-ASCII characters".to_string());
+    }
     if hex.len() % 2 != 0 {
         return Err("odd-length hex string".to_string());
     }

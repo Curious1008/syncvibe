@@ -34,7 +34,18 @@ pub async fn connect_ws(
             relay_url
         ));
     }
-    let url = format!("{}/ws/{}", relay_url, room_id);
+    // Percent-encode room_id to prevent URL injection
+    let encoded_room_id: String = room_id
+        .bytes()
+        .flat_map(|b| {
+            if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.' {
+                vec![b as char]
+            } else {
+                format!("%{:02X}", b).chars().collect()
+            }
+        })
+        .collect();
+    let url = format!("{}/ws/{}", relay_url, encoded_room_id);
     let (ws_stream, _) = time::timeout(Duration::from_secs(5), connect_async(&url))
         .await
         .map_err(|_| anyhow::anyhow!("Connection timed out"))??;
@@ -87,8 +98,12 @@ pub async fn connect_ws(
 
     // Spawn reader task
     tokio::spawn(async move {
+        const MAX_MSG_SIZE: usize = 1_048_576; // 1 MB limit per message
         while let Some(Ok(msg)) = read.next().await {
             if let Message::Text(text) = msg {
+                if text.len() > MAX_MSG_SIZE {
+                    continue; // Drop oversized messages
+                }
                 if let Ok(ws_msg) = serde_json::from_str::<WsMessage>(&text) {
                     if in_tx.send(ws_msg).await.is_err() {
                         break;

@@ -94,7 +94,13 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(storage: Storage, user: UserConfig) -> Result<Self> {
-        let mut all_msgs = storage.read_chat_messages().unwrap_or_default();
+        let mut all_msgs = match storage.read_chat_messages() {
+            Ok(msgs) => msgs,
+            Err(e) => {
+                eprintln!("Warning: Failed to load chat history: {}", e);
+                Vec::new()
+            }
+        };
         if all_msgs.len() > MAX_DISPLAY_MESSAGES {
             all_msgs = all_msgs.split_off(all_msgs.len() - MAX_DISPLAY_MESSAGES);
         }
@@ -146,7 +152,12 @@ impl AppState {
             if all_msgs.len() > self.disk_msg_count {
                 let new_msgs = all_msgs[self.disk_msg_count..].to_vec();
                 self.disk_msg_count = all_msgs.len();
-                self.chat_messages.extend(new_msgs);
+                // Deduplicate: skip messages already in memory (e.g. received via WebSocket)
+                for msg in new_msgs {
+                    if !self.chat_messages.iter().any(|m| m.id == msg.id) {
+                        self.chat_messages.push(msg);
+                    }
+                }
                 // Cap to prevent unbounded growth
                 if self.chat_messages.len() > MAX_DISPLAY_MESSAGES {
                     let excess = self.chat_messages.len() - MAX_DISPLAY_MESSAGES;
@@ -345,6 +356,7 @@ impl AppState {
             }
             "/clear" => {
                 self.chat_messages.clear();
+                self.older_messages.clear();
                 self.chat_selected = None;
             }
             "/rc" | "/reconnect" => {
@@ -608,8 +620,8 @@ pub async fn run() -> Result<()> {
                 ws_alive_rx = Some(alive_rx);
                 state.system_msg("Connected to chat");
             }
-            Err(_) => {
-                state.system_msg("Chat unavailable — running offline");
+            Err(e) => {
+                state.system_msg(&format!("Chat unavailable — {}", e));
                 reconnect_attempts = 1;
                 reconnect_at = Some(tokio::time::Instant::now() + Duration::from_secs(10));
             }
@@ -767,8 +779,10 @@ pub async fn run() -> Result<()> {
                         Err(_) => {
                             reconnect_attempts += 1;
                             if reconnect_attempts < MAX_AUTO_RECONNECTS {
+                                // Exponential backoff: 5s, 10s, 20s, 40s
+                                let delay = 5u64 * (1u64 << reconnect_attempts.min(4));
                                 reconnect_at = Some(
-                                    tokio::time::Instant::now() + Duration::from_secs(15),
+                                    tokio::time::Instant::now() + Duration::from_secs(delay),
                                 );
                             } else {
                                 state.system_msg("Chat unavailable — /rc to retry");
@@ -1097,6 +1111,10 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
             if !matches!(msg.message_type, MessageType::User | MessageType::Image) {
                 return;
             }
+            // Strip ANSI escape sequences from remote peer content to prevent terminal manipulation
+            let mut msg = msg;
+            msg.content = strip_ansi(&msg.content);
+            msg.user_name = strip_ansi(&msg.user_name);
             // Only ring bell when current user is @mentioned
             if msg.content.to_lowercase().contains(&format!("@{}", state.user.profile.name.to_lowercase())) {
                 state.ring_bell();
@@ -1107,6 +1125,10 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
             // Cap to prevent unbounded growth
             if state.chat_messages.len() > MAX_DISPLAY_MESSAGES {
                 state.chat_messages.remove(0);
+                // Adjust selection index to compensate for removed message
+                if let Some(ref mut idx) = state.chat_selected {
+                    *idx = idx.saturating_sub(1);
+                }
             }
         }
         WsMessage::ConflictWarning { file, users } => {
@@ -1329,6 +1351,50 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Strip ANSI escape sequences (CSI, OSC, etc.) from a string.
+/// Prevents remote peers from injecting terminal control codes.
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // CSI: ESC [
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                // consume until final byte (0x40-0x7E)
+                while let Some(&ch) = chars.peek() {
+                    chars.next();
+                    if ch.is_ascii() && (0x40..=0x7E).contains(&(ch as u8)) {
+                        break;
+                    }
+                }
+            // OSC: ESC ]
+            } else if chars.peek() == Some(&']') {
+                chars.next();
+                // consume until ST (ESC \ or BEL)
+                while let Some(ch) = chars.next() {
+                    if ch == '\x07' {
+                        break;
+                    }
+                    if ch == '\x1b' && chars.peek() == Some(&'\\') {
+                        chars.next();
+                        break;
+                    }
+                }
+            } else {
+                // Other escape — skip the next char
+                chars.next();
+            }
+        } else if c.is_ascii_control() && c != '\n' && c != '\t' {
+            // Skip other control chars (BEL, etc.) but keep newline/tab
+            continue;
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 fn draw_ui(frame: &mut ratatui::Frame, state: &AppState) {

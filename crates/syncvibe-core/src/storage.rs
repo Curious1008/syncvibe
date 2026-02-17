@@ -215,7 +215,13 @@ fn set_private_permissions(path: &Path) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+        if let Err(e) = fs::set_permissions(path, fs::Permissions::from_mode(0o600)) {
+            eprintln!(
+                "Warning: could not set permissions on {}: {}",
+                path.display(),
+                e
+            );
+        }
     }
     let _ = path;
 }
@@ -225,7 +231,13 @@ fn set_private_dir_permissions(path: &Path) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o700));
+        if let Err(e) = fs::set_permissions(path, fs::Permissions::from_mode(0o700)) {
+            eprintln!(
+                "Warning: could not set permissions on {}: {}",
+                path.display(),
+                e
+            );
+        }
     }
     let _ = path;
 }

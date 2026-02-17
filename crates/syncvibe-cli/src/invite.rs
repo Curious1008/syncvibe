@@ -94,7 +94,7 @@ pub fn share_message(code: &str, user_name: &str, room_name: Option<&str>) -> St
         None => format!("{} invited you to collaborate on SyncVibe", user_name),
     };
     format!(
-        "{}\nJoin: {}\nnpx syncvibe connect {}",
+        "{}\nJoin: {}\nsyncvibe connect {}",
         header, code, code
     )
 }

@@ -233,6 +233,8 @@ fn estimate_lines(msg: &ChatMessage, width: usize) -> usize {
     if width == 0 {
         return 1;
     }
+    // Count explicit newlines in content
+    let newline_count = msg.content.chars().filter(|c| *c == '\n').count();
     let text_width = match msg.message_type {
         MessageType::User => 8 + msg.user_name.width() + 2 + msg.content.width(),
         MessageType::Image => {
@@ -242,6 +244,7 @@ fn estimate_lines(msg: &ChatMessage, width: usize) -> usize {
         _ => 4 + msg.content.width(),
     };
     let base = ((text_width as f64) / (width as f64)).ceil().max(1.0) as usize;
+    let base = base + newline_count;
     // Quote adds one line
     if msg.quote.is_some() { base + 1 } else { base }
 }

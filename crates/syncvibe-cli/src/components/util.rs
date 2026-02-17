@@ -1,20 +1,27 @@
 use ratatui::style::Color;
+use unicode_width::UnicodeWidthChar;
 
-/// Truncate a string to at most `max_chars` characters, appending "..." if truncated.
-/// Safe for multi-byte/emoji content — never slices on a non-char boundary.
-pub fn truncate_str(s: &str, max_chars: usize) -> String {
-    let char_count = s.chars().count();
-    if char_count <= max_chars {
-        s.to_string()
-    } else {
-        let truncated: String = s.chars().take(max_chars.saturating_sub(3)).collect();
-        format!("{}...", truncated)
+/// Truncate a string to fit within `max_width` display columns, appending "..." if truncated.
+/// Uses Unicode display width (CJK chars = 2 columns, ASCII = 1).
+pub fn truncate_str(s: &str, max_width: usize) -> String {
+    let mut width = 0;
+    let mut truncated = String::new();
+    for c in s.chars() {
+        let cw = c.width().unwrap_or(0);
+        if width + cw > max_width.saturating_sub(3) {
+            truncated.push_str("...");
+            return truncated;
+        }
+        width += cw;
+        truncated.push(c);
     }
+    // Didn't need truncation
+    s.to_string()
 }
 
 pub fn parse_hex_color(hex: &str) -> Color {
     let hex = hex.trim_start_matches('#');
-    if hex.len() != 6 {
+    if hex.len() != 6 || !hex.is_ascii() {
         return Color::Cyan;
     }
     let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(255);

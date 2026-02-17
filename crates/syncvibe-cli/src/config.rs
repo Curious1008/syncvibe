@@ -38,7 +38,13 @@ fn set_private_permissions(path: &std::path::Path) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+        if let Err(e) = fs::set_permissions(path, fs::Permissions::from_mode(0o600)) {
+            eprintln!(
+                "Warning: could not set permissions on {}: {}",
+                path.display(),
+                e
+            );
+        }
     }
     let _ = path; // suppress unused warning on non-unix
 }

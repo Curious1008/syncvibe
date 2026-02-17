@@ -191,14 +191,16 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
     }
     storage.write_room_config(&room)?;
 
-    // Always do required items (gitignore)
-    if items[1].checked && !items[1].already_done {
-        setup_gitignore(cwd)?;
-    }
-
-    // Optional: MCP
-    if items[2].checked && !items[2].already_done {
-        setup_mcp_json(cwd)?;
+    // Execute confirmed items by file name (avoids fragile index assumptions)
+    for item in &items {
+        if !item.checked || item.already_done {
+            continue;
+        }
+        match item.file.as_str() {
+            ".gitignore" => setup_gitignore(cwd)?,
+            ".mcp.json" => setup_mcp_json(cwd)?,
+            _ => {} // .syncvibe/ is handled above via find_or_init_storage
+        }
     }
 
     // Print summary

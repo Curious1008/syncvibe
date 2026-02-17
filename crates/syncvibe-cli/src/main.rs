@@ -86,6 +86,14 @@ fn cmd_join(name: Option<String>, color: Option<String>) -> Result<()> {
         colors[hash % colors.len()].to_string()
     });
 
+    let name = onboarding::sanitize_name(&name);
+    if name.is_empty() {
+        anyhow::bail!("Name cannot be empty.");
+    }
+    if onboarding::is_reserved_name(&name) {
+        anyhow::bail!("That name is reserved. Please choose another.");
+    }
+
     let user_config = UserConfig::new(name.clone(), color);
     config::save_user_config(&user_config)?;
 
