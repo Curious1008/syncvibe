@@ -352,12 +352,14 @@ impl ServerHandler for SyncVibeMcp {
             instructions: Some(
                 "SyncVibe: Terminal-native collaboration for vibe coding.\n\
                  \n\
-                 Tool: read_chat — call with no parameters for smart defaults.\n\
-                 For small conversations, messages are returned inline.\n\
-                 For larger conversations (30+ messages), full content is written to\n\
-                 .syncvibe/chat-digest.md — use Read tool on that file to understand\n\
-                 the full conversation context and direction.\n\
-                 Subsequent calls return only new messages (incremental).\n\
+                 IMPORTANT: Before starting ANY task, call read_chat to understand\n\
+                 your team's discussion. If it returns a file path, Read that file.\n\
+                 Then briefly acknowledge what the team is discussing.\n\
+                 \n\
+                 read_chat behavior:\n\
+                 - Small conversations: messages returned inline.\n\
+                 - Large conversations (30+): full content in .syncvibe/chat-digest.md.\n\
+                 - Subsequent calls: only new messages (incremental).\n\
                  \n\
                  To send chat: append JSONL to .syncvibe/chat-log.jsonl directly.\n\
                  See CLAUDE.md for message format."

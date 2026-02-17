@@ -112,15 +112,17 @@ pub fn cmd_session() -> Result<()> {
             if let Ok(code) = room.to_invite_code() {
                 println!("  Share this invite code with your team:");
                 println!("  {}\n", code);
-                println!("  They just run `syncvibe` and paste it.\n");
+                println!("  They just run `syncvibe` and paste it.");
             }
+            println!("  AI agents auto-read your chat — just discuss, then assign tasks.\n");
             tmux::launch_project(&cwd)
         }
         "j" | "J" if in_git_repo => {
             let code = onboarding::prompt("  Paste invite code: ")?;
             let room = RoomConfig::from_invite_code(&code).map_err(|e| anyhow::anyhow!(e))?;
             init::perform_init(&cwd, Some(room))?;
-            println!("\n  Joined room! \u{1F389}\n");
+            println!("\n  Joined room! \u{1F389}");
+            println!("  AI agents auto-read your chat — just discuss, then assign tasks.\n");
             tmux::launch_project(&cwd)
         }
         num => {

@@ -32,7 +32,7 @@ const TIPS: &[&str] = &[
     "Tip: /mute (/m) toggles the notification bell — handy in meetings",
     "Tip: Drop a file path into chat to share images with your team",
     "Tip: /clear wipes the chat view — messages stay safe on disk",
-    "Tip: AI agents can read your chat via MCP — just talk and they'll follow along",
+    "Tip: AI agents auto-read this chat before starting work — just discuss here, then assign tasks",
     "Tip: /rc reconnects to the relay if you go offline — or it auto-retries for you",
     "Tip: Ctrl+G switches between panes in tmux — no mouse needed",
     "Tip: /name <new> changes your display name without leaving the TUI",

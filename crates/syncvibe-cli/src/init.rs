@@ -101,13 +101,16 @@ fn setup_claude_md(cwd: &std::path::Path) -> Result<()> {
 
 This project uses SyncVibe for team coordination. All shared state lives in `.syncvibe/`.
 
-### Before starting work
-- Read `.syncvibe/chat-log.jsonl` (last 20 lines) for recent team discussions.
+### Before starting ANY task
+1. ALWAYS call the `read_chat` MCP tool first to understand your team's current discussion and direction.
+2. If `read_chat` returns a file path (`.syncvibe/chat-digest.md`), use the Read tool on that file for the full conversation context.
+3. Briefly acknowledge what the team is discussing before proceeding (one sentence, e.g., "I've read the team chat — you're working on X. Let me...").
+4. Do NOT skip this step — your teammates' discussion defines your task context.
 
 ### Chat
 - Chat is append-only JSONL in `.syncvibe/chat-log.jsonl`. One JSON object per line.
 - To send a message: append a line with `{"id":"<uuid>","user_id":"...","user_name":"...","user_color":"...","content":"...","message_type":"user","thread_id":null,"session_id":"...","timestamp":"..."}`.
-- If SyncVibe MCP server is available, use `read_chat` for smart filtered/incremental reads.
+- For incremental reads or time-based filtering, use the `read_chat` MCP tool.
 "#;
     if claude_md_path.exists() {
         let content = std::fs::read_to_string(&claude_md_path)?;

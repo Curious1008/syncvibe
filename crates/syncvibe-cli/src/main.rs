@@ -66,6 +66,7 @@ fn cmd_init() -> Result<()> {
         println!("  {}", code);
         println!("\n  They just run `syncvibe` and paste it.");
     }
+    println!("\n  AI agents auto-read your chat — just discuss, then assign tasks.");
 
     Ok(())
 }

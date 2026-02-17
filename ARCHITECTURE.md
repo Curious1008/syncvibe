@@ -84,13 +84,33 @@ syncvibe/
 
 ## AI Agent Integration Strategy
 
+### Agent Auto-Read Flow
+
+The core UX: **users discuss in SyncVibe chat, then assign tasks to their agent — the agent automatically understands the team's context.**
+
+```
+1. syncvibe init
+   → .mcp.json       (registers SyncVibe MCP server)
+   → CLAUDE.md        (instructs agent: "call read_chat before ANY task")
+   → .claude/settings (hooks for file change notifications)
+
+2. User gives agent a task
+   → Agent calls read_chat (MCP) — instructed by CLAUDE.md
+   → Small chat: messages inline
+   → Large chat: full content → .syncvibe/chat-digest.md, agent reads the file
+   → Agent acknowledges: "I've read the team chat — you're working on X..."
+   → Agent proceeds with full context
+```
+
+Three reinforcement layers ensure the agent always reads chat:
+1. **CLAUDE.md** — "Before starting ANY task, call read_chat"
+2. **MCP server instructions** — "IMPORTANT: call read_chat before starting ANY task"
+3. **Agent behavior** — agent acknowledges the discussion, making it visible to the user
+
 ### What agents do natively (no MCP needed)
-- **Read chat**: `Read .syncvibe/chat-log.jsonl` — native file reading
 - **Send chat**: Append JSONL line to `.syncvibe/chat-log.jsonl` — native file writing
 
-All guided by CLAUDE.md instructions injected at `syncvibe init`.
-
-### What MCP adds (smart filtering agents can't do natively)
+### What MCP adds (smart capabilities agents can't do natively)
 | MCP Tool | Why it exists |
 |---|---|
 | `read_chat` | **Smart filtering**: session scoping, incremental byte-offset reads, time-based filtering, digest file offloading for large conversations — not possible with raw file read |
@@ -98,9 +118,9 @@ All guided by CLAUDE.md instructions injected at `syncvibe init`.
 ### What Claude Code provides natively
 | Capability | How SyncVibe leverages it |
 |---|---|
-| CLAUDE.md | `syncvibe init` injects collaboration instructions |
-| .mcp.json | `syncvibe init` generates MCP server config |
-| File Read/Write/Edit | Agents read/write `.syncvibe/` files directly |
+| CLAUDE.md | `syncvibe init` injects collaboration instructions — agent auto-reads chat |
+| .mcp.json | `syncvibe init` registers MCP server — agent discovers `read_chat` tool |
+| File Read/Write/Edit | Agents read `.syncvibe/chat-digest.md`, write `.syncvibe/chat-log.jsonl` |
 | Hooks | `.claude/settings.json` — PostToolUse hook touches `.syncvibe/.updated` on file changes |
 
 ## Data Flow
