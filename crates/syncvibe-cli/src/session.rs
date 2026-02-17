@@ -83,29 +83,15 @@ pub fn cmd_session() -> Result<()> {
                 );
                 let home = dirs::home_dir()
                     .unwrap_or_else(|| std::path::PathBuf::from("."));
-                let path = home.join(&name);
                 // Already joined — just launch
-                if path.join(".syncvibe").is_dir() {
+                if home.join(&name).join(".syncvibe").is_dir() {
                     println!(
                         "  \x1b[38;2;100;100;115m→ {} (already set up)\x1b[0m\n",
-                        path.display()
+                        home.join(&name).display()
                     );
-                    return tmux::launch_project(&path);
+                    return tmux::launch_project(&home.join(&name));
                 }
-                println!(
-                    "  \x1b[38;2;100;100;115m→ {}\x1b[0m\n",
-                    path.display()
-                );
-                if !path.exists() {
-                    std::fs::create_dir_all(&path)?;
-                }
-                if !path.join(".git").exists() {
-                    std::process::Command::new("git")
-                        .args(["init"])
-                        .current_dir(&path)
-                        .stdout(std::process::Stdio::null())
-                        .status()?;
-                }
+                let path = init::prepare_project_dir(&name)?;
                 init::perform_init(&path, Some(room))?;
                 return tmux::launch_project(&path);
             }
@@ -158,23 +144,7 @@ pub fn cmd_session() -> Result<()> {
                 if name.is_empty() {
                     anyhow::bail!("Cancelled.");
                 }
-                let home = dirs::home_dir()
-                    .unwrap_or_else(|| std::path::PathBuf::from("."));
-                let path = home.join(&name);
-                println!(
-                    "  \x1b[38;2;100;100;115m→ {}\x1b[0m\n",
-                    path.display()
-                );
-                if !path.exists() {
-                    std::fs::create_dir_all(&path)?;
-                }
-                if !path.join(".git").exists() {
-                    std::process::Command::new("git")
-                        .args(["init"])
-                        .current_dir(&path)
-                        .stdout(std::process::Stdio::null())
-                        .status()?;
-                }
+                let path = init::prepare_project_dir(&name)?;
                 let mut room = RoomConfig::new();
                 room.room_name = Some(name);
                 init::perform_init(&path, Some(room))?;
@@ -192,29 +162,15 @@ pub fn cmd_session() -> Result<()> {
                 );
                 let home = dirs::home_dir()
                     .unwrap_or_else(|| std::path::PathBuf::from("."));
-                let path = home.join(&name);
                 // Already joined — just launch
-                if path.join(".syncvibe").is_dir() {
+                if home.join(&name).join(".syncvibe").is_dir() {
                     println!(
                         "  \x1b[38;2;100;100;115m→ {} (already set up)\x1b[0m\n",
-                        path.display()
+                        home.join(&name).display()
                     );
-                    return tmux::launch_project(&path);
+                    return tmux::launch_project(&home.join(&name));
                 }
-                println!(
-                    "  \x1b[38;2;100;100;115m→ {}\x1b[0m\n",
-                    path.display()
-                );
-                if !path.exists() {
-                    std::fs::create_dir_all(&path)?;
-                }
-                if !path.join(".git").exists() {
-                    std::process::Command::new("git")
-                        .args(["init"])
-                        .current_dir(&path)
-                        .stdout(std::process::Stdio::null())
-                        .status()?;
-                }
+                let path = init::prepare_project_dir(&name)?;
                 init::perform_init(&path, Some(room))?;
                 tmux::launch_project(&path)
             }

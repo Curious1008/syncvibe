@@ -19,6 +19,8 @@ pub fn launch_project(project_path: &std::path::Path) -> Result<()> {
         .unwrap_or(false);
 
     if !tmux_available || env::var("TMUX").is_ok() {
+        // Ensure cwd is the project directory so app::run() finds .syncvibe/
+        env::set_current_dir(project_path)?;
         let rt = tokio::runtime::Runtime::new()?;
         return rt.block_on(crate::app::run());
     }
@@ -33,6 +35,10 @@ pub fn launch_or_attach(project_path: &str) -> Result<()> {
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "project".into());
+
+    // Ensure project is in the registry
+    let _ = config::register_project(&project_name, project_path);
+
     let session_name = format!("sv-{}", project_name);
 
     let has_session = std::process::Command::new("tmux")

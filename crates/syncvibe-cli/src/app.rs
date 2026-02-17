@@ -949,38 +949,6 @@ pub async fn run() -> Result<()> {
     Ok(())
 }
 
-/// Ensure a path exists, is a directory, and has a git repo. Returns false on failure.
-fn ensure_project_dir(path: &std::path::Path) -> bool {
-    if !path.exists() {
-        if let Err(e) = std::fs::create_dir_all(path) {
-            println!("  \x1b[38;2;255;100;100mError:\x1b[0m {}", e);
-            return false;
-        }
-    }
-    if !path.is_dir() {
-        println!(
-            "  \x1b[38;2;255;100;100mError:\x1b[0m {} is not a directory.",
-            path.display()
-        );
-        return false;
-    }
-    if !path.join(".git").exists() {
-        let status = std::process::Command::new("git")
-            .args(["init"])
-            .current_dir(path)
-            .stdout(std::process::Stdio::null())
-            .status();
-        match status {
-            Ok(s) if s.success() => {}
-            _ => {
-                println!("  \x1b[38;2;255;100;100mError:\x1b[0m Failed to initialize git repo.");
-                return false;
-            }
-        }
-    }
-    true
-}
-
 /// Handle /new command: prompt for path, init, launch new tmux session.
 /// Returns true if we switched to a new tmux session.
 fn handle_new_project() -> bool {
@@ -1000,16 +968,10 @@ fn handle_new_project() -> bool {
         }
     };
 
-    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-    let path = home.join(&name);
-    println!(
-        "  \x1b[38;2;100;100;115m→ {}\x1b[0m\n",
-        path.display()
-    );
-
-    if !ensure_project_dir(&path) {
-        return false;
-    }
+    let path = match init::prepare_project_dir(&name) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
 
     if session::ensure_user_profile().is_err() {
         return false;
@@ -1070,28 +1032,23 @@ fn handle_join_project() -> bool {
     }
 
     let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-    let path = home.join(&name);
 
     // Already joined — just launch
-    if path.join(".syncvibe").is_dir() {
+    if home.join(&name).join(".syncvibe").is_dir() {
         println!(
             "  \x1b[38;2;100;100;115m→ {} (already set up)\x1b[0m\n",
-            path.display()
+            home.join(&name).display()
         );
-        if tmux::launch_or_attach(&path.to_string_lossy()).is_err() {
+        if tmux::launch_or_attach(&home.join(&name).to_string_lossy()).is_err() {
             println!("  \x1b[38;2;255;100;100mError:\x1b[0m Failed to launch tmux session.");
         }
         return true;
     }
 
-    println!(
-        "  \x1b[38;2;100;100;115m→ {}\x1b[0m\n",
-        path.display()
-    );
-
-    if !ensure_project_dir(&path) {
-        return false;
-    }
+    let path = match init::prepare_project_dir(&name) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
 
     if session::ensure_user_profile().is_err() {
         return false;

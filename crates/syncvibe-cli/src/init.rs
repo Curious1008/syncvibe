@@ -1,9 +1,76 @@
+use std::path::{Path, PathBuf};
+
 use anyhow::Result;
 
 use syncvibe_core::models::RoomConfig;
 use syncvibe_core::storage::Storage;
 
 use crate::onboarding::{self, SetupItem};
+
+/// Prepare a project directory: create it, git init, show clear feedback.
+/// On failure, offers fallback to pick a different path.
+/// Returns the final usable path.
+pub fn prepare_project_dir(name: &str) -> Result<PathBuf> {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let mut path = home.join(name);
+
+    loop {
+        println!(
+            "\n  \x1b[38;2;78;205;196m◆ Project folder\x1b[0m\n  \x1b[38;2;225;225;235m{}\x1b[0m\n",
+            path.display()
+        );
+
+        match try_create_project_dir(&path) {
+            Ok(()) => {
+                println!(
+                    "  \x1b[38;2;80;200;120m✓\x1b[0m Folder ready\n"
+                );
+                return Ok(path);
+            }
+            Err(e) => {
+                println!(
+                    "  \x1b[38;2;255;100;100m✗\x1b[0m Cannot create folder: {}\n",
+                    e
+                );
+                let alt = onboarding::prompt(
+                    "  \x1b[38;2;78;205;196mEnter a different path (or 'q' to cancel):\x1b[0m ",
+                )?;
+                let alt = alt.trim();
+                if alt.is_empty() || alt == "q" || alt == "Q" {
+                    anyhow::bail!("Cancelled.");
+                }
+                // Support both absolute and relative-to-home paths
+                if alt.starts_with('/') || alt.starts_with('~') {
+                    path = PathBuf::from(alt.replace("~", &home.to_string_lossy()));
+                } else {
+                    path = home.join(alt);
+                }
+            }
+        }
+    }
+}
+
+/// Try to create directory + git init. Returns error on failure.
+fn try_create_project_dir(path: &Path) -> Result<()> {
+    if path.exists() && !path.is_dir() {
+        anyhow::bail!("{} exists but is not a directory", path.display());
+    }
+    if !path.exists() {
+        std::fs::create_dir_all(path)?;
+    }
+    if !path.join(".git").exists() {
+        let status = std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(path)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()?;
+        if !status.success() {
+            anyhow::bail!("git init failed");
+        }
+    }
+    Ok(())
+}
 
 /// Core init logic with interactive checklist.
 /// Creates .syncvibe/ and optionally sets up AI integration files.
