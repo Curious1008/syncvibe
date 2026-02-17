@@ -112,6 +112,15 @@ fn format_compact(msgs: &[&ChatMessage]) -> String {
     lines.join("\n")
 }
 
+/// Filter messages to only include user-visible content (user, image, git_commit, conflict).
+/// Strips system messages and tips that would confuse AI agents.
+fn filter_for_agent<'a>(msgs: &[&'a ChatMessage]) -> Vec<&'a ChatMessage> {
+    msgs.iter()
+        .copied()
+        .filter(|m| !matches!(m.message_type, MessageType::System | MessageType::Tip))
+        .collect()
+}
+
 /// Extract unique participant names from messages (user messages only).
 fn collect_participants(msgs: &[&ChatMessage]) -> Vec<String> {
     let mut seen = HashSet::new();
@@ -242,7 +251,8 @@ impl SyncVibeMcp {
                 .read_chat_messages()
                 .map_err(|e| err(e.to_string()))?;
             let refs: Vec<&ChatMessage> = all.iter().collect();
-            let header = format!("── all: {} messages ──\n", all.len());
+            let refs = filter_for_agent(&refs);
+            let header = format!("── all: {} messages ──\n", refs.len());
             let text = build_response(&refs, &header, is_json, &storage)?;
             return Ok(CallToolResult::success(vec![Content::text(text)]));
         }
@@ -258,6 +268,7 @@ impl SyncVibeMcp {
                 .map_err(|e| err(e.to_string()))?;
             let refs: Vec<&ChatMessage> =
                 all.iter().filter(|m| m.timestamp >= since).collect();
+            let refs = filter_for_agent(&refs);
             let header = format!("── since {}: {} messages ──\n", since_str, refs.len());
             let text = build_response(&refs, &header, is_json, &storage)?;
             return Ok(CallToolResult::success(vec![Content::text(text)]));
@@ -279,6 +290,7 @@ impl SyncVibeMcp {
                 .iter()
                 .filter(|m| m.session_id == session_id)
                 .collect();
+            let session_msgs = filter_for_agent(&session_msgs);
 
             // Update state
             state.byte_offset = storage.chat_log_size();
@@ -317,12 +329,13 @@ impl SyncVibeMcp {
                 )]));
             }
 
-            // Filter by current session
+            // Filter by current session and strip system messages
             let session_id = state.session_id.as_deref().unwrap_or("");
             let filtered: Vec<&ChatMessage> = new_msgs
                 .iter()
                 .filter(|m| m.session_id == session_id)
                 .collect();
+            let filtered = filter_for_agent(&filtered);
 
             if filtered.is_empty() {
                 return Ok(CallToolResult::success(vec![Content::text(

@@ -55,6 +55,7 @@ pub struct AppState {
     pub should_quit: bool,
     pub show_picker: bool,
     pub want_new_project: bool,
+    pub want_join_project: bool,
     pub want_reconnect: bool,
     pub muted: bool,
 
@@ -118,6 +119,7 @@ impl AppState {
             should_quit: false,
             show_picker: false,
             want_new_project: false,
+            want_join_project: false,
             want_reconnect: false,
             muted: false,
             chat_messages,
@@ -236,7 +238,8 @@ impl AppState {
         match cmd {
             "/help" | "/h" | "/?" => {
                 self.system_msg("/invite   — show room invite code  (/i)");
-                self.system_msg("/new      — create a new room             (/n)");
+                self.system_msg("/new      — create a new room      (/n)");
+                self.system_msg("/join     — join with invite code   (/j)");
                 self.system_msg("/chats    — switch between rooms");
                 self.system_msg("/name <n> — change display name");
                 self.system_msg("/color <#hex> — change your color");
@@ -268,6 +271,9 @@ impl AppState {
             }
             "/new" | "/n" => {
                 self.want_new_project = true;
+            }
+            "/join" | "/j" => {
+                self.want_join_project = true;
             }
             "/name" => {
                 if arg.is_empty() {
@@ -550,6 +556,9 @@ pub async fn run() -> Result<()> {
     let mut reconnecting = false;
     let mut connected_since: Option<tokio::time::Instant> = None;
 
+    // Check before ws connect adds system messages
+    let is_new_room = state.chat_messages.is_empty();
+
     if let Some(ref room) = room_config {
         match ws_client::connect_ws(
             &room.relay_url,
@@ -577,7 +586,7 @@ pub async fn run() -> Result<()> {
     }
 
     // New room: show invite code so user can share it
-    if state.chat_messages.is_empty() {
+    if is_new_room {
         if let Some(ref room) = room_config {
             if let Ok(code) = room.to_invite_code() {
                 state.system_msg(&format!("Invite code: {}", code));
@@ -813,6 +822,23 @@ pub async fn run() -> Result<()> {
             continue;
         }
 
+        // Handle /join — join a room with invite code
+        if state.want_join_project {
+            state.want_join_project = false;
+            tui::teardown(&mut terminal)?;
+
+            let switched = handle_join_project();
+            if !switched {
+                terminal = tui::setup()?;
+                event_stream = EventStream::new();
+                continue;
+            }
+
+            terminal = tui::setup()?;
+            event_stream = EventStream::new();
+            continue;
+        }
+
         // Handle project picker request (requires leaving TUI temporarily)
         if state.show_picker {
             state.show_picker = false;
@@ -927,6 +953,91 @@ fn handle_new_project() -> bool {
     }
 
     // Launch new tmux session and switch to it
+    if tmux::launch_or_attach(&path.to_string_lossy()).is_err() {
+        println!("  Error: Failed to launch tmux session.");
+        return false;
+    }
+
+    true
+}
+
+/// Handle /join command: prompt for invite code + path, init, launch new tmux session.
+fn handle_join_project() -> bool {
+    use crate::{init, onboarding, session, tmux};
+    use syncvibe_core::models::RoomConfig;
+
+    println!("\n  Join a SyncVibe room\n");
+    let code = match onboarding::prompt("  Paste invite code: ") {
+        Ok(c) if !c.is_empty() => c,
+        _ => {
+            println!("  Cancelled.");
+            return false;
+        }
+    };
+
+    let room = match RoomConfig::from_invite_code(&code) {
+        Ok(r) => r,
+        Err(e) => {
+            println!("  Invalid invite code: {}", e);
+            return false;
+        }
+    };
+
+    let path_str = match onboarding::prompt("  Project path: ") {
+        Ok(p) if !p.is_empty() => p,
+        _ => {
+            println!("  Cancelled.");
+            return false;
+        }
+    };
+
+    let path = std::path::Path::new(&path_str);
+    let path = if path_str.starts_with("~/") {
+        match dirs::home_dir() {
+            Some(home) => home.join(&path_str[2..]),
+            None => path.to_path_buf(),
+        }
+    } else {
+        path.to_path_buf()
+    };
+
+    if !path.exists() {
+        println!("  Directory doesn't exist. Creating...");
+        if let Err(e) = std::fs::create_dir_all(&path) {
+            println!("  Error: {}", e);
+            return false;
+        }
+    }
+
+    if !path.is_dir() {
+        println!("  Error: {} is not a directory.", path.display());
+        return false;
+    }
+
+    if !path.join(".git").exists() {
+        println!("  Initializing git repository...");
+        let status = std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(&path)
+            .status();
+        match status {
+            Ok(s) if s.success() => {}
+            _ => {
+                println!("  Error: Failed to initialize git repo.");
+                return false;
+            }
+        }
+    }
+
+    if session::ensure_user_profile().is_err() {
+        return false;
+    }
+
+    if init::perform_init(&path, Some(room)).is_err() {
+        println!("  Setup cancelled or failed.");
+        return false;
+    }
+
     if tmux::launch_or_attach(&path.to_string_lossy()).is_err() {
         println!("  Error: Failed to launch tmux session.");
         return false;

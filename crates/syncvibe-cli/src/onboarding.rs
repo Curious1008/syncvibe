@@ -21,25 +21,25 @@ const R: &str = "\x1b[0m";
 
 /// Print the SyncVibe splash banner (used on first launch).
 pub fn print_banner() {
+    const W: usize = 40;
+    let hr: String = "─".repeat(W);
+    let blank: String = " ".repeat(W);
+    // Pad a visible-width string to W columns
+    let pad = |used: usize| " ".repeat(W.saturating_sub(used));
+
     println!();
+    println!("  {DIM_TEAL}╭{hr}╮{R}");
+    println!("  {DIM_TEAL}│{R}{blank}{DIM_TEAL}│{R}");
     println!(
-        "  {DIM_TEAL}╭──────────────────────────────────────╮{R}"
+        "  {DIM_TEAL}│{R}      {TEAL}{B}S y n c V i b e{R}{}{DIM_TEAL}│{R}",
+        pad(6 + 15)
     );
     println!(
-        "  {DIM_TEAL}│{R}                                      {DIM_TEAL}│{R}"
+        "  {DIM_TEAL}│{R}      {DIM}collaborate in the terminal{R}{}{DIM_TEAL}│{R}",
+        pad(6 + 27)
     );
-    println!(
-        "  {DIM_TEAL}│{R}     {TEAL}◆{R}  {TEAL}{B}S y n c V i b e{R}              {DIM_TEAL}│{R}"
-    );
-    println!(
-        "  {DIM_TEAL}│{R}     {DIM}collaborate in the terminal{R}      {DIM_TEAL}│{R}"
-    );
-    println!(
-        "  {DIM_TEAL}│{R}                                      {DIM_TEAL}│{R}"
-    );
-    println!(
-        "  {DIM_TEAL}╰──────────────────────────────────────╯{R}"
-    );
+    println!("  {DIM_TEAL}│{R}{blank}{DIM_TEAL}│{R}");
+    println!("  {DIM_TEAL}╰{hr}╯{R}");
     println!();
 }
 

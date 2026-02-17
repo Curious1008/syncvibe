@@ -7,6 +7,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/help", "Show all commands"),
     ("/invite", "Show invite code"),
     ("/new", "Create a new room"),
+    ("/join", "Join with invite code"),
     ("/chats", "Switch between rooms"),
     ("/name", "Change display name"),
     ("/color", "Change chat color"),
