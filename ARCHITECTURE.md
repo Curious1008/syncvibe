@@ -68,6 +68,12 @@ syncvibe/
 - Message grouping by user, bell only on @mention (with debounce)
 - Chat truncation for performance (>5000 msgs → keep last 2000 in memory)
 
+### Status Bar & Presence
+- **Fixed positions**: current user (rightmost, bold with color) + agent indicator (`◆ Agent` in teal, when in tmux)
+- **Carousel rotation**: other online users rotate every 3 seconds when they don't all fit
+- **Dynamic width**: calculates available space, shows as many users as fit, `+N` indicator for hidden ones
+- **Online/offline indicator**: green `●` when connected, gray `○ offline` when disconnected
+
 ### tmux Integration
 - Auto-creates split layout: SyncVibe Chat (30%) | Claude Code (70%)
 - Ctrl+G to switch panes, styled pane borders

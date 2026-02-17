@@ -73,6 +73,13 @@ pub struct AppState {
 
     // Notification bell debounce
     last_bell: Option<std::time::Instant>,
+
+    // Presence carousel
+    pub presence_offset: usize,
+    last_presence_rotate: std::time::Instant,
+
+    // tmux mode (agent pane available)
+    pub in_tmux: bool,
 }
 
 impl AppState {
@@ -109,6 +116,9 @@ impl AppState {
             ws_client: None,
             is_online: false,
             last_bell: None,
+            presence_offset: 0,
+            last_presence_rotate: std::time::Instant::now(),
+            in_tmux: std::env::var("TMUX").is_ok(),
         })
     }
 
@@ -632,6 +642,13 @@ pub async fn run() -> Result<()> {
                         ws_alive_rx = None;
                         ws_rx = None;
                     }
+                }
+
+                // Presence carousel rotation (every 3 seconds)
+                let others_count = state.presence.iter().filter(|p| p.user_id != state.user.profile.user_id).count();
+                if others_count > 0 && state.last_presence_rotate.elapsed() >= Duration::from_secs(3) {
+                    state.presence_offset = (state.presence_offset + 1) % others_count;
+                    state.last_presence_rotate = std::time::Instant::now();
                 }
 
                 // Manual reconnect via /rc
