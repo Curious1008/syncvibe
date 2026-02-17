@@ -34,7 +34,7 @@ syncvibe/
 │   │       ├── network/
 │   │       │   └── ws_client.rs   # WebSocket client (tokio-tungstenite)
 │   │       ├── mcp/
-│   │       │   └── server.rs      # MCP server: 3 tools, 1 resource
+│   │       │   └── server.rs      # MCP server: read_chat tool
 │   │       └── git/
 │   │           └── ops.rs         # Git repo name detection
 │   │
@@ -42,7 +42,7 @@ syncvibe/
 │       └── src/
 │           ├── lib.rs
 │           ├── error.rs           # SyncVibeError enum
-│           ├── models/            # Data types (chat, plan, room, user)
+│           ├── models/            # Data types (chat, room, user)
 │           ├── protocol.rs        # WsMessage enum (WebSocket types)
 │           └── storage.rs         # .syncvibe/ file I/O (atomic writes, file locking)
 │
@@ -73,8 +73,7 @@ syncvibe/
 - Project switching between tmux sessions
 
 ### MCP Server
-- 3 tools: `read_plan`, `update_plan`, `read_chat`
-- 1 resource: `syncvibe://plan`
+- 1 tool: `read_chat` (smart filtered/incremental reads)
 - Injected via `.mcp.json` at init time
 
 ### Project Registry
@@ -86,15 +85,12 @@ syncvibe/
 ### What agents do natively (no MCP needed)
 - **Read chat**: `Read .syncvibe/chat-log.jsonl` — native file reading
 - **Send chat**: Append JSONL line to `.syncvibe/chat-log.jsonl` — native file writing
-- **Read plan**: `Read .syncvibe/plan.md` — native file reading
 
 All guided by CLAUDE.md instructions injected at `syncvibe init`.
 
-### What MCP adds (smart filtering only agents can't do natively)
+### What MCP adds (smart filtering agents can't do natively)
 | MCP Tool | Why it exists |
 |---|---|
-| `read_plan` | Returns plan + metadata (who edited, when, version) |
-| `update_plan` | Writes plan + updates metadata atomically |
 | `read_chat` | **Smart filtering**: session scoping, incremental reads, time-based — not possible with raw file read |
 
 ### What Claude Code provides natively
@@ -123,7 +119,6 @@ AI Agent → Writes .syncvibe/ files → Hook touches .updated → TUI file watc
 ### AI Agent ↔ AI Agent
 ```
 Agent A → Appends chat-log.jsonl → Agent B reads via MCP read_chat (incremental)
-Agent A → Updates plan.md → Agent B reads via MCP read_plan
 ```
 
 ## .syncvibe/ Directory
@@ -131,8 +126,6 @@ Agent A → Updates plan.md → Agent B reads via MCP read_plan
 ```
 .syncvibe/
 ├── room.json            # Room config (room_id, room_secret, relay_url)
-├── plan.md              # Shared plan (raw markdown)
-├── plan-meta.json       # Who edited, when, version
 ├── chat-log.jsonl       # Append-only, one JSON per line
 └── images/              # Shared images (UUID-named)
 ```
@@ -144,7 +137,7 @@ Agent A → Updates plan.md → Agent B reads via MCP read_plan
 1. **Local-first**: All state in `.syncvibe/`, gitignored. WebSocket relay is ephemeral for real-time sync.
 2. **JSONL for chat**: Append-only, no merge conflicts, advisory file locking for concurrent writes.
 3. **Atomic file writes**: Write to `.tmp`, then rename. Prevents partial reads.
-4. **3 MCP tools, not 7**: Only tools that add value beyond native file access. Chat sending handled via direct file append.
+4. **1 MCP tool, not many**: Only `read_chat` — adds value beyond native file access. Chat sending handled via direct file append.
 5. **Session auto-segmentation**: 30min silence → new session ID. MCP `read_chat` defaults to current session.
 6. **Offline-first**: TUI works fully with local files. WebSocket is optional.
 7. **Hooks integration**: `PostToolUse` hook signals TUI when agents modify `.syncvibe/` files.

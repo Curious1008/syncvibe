@@ -62,35 +62,6 @@ impl Storage {
         Ok(())
     }
 
-    // --- Plan ---
-
-    pub fn read_plan(&self) -> Result<String> {
-        let path = self.root.join("plan.md");
-        if !path.exists() {
-            return Ok(String::new());
-        }
-        Ok(fs::read_to_string(&path)?)
-    }
-
-    pub fn write_plan(&self, content: &str) -> Result<()> {
-        let path = self.root.join("plan.md");
-        atomic_write(&path, content)
-    }
-
-    pub fn read_plan_meta(&self) -> Result<Option<PlanMeta>> {
-        let path = self.root.join("plan-meta.json");
-        if !path.exists() {
-            return Ok(None);
-        }
-        let content = fs::read_to_string(&path)?;
-        Ok(Some(serde_json::from_str(&content)?))
-    }
-
-    pub fn write_plan_meta(&self, meta: &PlanMeta) -> Result<()> {
-        let path = self.root.join("plan-meta.json");
-        atomic_write(&path, &serde_json::to_string_pretty(meta)?)
-    }
-
     // --- Chat Log (JSONL) ---
 
     pub fn append_chat_message(&self, msg: &ChatMessage) -> Result<()> {
@@ -127,27 +98,6 @@ impl Storage {
             }
         }
         Ok(messages)
-    }
-
-    /// Read messages filtered by session_id
-    pub fn read_chat_by_session(&self, session_id: &str) -> Result<Vec<ChatMessage>> {
-        Ok(self
-            .read_chat_messages()?
-            .into_iter()
-            .filter(|m| m.session_id == session_id)
-            .collect())
-    }
-
-    /// Read messages since a given timestamp
-    pub fn read_chat_since(
-        &self,
-        since: chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<ChatMessage>> {
-        Ok(self
-            .read_chat_messages()?
-            .into_iter()
-            .filter(|m| m.timestamp >= since)
-            .collect())
     }
 
     // --- Images ---
@@ -342,24 +292,6 @@ mod tests {
         assert_eq!(msgs[49].content, "msg49");
     }
 
-    #[test]
-    fn chat_filter_by_session() {
-        let (_tmp, storage) = make_storage();
-        let mut m1 = make_msg("a");
-        m1.session_id = "s1".into();
-        let mut m2 = make_msg("b");
-        m2.session_id = "s2".into();
-        let mut m3 = make_msg("c");
-        m3.session_id = "s1".into();
-        storage.append_chat_message(&m1).unwrap();
-        storage.append_chat_message(&m2).unwrap();
-        storage.append_chat_message(&m3).unwrap();
-        let filtered = storage.read_chat_by_session("s1").unwrap();
-        assert_eq!(filtered.len(), 2);
-        assert_eq!(filtered[0].content, "a");
-        assert_eq!(filtered[1].content, "c");
-    }
-
     // ── Room Config ──
 
     #[test]
@@ -385,21 +317,6 @@ mod tests {
         let b = RoomConfig::new();
         assert_ne!(a.room_secret, b.room_secret);
         assert_ne!(a.room_id, b.room_id);
-    }
-
-    // ── Plan ──
-
-    #[test]
-    fn plan_empty_when_missing() {
-        let (_tmp, storage) = make_storage();
-        assert_eq!(storage.read_plan().unwrap(), "");
-    }
-
-    #[test]
-    fn plan_roundtrip() {
-        let (_tmp, storage) = make_storage();
-        storage.write_plan("# My Plan\n\n- Step 1").unwrap();
-        assert_eq!(storage.read_plan().unwrap(), "# My Plan\n\n- Step 1");
     }
 
     // ── Atomic Write ──

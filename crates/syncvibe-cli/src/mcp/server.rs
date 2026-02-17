@@ -5,16 +5,14 @@ use anyhow::Result;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    AnnotateAble, CallToolResult, Content, Implementation, ListResourcesResult,
-    PaginatedRequestParams, ProtocolVersion, RawResource, ReadResourceRequestParams,
-    ReadResourceResult, ResourceContents, ServerCapabilities, ServerInfo,
+    CallToolResult, Content, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo,
 };
-use rmcp::{tool, tool_handler, tool_router, ErrorData, RoleServer, ServerHandler, ServiceExt};
+use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler, ServiceExt};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tokio::sync::Mutex;
 
-use syncvibe_core::models::{ChatMessage, PlanMeta, UserConfig};
+use syncvibe_core::models::{ChatMessage, UserConfig};
 use syncvibe_core::storage::Storage;
 
 use crate::config;
@@ -25,14 +23,6 @@ pub struct SyncVibeMcp {
     user: UserConfig,
     last_read_index: Arc<Mutex<usize>>,
     tool_router: ToolRouter<Self>,
-}
-
-// Tool parameter types — only 3 tools now
-
-#[derive(Debug, Deserialize, JsonSchema)]
-struct UpdatePlanParams {
-    /// The new plan content (markdown)
-    content: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -56,57 +46,6 @@ impl SyncVibeMcp {
             last_read_index: Arc::new(Mutex::new(0)),
             tool_router: Self::tool_router(),
         }
-    }
-
-    #[tool(description = "Read the shared project plan (markdown). Returns plan content and metadata about who last edited it.")]
-    async fn read_plan(&self) -> Result<CallToolResult, ErrorData> {
-        let storage = self.storage.lock().await;
-        let content = storage.read_plan().map_err(|e| err(e.to_string()))?;
-        let meta = storage.read_plan_meta().map_err(|e| err(e.to_string()))?;
-
-        let mut result = content;
-        if let Some(meta) = meta {
-            result.push_str(&format!(
-                "\n\n---\nLast edited by {} at {} (v{})",
-                meta.last_edited_name,
-                meta.last_edited_at.format("%Y-%m-%d %H:%M UTC"),
-                meta.version
-            ));
-        }
-
-        Ok(CallToolResult::success(vec![Content::text(result)]))
-    }
-
-    #[tool(description = "Update the shared project plan. Replaces the entire plan content with the provided markdown.")]
-    async fn update_plan(
-        &self,
-        Parameters(params): Parameters<UpdatePlanParams>,
-    ) -> Result<CallToolResult, ErrorData> {
-        let storage = self.storage.lock().await;
-        storage
-            .write_plan(&params.content)
-            .map_err(|e| err(e.to_string()))?;
-
-        let mut meta = storage
-            .read_plan_meta()
-            .map_err(|e| err(e.to_string()))?
-            .unwrap_or_else(|| {
-                PlanMeta::new(
-                    self.user.profile.user_id.clone(),
-                    self.user.profile.name.clone(),
-                )
-            });
-        meta.update(
-            self.user.profile.user_id.clone(),
-            self.user.profile.name.clone(),
-        );
-        storage
-            .write_plan_meta(&meta)
-            .map_err(|e| err(e.to_string()))?;
-
-        Ok(CallToolResult::success(vec![Content::text(
-            "Plan updated successfully.",
-        )]))
     }
 
     #[tool(description = "Read recent chat messages with smart filtering. Defaults to current session only (incremental — returns only new messages since last read). Use 'all: true' for full history, or 'since' for time-based filtering.")]
@@ -166,15 +105,14 @@ impl ServerHandler for SyncVibeMcp {
             instructions: Some(
                 "SyncVibe: Terminal-native collaboration for vibe coding.\n\
                  \n\
-                 Tools: read_plan, update_plan, read_chat (with smart filtering).\n\
+                 Tool: read_chat (smart filtered/incremental reads).\n\
                  \n\
-                 For chat messages: append JSONL to .syncvibe/chat-log.jsonl directly, \
-                 or use read_chat for filtered/incremental reads."
+                 To send chat: append JSONL to .syncvibe/chat-log.jsonl directly.\n\
+                 See CLAUDE.md for message format."
                     .to_string(),
             ),
             capabilities: ServerCapabilities::builder()
                 .enable_tools()
-                .enable_resources()
                 .build(),
             server_info: Implementation {
                 name: "syncvibe".to_string(),
@@ -186,50 +124,6 @@ impl ServerHandler for SyncVibeMcp {
                 icons: None,
                 website_url: None,
             },
-        }
-    }
-
-    async fn list_resources(
-        &self,
-        _request: Option<PaginatedRequestParams>,
-        _context: rmcp::service::RequestContext<RoleServer>,
-    ) -> Result<ListResourcesResult, ErrorData> {
-        Ok(ListResourcesResult {
-            resources: vec![RawResource {
-                uri: "syncvibe://plan".to_string(),
-                name: "Project Plan".to_string(),
-                title: None,
-                description: Some(
-                    "The shared project plan in markdown format".to_string(),
-                ),
-                mime_type: Some("text/markdown".to_string()),
-                size: None,
-                icons: None,
-                meta: None,
-            }
-            .no_annotation()],
-            ..Default::default()
-        })
-    }
-
-    async fn read_resource(
-        &self,
-        request: ReadResourceRequestParams,
-        _context: rmcp::service::RequestContext<RoleServer>,
-    ) -> Result<ReadResourceResult, ErrorData> {
-        let storage = self.storage.lock().await;
-
-        match request.uri.as_str() {
-            "syncvibe://plan" => {
-                let content = storage.read_plan().map_err(|e| err(e.to_string()))?;
-                Ok(ReadResourceResult {
-                    contents: vec![ResourceContents::text(content, "syncvibe://plan")],
-                })
-            }
-            _ => Err(ErrorData::resource_not_found(
-                format!("Unknown resource: {}", request.uri),
-                None,
-            )),
         }
     }
 }

@@ -685,11 +685,6 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
             let _ = state.storage.append_chat_message(&msg);
             state.chat_messages.push(msg);
         }
-        WsMessage::PlanUpdated {
-            edited_name, ..
-        } => {
-            state.system_msg(&format!("{} updated the plan", edited_name));
-        }
         WsMessage::ConflictWarning { file, users } => {
             state.system_msg_typed(
                 &format!("Conflict: {} edited by {}", file, users.join(" and ")),

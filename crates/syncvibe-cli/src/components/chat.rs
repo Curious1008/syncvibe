@@ -249,10 +249,6 @@ fn format_message(msg: &ChatMessage, selected: bool, grouped: bool) -> Line<'sta
                 format!("{} {} * {}", prefix, time, msg.content),
                 Style::default().fg(Color::Green),
             )),
-            MessageType::TaskUpdate => Line::from(Span::styled(
-                format!("{} {} > {}", prefix, time, msg.content),
-                Style::default().fg(Color::Blue),
-            )),
             MessageType::ConflictWarning => Line::from(Span::styled(
                 format!("{} {} ! {}", prefix, time, msg.content),
                 Style::default()

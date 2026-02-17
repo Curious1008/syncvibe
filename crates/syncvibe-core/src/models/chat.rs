@@ -8,7 +8,6 @@ pub enum MessageType {
     System,
     Image,
     GitCommit,
-    TaskUpdate,
     ConflictWarning,
     Tip,
 }

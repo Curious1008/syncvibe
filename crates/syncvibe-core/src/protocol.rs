@@ -35,13 +35,6 @@ pub enum WsMessage {
         user_id: String,
     },
 
-    // Plan
-    PlanUpdated {
-        content: String,
-        edited_by: String,
-        edited_name: String,
-    },
-
     // Git
     GitStatus {
         user_id: String,

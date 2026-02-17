@@ -17,10 +17,6 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
     };
     let room = room.unwrap_or_else(RoomConfig::new);
     storage.write_room_config(&room)?;
-    // Only write blank plan if it doesn't exist yet
-    if storage.read_plan().unwrap_or_default().is_empty() {
-        storage.write_plan("")?;
-    }
 
     setup_gitignore(cwd)?;
     setup_mcp_json(cwd)?;
@@ -106,17 +102,12 @@ fn setup_claude_md(cwd: &std::path::Path) -> Result<()> {
 This project uses SyncVibe for team coordination. All shared state lives in `.syncvibe/`.
 
 ### Before starting work
-- Read `.syncvibe/plan.md` for the shared project plan.
 - Read `.syncvibe/chat-log.jsonl` (last 20 lines) for recent team discussions.
 
 ### Chat
 - Chat is append-only JSONL in `.syncvibe/chat-log.jsonl`. One JSON object per line.
 - To send a message: append a line with `{"id":"<uuid>","user_id":"...","user_name":"...","user_color":"...","content":"...","message_type":"user","thread_id":null,"session_id":"...","timestamp":"..."}`.
 - If SyncVibe MCP server is available, use `read_chat` for smart filtered/incremental reads.
-
-### Plan
-- If SyncVibe MCP server is available, use `read_plan`/`update_plan` tools (they handle metadata tracking).
-- Otherwise, read/write `.syncvibe/plan.md` directly.
 "#;
     if claude_md_path.exists() {
         let content = std::fs::read_to_string(&claude_md_path)?;
