@@ -10,6 +10,55 @@ use syncvibe_core::models::{ChatMessage, MessageType};
 use crate::app::{AppState, Panel};
 use crate::components::util::parse_hex_color;
 
+/// Parse message content into spans, highlighting @mentions.
+fn parse_mentions(content: &str, default_style: Style) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let mut remaining = content;
+
+    while let Some(at_pos) = remaining.find('@') {
+        // Add text before the @
+        if at_pos > 0 {
+            spans.push(Span::styled(
+                remaining[..at_pos].to_string(),
+                default_style,
+            ));
+        }
+
+        // Extract the @mention (letters, digits, hyphens, underscores)
+        let after_at = &remaining[at_pos + 1..];
+        let mention_len = after_at
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+            .count();
+
+        if mention_len == 0 {
+            // Bare @ with no name
+            spans.push(Span::styled("@".to_string(), default_style));
+            remaining = &remaining[at_pos + 1..];
+        } else {
+            let mention = &remaining[at_pos..at_pos + 1 + mention_len];
+            spans.push(Span::styled(
+                mention.to_string(),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            remaining = &remaining[at_pos + 1 + mention_len..];
+        }
+    }
+
+    // Add remaining text
+    if !remaining.is_empty() {
+        spans.push(Span::styled(remaining.to_string(), default_style));
+    }
+
+    if spans.is_empty() {
+        spans.push(Span::styled(content.to_string(), default_style));
+    }
+
+    spans
+}
+
 /// A renderable line item — either a message or a date separator
 enum ChatLine {
     Message { idx: usize },
@@ -197,19 +246,18 @@ fn format_message(msg: &ChatMessage, selected: bool, grouped: bool) -> Line<'sta
 
     let mut line = if grouped {
         // Grouped: no timestamp/name, just indented content
-        Line::from(vec![
-            Span::styled(
-                format!("{}        ", prefix),
-                Style::default().fg(Color::DarkGray),
-            ),
-            Span::styled(msg.content.clone(), Style::default().fg(Color::Reset)),
-        ])
+        let mut spans = vec![Span::styled(
+            format!("{}        ", prefix),
+            Style::default().fg(Color::DarkGray),
+        )];
+        spans.extend(parse_mentions(&msg.content, Style::default().fg(Color::Reset)));
+        Line::from(spans)
     } else {
         let time = msg.timestamp.format("%H:%M").to_string();
         match msg.message_type {
             MessageType::User => {
                 let color = parse_hex_color(&msg.user_color);
-                Line::from(vec![
+                let mut spans = vec![
                     Span::styled(
                         format!("{} {} ", prefix, time),
                         Style::default().fg(Color::DarkGray),
@@ -218,8 +266,9 @@ fn format_message(msg: &ChatMessage, selected: bool, grouped: bool) -> Line<'sta
                         format!("{}: ", msg.user_name),
                         Style::default().fg(color).add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(msg.content.clone(), Style::default().fg(Color::Reset)),
-                ])
+                ];
+                spans.extend(parse_mentions(&msg.content, Style::default().fg(Color::Reset)));
+                Line::from(spans)
             }
             MessageType::Image => {
                 let color = parse_hex_color(&msg.user_color);

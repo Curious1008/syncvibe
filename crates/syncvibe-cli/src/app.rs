@@ -29,7 +29,8 @@ const MAX_DISPLAY_MESSAGES: usize = 2000;
 const TIPS: &[&str] = &[
     "Tip: /invite (/i) shows your room's invite code — share it to add teammates",
     "Tip: /projects (/p) lets you switch between SyncVibe rooms",
-    "Tip: /mute (/m) toggles the notification bell — handy in meetings",
+    "Tip: /mute (/m) toggles the @mention notification bell",
+    "Tip: @agent <task> sends a task directly to Claude Code — no pane switching needed",
     "Tip: Drop a file path into chat to share images with your team",
     "Tip: /clear wipes the chat view — messages stay safe on disk",
     "Tip: AI agents auto-read this chat before starting work — just discuss here, then assign tasks",
@@ -198,10 +199,13 @@ impl AppState {
                 self.system_msg("/projects — switch between rooms   (/p)");
                 self.system_msg("/name <n> — change display name");
                 self.system_msg("/color <#hex> — change your color");
-                self.system_msg("/mute     — toggle notification bell  (/m)");
+                self.system_msg("/mute     — toggle @mention bell     (/m)");
                 self.system_msg("/clear    — clear chat view");
                 self.system_msg("/rc       — reconnect to relay");
                 self.system_msg("/quit     — exit SyncVibe  (/q)");
+                self.system_msg("");
+                self.system_msg("@name     — mention a teammate (highlights + bell)");
+                self.system_msg("@agent    — send task directly to Claude Code");
             }
             "/invite" | "/i" => {
                 match self.storage.read_room_config() {
@@ -345,6 +349,11 @@ impl AppState {
             )
         };
 
+        // Detect @agent mention — send message to agent pane via tmux
+        if msg.message_type == MessageType::User {
+            self.handle_agent_mention(&msg);
+        }
+
         self.storage.append_chat_message(&msg)?;
         self.chat_messages.push(msg.clone());
         self.input_buffer.clear();
@@ -359,6 +368,42 @@ impl AppState {
         }
 
         Ok(())
+    }
+
+    /// If message contains @agent, extract the instruction and send it to the
+    /// Claude Code tmux pane via send-keys.
+    fn handle_agent_mention(&self, msg: &ChatMessage) {
+        let content = &msg.content;
+        // Match @agent, @claude, @claude-code (case insensitive)
+        let agent_patterns = ["@agent", "@claude-code", "@claude"];
+        let content_lower = content.to_lowercase();
+        let mut instruction = None;
+
+        for pattern in &agent_patterns {
+            if let Some(pos) = content_lower.find(pattern) {
+                let after = &content[pos + pattern.len()..].trim();
+                if !after.is_empty() {
+                    instruction = Some(after.to_string());
+                } else {
+                    // Just "@agent" with no message — send a generic read prompt
+                    instruction = Some(
+                        "Read .syncvibe/chat-digest.md to understand the team's current discussion"
+                            .to_string(),
+                    );
+                }
+                break;
+            }
+        }
+
+        if let Some(text) = instruction {
+            let session_name = format!("sv-{}", self.project_name);
+            let agent_pane = format!("{}:0.1", session_name);
+            // Fire and forget — don't block the TUI
+            let _ = std::process::Command::new("tmux")
+                .args(["send-keys", "-t", &agent_pane, &text, "Enter"])
+                .env_remove("TMUX")
+                .spawn();
+        }
     }
 
     /// Open the currently selected image message
@@ -681,7 +726,10 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
             if state.chat_messages.iter().any(|m| m.id == msg.id) {
                 return;
             }
-            state.ring_bell();
+            // Only ring bell when current user is @mentioned
+            if msg.content.to_lowercase().contains(&format!("@{}", state.user.profile.name.to_lowercase())) {
+                state.ring_bell();
+            }
             let _ = state.storage.append_chat_message(&msg);
             state.chat_messages.push(msg);
         }

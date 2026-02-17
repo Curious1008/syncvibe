@@ -63,8 +63,9 @@ syncvibe/
 ### TUI Chat
 - Real-time chat with presence indicators
 - Slash commands: `/help` (`/?`), `/invite` (`/i`), `/projects` (`/p`), `/name`, `/color`, `/mute` (`/m`), `/clear`, `/rc`, `/quit` (`/q`)
+- **@mentions**: `@name` highlights + bell notification; `@agent` / `@claude` sends task directly to Claude Code pane via tmux send-keys
 - Image sharing (drag path into input)
-- Message grouping by user, bell notifications with debounce
+- Message grouping by user, bell only on @mention (with debounce)
 - Chat truncation for performance (>5000 msgs → keep last 2000 in memory)
 
 ### tmux Integration
