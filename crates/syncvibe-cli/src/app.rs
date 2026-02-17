@@ -457,17 +457,17 @@ impl AppState {
             msg.quote = self.pending_quote.take();
         }
 
-        // Detect @agent mention — send message to agent pane via tmux
-        if msg.message_type == MessageType::User {
-            self.handle_agent_mention(&msg);
-        }
-
         self.storage.append_chat_message(&msg)?;
         self.disk_msg_count += 1;
         self.chat_messages.push(msg.clone());
         self.input_buffer.clear();
         self.input_cursor = 0;
         self.chat_selected = None;
+
+        // Detect @agent mention — show confirmation AFTER the message
+        if msg.message_type == MessageType::User {
+            self.handle_agent_mention(&msg);
+        }
 
         if let Some(ws) = self.ws_client.clone() {
             let ws_msg = WsMessage::ChatMessage(msg);
@@ -493,7 +493,7 @@ impl AppState {
             .any(|p| content_lower.contains(p));
 
         if has_agent {
-            self.system_msg("Highlighted for agent — Claude will prioritize this message");
+            self.system_msg("\u{26a1} Highlighted for agent — Claude will prioritize this message");
         }
     }
 
