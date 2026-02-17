@@ -22,12 +22,15 @@ pub fn ensure_user_profile() -> Result<UserConfig> {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_default();
 
-    println!("\n  Welcome to SyncVibe! \u{2728}\n");
+    onboarding::print_banner();
 
     let raw_name = if git_name.is_empty() {
-        onboarding::prompt("  Your name: ")?
+        onboarding::prompt("  \x1b[38;2;78;205;196mYour name:\x1b[0m ")?
     } else {
-        onboarding::prompt_with_default("  Your name", &git_name)?
+        onboarding::prompt_with_default(
+            "  \x1b[38;2;78;205;196mYour name\x1b[0m",
+            &git_name,
+        )?
     };
     let name = onboarding::sanitize_name(&raw_name);
 
@@ -44,7 +47,10 @@ pub fn ensure_user_profile() -> Result<UserConfig> {
     let user_config = UserConfig::new(name.clone(), color);
     config::save_user_config(&user_config)?;
 
-    println!("  Profile saved! ({})\n", name);
+    println!(
+        "  \x1b[38;2;80;200;120m✓\x1b[0m Profile saved \x1b[38;2;100;100;115m({})\x1b[0m\n",
+        name
+    );
     Ok(user_config)
 }
 
@@ -95,6 +101,7 @@ pub fn cmd_session() -> Result<()> {
         });
     }
 
+    onboarding::print_section("Choose a room");
     println!();
     let choice = onboarding::select_menu(&menu_items)?;
 
@@ -112,7 +119,9 @@ pub fn cmd_session() -> Result<()> {
                 tmux::launch_project(&cwd)
             } else {
                 // Join with invite code
-                let code = onboarding::prompt("  Paste invite code: ")?;
+                let code = onboarding::prompt(
+                    "  \x1b[38;2;78;205;196mPaste invite code:\x1b[0m ",
+                )?;
                 let room =
                     RoomConfig::from_invite_code(&code).map_err(|e| anyhow::anyhow!(e))?;
                 init::perform_init(&cwd, Some(room))?;

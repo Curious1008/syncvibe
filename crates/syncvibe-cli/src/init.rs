@@ -75,8 +75,9 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
     }
 
     // Show header
-    println!("\n  SyncVibe Setup\n");
-    println!("  Select what to set up for this project:\n");
+    println!();
+    onboarding::print_section("Room Setup");
+    println!("  \x1b[38;2;155;155;170mSelect what to set up for this project:\x1b[0m\n");
 
     let confirmed = onboarding::confirm_setup(&mut items)?;
     if !confirmed {
@@ -105,17 +106,31 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
 
     // Print summary
     println!();
+    println!(
+        "  \x1b[38;2;50;100;95m──────────────────────────────────────\x1b[0m"
+    );
     for item in &items {
         if item.already_done {
             continue;
         }
         if item.checked {
-            println!("  \x1b[32m✓\x1b[0m {}", item.file);
+            println!(
+                "  \x1b[38;2;80;200;120m✓\x1b[0m \x1b[38;2;225;225;235m{}\x1b[0m",
+                item.file
+            );
         } else {
-            println!("  \x1b[90m- {} (skipped)\x1b[0m", item.file);
+            println!(
+                "  \x1b[38;2;100;100;115m- {} (skipped)\x1b[0m",
+                item.file
+            );
         }
     }
-    println!();
+    println!(
+        "  \x1b[38;2;50;100;95m──────────────────────────────────────\x1b[0m"
+    );
+    println!(
+        "\n  \x1b[38;2;78;205;196m◆\x1b[0m \x1b[38;2;80;200;120mRoom ready!\x1b[0m\n"
+    );
 
     Ok(room)
 }
