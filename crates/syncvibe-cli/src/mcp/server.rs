@@ -41,40 +41,68 @@ struct ReadChatParams {
     all: Option<bool>,
     /// Only return messages after this ISO 8601 timestamp
     since: Option<String>,
-    /// Maximum number of messages to return (most recent N). Safety cap: 200
-    limit: Option<usize>,
     /// Output format: "compact" (default, token-efficient) or "json" (full structured data)
     format: Option<String>,
 }
 
-/// Max messages to return without explicit limit — safety cap for context window
-const MAX_MESSAGES: usize = 200;
+/// Threshold: above this many messages, write digest file instead of inline
+const DIGEST_THRESHOLD: usize = 30;
 
 fn err(msg: String) -> ErrorData {
     ErrorData::internal_error(msg, None)
 }
 
-/// Format messages in compact human-readable form.
+/// Format a single message line (without name/time prefix, for grouped output).
+fn format_message_body(m: &ChatMessage) -> String {
+    match m.message_type {
+        MessageType::User => m.content.clone(),
+        MessageType::Image => {
+            let filename = m.content.split('\n').nth(1).unwrap_or("image");
+            format!("[Image: {}]", filename)
+        }
+        MessageType::System => format!("-- {} --", m.content),
+        MessageType::GitCommit => format!("* {}", m.content),
+        MessageType::ConflictWarning => format!("⚠ {}", m.content),
+        MessageType::Tip => format!("💡 {}", m.content),
+    }
+}
+
+/// Format messages in compact grouped form.
+/// Consecutive messages from the same user are grouped under one header.
 fn format_compact(msgs: &[&ChatMessage]) -> String {
-    msgs.iter()
-        .map(|m| {
-            let time = m.timestamp.with_timezone(&Local).format("%H:%M");
-            match m.message_type {
-                MessageType::User => format!("[{}] {}: {}", time, m.user_name, m.content),
-                MessageType::Image => {
-                    let filename = m.content.split('\n').nth(1).unwrap_or("image");
-                    format!("[{}] {} [Image: {}]", time, m.user_name, filename)
-                }
-                MessageType::System => format!("[{}] -- {} --", time, m.content),
-                MessageType::GitCommit => format!("[{}] * {}", time, m.content),
-                MessageType::ConflictWarning => {
-                    format!("[{}] ⚠ {}", time, m.content)
-                }
-                MessageType::Tip => format!("  💡 {}", m.content),
+    if msgs.is_empty() {
+        return String::new();
+    }
+
+    let mut lines = Vec::new();
+    let mut i = 0;
+    while i < msgs.len() {
+        let m = msgs[i];
+        let time = m.timestamp.with_timezone(&Local).format("%H:%M");
+
+        // Collect consecutive messages from same user
+        let mut group = vec![format_message_body(m)];
+        let mut j = i + 1;
+        while j < msgs.len() && msgs[j].user_name == m.user_name {
+            group.push(format_message_body(msgs[j]));
+            j += 1;
+        }
+
+        if group.len() == 1 {
+            // Single message — inline format
+            lines.push(format!("[{}] {}: {}", time, m.user_name, group[0]));
+        } else {
+            // Grouped — header + indented lines
+            lines.push(format!("[{}] {}:", time, m.user_name));
+            for line in &group {
+                lines.push(format!("  {}", line));
             }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+        }
+
+        i = j;
+    }
+
+    lines.join("\n")
 }
 
 /// Extract unique participant names from messages (user messages only).
@@ -89,17 +117,6 @@ fn collect_participants(msgs: &[&ChatMessage]) -> Vec<String> {
     names
 }
 
-/// Apply a limit: keep the last N messages.
-fn tail<'a>(msgs: Vec<&'a ChatMessage>, limit: usize) -> (Vec<&'a ChatMessage>, usize) {
-    let total = msgs.len();
-    if total <= limit {
-        (msgs, 0)
-    } else {
-        let skipped = total - limit;
-        (msgs[skipped..].to_vec(), skipped)
-    }
-}
-
 /// Format the output, choosing compact or json based on params.
 fn format_output(msgs: &[&ChatMessage], is_json: bool) -> std::result::Result<String, ErrorData> {
     if is_json {
@@ -107,6 +124,84 @@ fn format_output(msgs: &[&ChatMessage], is_json: bool) -> std::result::Result<St
     } else {
         Ok(format_compact(msgs))
     }
+}
+
+/// Build a time range string like "14:00 – 15:32 (1h32m)".
+fn time_range(msgs: &[&ChatMessage]) -> String {
+    if msgs.is_empty() {
+        return String::new();
+    }
+    let first = msgs.first().unwrap().timestamp.with_timezone(&Local);
+    let last = msgs.last().unwrap().timestamp.with_timezone(&Local);
+    let duration = last - first;
+    let mins = duration.num_minutes();
+    let duration_str = if mins < 1 {
+        "<1m".to_string()
+    } else if mins < 60 {
+        format!("{}m", mins)
+    } else {
+        format!("{}h{}m", mins / 60, mins % 60)
+    };
+    format!(
+        "{} – {} ({})",
+        first.format("%H:%M"),
+        last.format("%H:%M"),
+        duration_str
+    )
+}
+
+/// Count messages per participant, sorted by count descending.
+fn participant_stats(msgs: &[&ChatMessage]) -> Vec<(String, usize)> {
+    let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for m in msgs {
+        if m.message_type == MessageType::User {
+            *counts.entry(&m.user_name).or_default() += 1;
+        }
+    }
+    let mut stats: Vec<(String, usize)> = counts
+        .into_iter()
+        .map(|(name, count)| (name.to_string(), count))
+        .collect();
+    stats.sort_by(|a, b| b.1.cmp(&a.1));
+    stats
+}
+
+/// Build the response: inline for small chats, digest file for large ones.
+/// Returns the tool response text.
+fn build_response(
+    msgs: &[&ChatMessage],
+    header: &str,
+    is_json: bool,
+    storage: &Storage,
+) -> std::result::Result<String, ErrorData> {
+    if msgs.len() < DIGEST_THRESHOLD {
+        // Small: inline everything
+        let body = format_output(msgs, is_json)?;
+        return Ok(format!("{}{}", header, body));
+    }
+
+    // Large: write full content to digest file, return brief response
+    let body = format_output(msgs, is_json)?;
+    let digest_content = format!("{}{}", header, body);
+    storage
+        .write_chat_digest(&digest_content)
+        .map_err(|e| err(e.to_string()))?;
+
+    let stats = participant_stats(msgs);
+    let participants = stats
+        .iter()
+        .map(|(name, count)| format!("{}({})", name, count))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let range = time_range(msgs);
+
+    Ok(format!(
+        "── {} msgs · {} · {} ──\nFull conversation: {}\nUse Read tool on the file above to understand the full context.",
+        msgs.len(),
+        participants,
+        range,
+        storage.chat_digest_relative_path(),
+    ))
 }
 
 #[tool_router]
@@ -125,7 +220,7 @@ impl SyncVibeMcp {
         }
     }
 
-    #[tool(description = "Read chat messages. Call with no parameters for smart defaults: returns current session messages (compact, token-efficient format), then only new messages on subsequent calls. Use 'all: true' for full history, 'since' for time-based, 'limit' to cap results, 'format: json' for structured data.")]
+    #[tool(description = "Read chat messages. Call with no parameters for smart defaults: returns current session messages, then only new messages on subsequent calls. For large conversations, full content is written to .syncvibe/chat-digest.md — use Read tool to access it. Use 'all: true' for full history, 'since' for time-based filtering.")]
     async fn read_chat(
         &self,
         Parameters(params): Parameters<ReadChatParams>,
@@ -133,31 +228,16 @@ impl SyncVibeMcp {
         let storage = self.storage.lock().await;
         let is_json = params.format.as_deref() == Some("json");
 
-        // --- Explicit modes: all / since (always full file read) ---
+        // --- Explicit modes: all / since ---
 
         if params.all.unwrap_or(false) {
             let all = storage
                 .read_chat_messages()
                 .map_err(|e| err(e.to_string()))?;
             let refs: Vec<&ChatMessage> = all.iter().collect();
-            let (display, skipped) = match params.limit {
-                Some(n) => tail(refs, n),
-                None => (refs, 0),
-            };
-            let body = format_output(&display, is_json)?;
-            let header = format!(
-                "── all: {} messages{} ──\n",
-                all.len(),
-                if skipped > 0 {
-                    format!(" (showing last {})", display.len())
-                } else {
-                    String::new()
-                }
-            );
-            return Ok(CallToolResult::success(vec![Content::text(format!(
-                "{}{}",
-                header, body
-            ))]));
+            let header = format!("── all: {} messages ──\n", all.len());
+            let text = build_response(&refs, &header, is_json, &storage)?;
+            return Ok(CallToolResult::success(vec![Content::text(text)]));
         }
 
         if let Some(ref since_str) = params.since {
@@ -171,31 +251,14 @@ impl SyncVibeMcp {
                 .map_err(|e| err(e.to_string()))?;
             let refs: Vec<&ChatMessage> =
                 all.iter().filter(|m| m.timestamp >= since).collect();
-            let (display, skipped) = match params.limit {
-                Some(n) => tail(refs, n),
-                None => (refs, 0),
-            };
-            let body = format_output(&display, is_json)?;
-            let header = format!(
-                "── since {}: {} messages{} ──\n",
-                since_str,
-                display.len() + skipped,
-                if skipped > 0 {
-                    format!(" (showing last {})", display.len())
-                } else {
-                    String::new()
-                }
-            );
-            return Ok(CallToolResult::success(vec![Content::text(format!(
-                "{}{}",
-                header, body
-            ))]));
+            let header = format!("── since {}: {} messages ──\n", since_str, refs.len());
+            let text = build_response(&refs, &header, is_json, &storage)?;
+            return Ok(CallToolResult::success(vec![Content::text(text)]));
         }
 
         // --- Default: smart incremental, current session ---
 
         let mut state = self.state.lock().await;
-        let limit = params.limit.unwrap_or(MAX_MESSAGES);
 
         if state.byte_offset == 0 {
             // First read: full scan to determine session, then record offset
@@ -222,29 +285,18 @@ impl SyncVibeMcp {
                 )]));
             }
 
-            let (display, skipped) = tail(session_msgs, limit);
-            let body = format_output(&display, is_json)?;
-
             let participants = if state.participants.is_empty() {
                 "no activity".to_string()
             } else {
                 state.participants.join(", ")
             };
-            let mut header = format!(
+            let header = format!(
                 "── session: {} msgs · {} ──\n",
                 state.total_read, participants
             );
-            if skipped > 0 {
-                header.push_str(&format!(
-                    "({} earlier — use read_chat(all: true) for full history)\n",
-                    skipped
-                ));
-            }
+            let text = build_response(&session_msgs, &header, is_json, &storage)?;
 
-            Ok(CallToolResult::success(vec![Content::text(format!(
-                "{}{}",
-                header, body
-            ))]))
+            Ok(CallToolResult::success(vec![Content::text(text)]))
         } else {
             // Incremental: only read bytes appended since last call
             let (new_msgs, new_offset) = storage
@@ -280,12 +332,9 @@ impl SyncVibeMcp {
             }
             state.total_read += filtered.len();
 
-            let (display, _) = match params.limit {
-                Some(n) => tail(filtered, n),
-                None => (filtered, 0),
-            };
-            let body = format_output(&display, is_json)?;
-            let header = format!("── {} new ──\n", display.len());
+            // Incremental reads are typically small, always inline
+            let body = format_output(&filtered, is_json)?;
+            let header = format!("── {} new ──\n", filtered.len());
 
             Ok(CallToolResult::success(vec![Content::text(format!(
                 "{}{}",
@@ -304,9 +353,11 @@ impl ServerHandler for SyncVibeMcp {
                 "SyncVibe: Terminal-native collaboration for vibe coding.\n\
                  \n\
                  Tool: read_chat — call with no parameters for smart defaults.\n\
-                 Returns current session messages in compact format, then only new\n\
-                 messages on subsequent calls. Use 'all: true' for full history,\n\
-                 'format: json' for structured data.\n\
+                 For small conversations, messages are returned inline.\n\
+                 For larger conversations (30+ messages), full content is written to\n\
+                 .syncvibe/chat-digest.md — use Read tool on that file to understand\n\
+                 the full conversation context and direction.\n\
+                 Subsequent calls return only new messages (incremental).\n\
                  \n\
                  To send chat: append JSONL to .syncvibe/chat-log.jsonl directly.\n\
                  See CLAUDE.md for message format."

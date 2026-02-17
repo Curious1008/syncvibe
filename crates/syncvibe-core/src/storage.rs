@@ -136,6 +136,20 @@ impl Storage {
         fs::metadata(&path).map(|m| m.len()).unwrap_or(0)
     }
 
+    // --- Digest ---
+
+    /// Write chat digest markdown to .syncvibe/chat-digest.md (atomic write)
+    pub fn write_chat_digest(&self, content: &str) -> Result<PathBuf> {
+        let path = self.root.join("chat-digest.md");
+        atomic_write(&path, content)?;
+        Ok(path)
+    }
+
+    /// Return the project-relative path of the digest file
+    pub fn chat_digest_relative_path(&self) -> String {
+        ".syncvibe/chat-digest.md".to_string()
+    }
+
     // --- Images ---
 
     /// Save an image file into .syncvibe/images/, return the relative path
