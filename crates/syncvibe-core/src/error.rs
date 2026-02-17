@@ -8,20 +8,11 @@ pub enum SyncVibeError {
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
 
-    #[error("TOML deserialize error: {0}")]
-    TomlDeserialize(#[from] toml::de::Error),
-
-    #[error("TOML serialize error: {0}")]
-    TomlSerialize(#[from] toml::ser::Error),
-
     #[error("Not in a SyncVibe room (no .syncvibe/ directory found)")]
     NotInRoom,
 
     #[error("Room already initialized")]
     RoomAlreadyExists,
-
-    #[error("Not in a git repository")]
-    NotInGitRepo,
 
     #[error("User config not found. Run `syncvibe join` first.")]
     NoUserConfig,

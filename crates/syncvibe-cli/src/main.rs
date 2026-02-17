@@ -187,7 +187,7 @@ fn cmd_status() -> Result<()> {
     let messages = storage.read_chat_messages().unwrap_or_default();
     let project_name = crate::git::ops::repo_name().unwrap_or_else(|_| "project".to_string());
 
-    let short_id = &room.room_id[..8];
+    let short_id = if room.room_id.len() >= 8 { &room.room_id[..8] } else { &room.room_id };
     println!(
         "  {} · room:{} · {} messages",
         project_name,

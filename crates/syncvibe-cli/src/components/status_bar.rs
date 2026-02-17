@@ -2,6 +2,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
+use unicode_width::UnicodeWidthStr;
 
 use crate::app::AppState;
 use crate::components::util::parse_hex_color;
@@ -40,13 +41,13 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
     // 1. Always show current user
     let me_text = format!(" ● {} ", state.user.profile.name);
     let you_text = "(you) ";
-    presence_len += me_text.len() + you_text.len();
+    presence_len += me_text.width() + you_text.width();
     let me_color = parse_hex_color(&state.user.profile.color);
 
     // 2. Agent indicator (if in tmux)
     let agent_text = " ◆ Agent ";
     if state.in_tmux {
-        presence_len += agent_text.len();
+        presence_len += agent_text.width();
     }
 
     // 3. Other users — carousel
@@ -57,7 +58,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
         .collect();
 
     // Calculate how much space is left for other users
-    let left_used = 12 + state.project_name.len() + 3 + if state.is_online { 2 } else { 10 };
+    let left_used = 12 + state.project_name.width() + 3 + if state.is_online { 2 } else { 10 };
     let spacer_min = 2; // at least some separator
     let available_for_others = width
         .saturating_sub(left_used)
@@ -74,7 +75,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
             let idx = (state.presence_offset + i) % count;
             let p = others[idx];
             let entry_text = format!(" ● {} ", p.user_name);
-            let entry_len = entry_text.len();
+            let entry_len = entry_text.width();
 
             // Reserve space for "+N" indicator if there are more
             let remaining_after = available_for_others.saturating_sub(others_used + entry_len);
@@ -93,7 +94,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
     let hidden_count = others.len().saturating_sub(visible_others.len());
     if hidden_count > 0 {
         let indicator = format!("+{} ", hidden_count);
-        others_used += indicator.len();
+        others_used += indicator.width();
     }
 
     // Spacer

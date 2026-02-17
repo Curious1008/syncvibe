@@ -5,6 +5,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use unicode_width::UnicodeWidthChar;
 
 use crate::app::{AppState, Panel};
+use crate::components::util::truncate_str;
 
 pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
     let is_focused = state.focus == Panel::Input;
@@ -16,12 +17,8 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
 
     // Show quote preview in title
     if let Some(ref q) = state.pending_quote {
-        let max_len = area.width.saturating_sub(12) as usize;
-        let preview = if q.content.len() > max_len {
-            format!("{}...", &q.content[..max_len.saturating_sub(3)])
-        } else {
-            q.content.clone()
-        };
+        let max_chars = area.width.saturating_sub(12) as usize;
+        let preview = truncate_str(&q.content, max_chars);
         block = block.title(Line::from(vec![
             Span::styled(
                 format!(" ↩ {}: ", q.user_name),

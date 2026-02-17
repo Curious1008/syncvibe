@@ -36,6 +36,7 @@ impl Storage {
             return Err(SyncVibeError::RoomAlreadyExists);
         }
         fs::create_dir_all(&root)?;
+        set_private_dir_permissions(&root);
         Ok(Self { root })
     }
 
@@ -44,7 +45,7 @@ impl Storage {
     }
 
     pub fn project_root(&self) -> &Path {
-        self.root.parent().unwrap()
+        self.root.parent().unwrap_or(&self.root)
     }
 
     // --- Room Config ---
@@ -67,10 +68,14 @@ impl Storage {
     pub fn append_chat_message(&self, msg: &ChatMessage) -> Result<()> {
         let path = self.root.join("chat-log.jsonl");
         let line = serde_json::to_string(msg)?;
+        let created = !path.exists();
         let mut file = fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(&path)?;
+        if created {
+            set_private_permissions(&path);
+        }
         // Advisory file lock to prevent concurrent write corruption
         file.lock_exclusive()?;
         writeln!(file, "{}", line)?;
@@ -188,6 +193,16 @@ fn set_private_permissions(path: &Path) {
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+    }
+    let _ = path;
+}
+
+/// Set directory to owner-only (0700) on Unix
+fn set_private_dir_permissions(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o700));
     }
     let _ = path;
 }

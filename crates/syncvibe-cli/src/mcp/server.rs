@@ -69,6 +69,7 @@ fn format_message_body(m: &ChatMessage) -> String {
         MessageType::GitCommit => format!("* {}", m.content),
         MessageType::ConflictWarning => format!("⚠ {}", m.content),
         MessageType::Tip => format!("💡 {}", m.content),
+        MessageType::Unknown => m.content.clone(),
     };
     format!("{}{}", quote_prefix, body)
 }
@@ -367,8 +368,9 @@ impl ServerHandler for SyncVibeMcp {
                  - Large conversations (30+): full content in .syncvibe/chat-digest.md.\n\
                  - Subsequent calls: only new messages (incremental).\n\
                  \n\
-                 To send chat: append JSONL to .syncvibe/chat-log.jsonl directly.\n\
-                 See CLAUDE.md for message format."
+                 To send chat: append a single JSONL line to .syncvibe/chat-log.jsonl.\n\
+                 Format: {\"id\":\"<uuid>\",\"user_id\":\"...\",\"user_name\":\"...\",\"user_color\":\"...\",\"content\":\"...\",\"message_type\":\"user\",\"thread_id\":null,\"session_id\":\"...\",\"timestamp\":\"...\"}\n\
+                 Only use message_type \"user\". Never use \"system\", \"git_commit\", or other types."
                     .to_string(),
             ),
             capabilities: ServerCapabilities::builder()

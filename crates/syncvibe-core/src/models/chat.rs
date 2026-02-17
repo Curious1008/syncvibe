@@ -10,6 +10,9 @@ pub enum MessageType {
     GitCommit,
     ConflictWarning,
     Tip,
+    /// Catch-all for unknown types from future versions
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

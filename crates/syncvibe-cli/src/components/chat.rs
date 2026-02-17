@@ -8,7 +8,7 @@ use unicode_width::UnicodeWidthStr;
 use syncvibe_core::models::{ChatMessage, MessageType};
 
 use crate::app::{AppState, Panel};
-use crate::components::util::parse_hex_color;
+use crate::components::util::{parse_hex_color, truncate_str};
 
 /// Parse message content into spans, highlighting @mentions.
 fn parse_mentions(content: &str, default_style: Style) -> Vec<Span<'static>> {
@@ -26,24 +26,25 @@ fn parse_mentions(content: &str, default_style: Style) -> Vec<Span<'static>> {
 
         // Extract the @mention (letters, digits, hyphens, underscores)
         let after_at = &remaining[at_pos + 1..];
-        let mention_len = after_at
+        let mention_byte_len: usize = after_at
             .chars()
             .take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
-            .count();
+            .map(|c| c.len_utf8())
+            .sum();
 
-        if mention_len == 0 {
+        if mention_byte_len == 0 {
             // Bare @ with no name
             spans.push(Span::styled("@".to_string(), default_style));
             remaining = &remaining[at_pos + 1..];
         } else {
-            let mention = &remaining[at_pos..at_pos + 1 + mention_len];
+            let mention = &remaining[at_pos..at_pos + 1 + mention_byte_len];
             spans.push(Span::styled(
                 mention.to_string(),
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             ));
-            remaining = &remaining[at_pos + 1 + mention_len..];
+            remaining = &remaining[at_pos + 1 + mention_byte_len..];
         }
     }
 
@@ -70,7 +71,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
     let border_color = if is_focused { Color::Cyan } else { Color::DarkGray };
 
     // Smart title: only show hint when in selection mode
-    let title = if let Some(_sel) = state.chat_selected {
+    let title = if state.chat_selected.is_some() {
         if state.selected_is_image() {
             " Chat ↑↓ Enter: open image ".to_string()
         } else {
@@ -255,11 +256,7 @@ fn format_message(msg: &ChatMessage, selected: bool, grouped: bool) -> Vec<Line<
 
     // Quote line (above the message)
     if let Some(ref q) = msg.quote {
-        let truncated = if q.content.len() > 60 {
-            format!("{}...", &q.content[..57])
-        } else {
-            q.content.clone()
-        };
+        let truncated = truncate_str(&q.content, 57);
         let mut quote_line = Line::from(Span::styled(
             format!("{}        ↩ {}: {}", prefix, q.user_name, truncated),
             Style::default().fg(Color::Rgb(100, 100, 120)),
@@ -333,6 +330,10 @@ fn format_message(msg: &ChatMessage, selected: bool, grouped: bool) -> Vec<Line<
             MessageType::Tip => Line::from(Span::styled(
                 format!("{}   {}", prefix, msg.content),
                 Style::default().fg(Color::Rgb(100, 120, 130)),
+            )),
+            MessageType::Unknown => Line::from(Span::styled(
+                format!("{} {} {}", prefix, time, msg.content),
+                Style::default().fg(Color::DarkGray),
             )),
         }
     };

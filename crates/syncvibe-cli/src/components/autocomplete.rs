@@ -17,7 +17,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
 
 /// Returns indices into COMMANDS that match the current input.
 pub fn filter(input: &str) -> Vec<usize> {
-    if !input.starts_with('/') || input.contains(' ') || input.is_empty() {
+    if input.is_empty() || !input.starts_with('/') || input.contains(' ') {
         return Vec::new();
     }
     let input_lower = input.to_lowercase();

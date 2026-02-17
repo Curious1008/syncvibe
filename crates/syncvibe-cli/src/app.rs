@@ -143,6 +143,11 @@ impl AppState {
                 let new_msgs = all_msgs[self.disk_msg_count..].to_vec();
                 self.disk_msg_count = all_msgs.len();
                 self.chat_messages.extend(new_msgs);
+                // Cap to prevent unbounded growth
+                if self.chat_messages.len() > MAX_DISPLAY_MESSAGES {
+                    let excess = self.chat_messages.len() - MAX_DISPLAY_MESSAGES;
+                    self.chat_messages.drain(..excess);
+                }
             }
         }
     }
@@ -439,6 +444,11 @@ impl AppState {
     /// If message contains @agent, extract the instruction and send it to the
     /// Claude Code tmux pane via send-keys.
     fn handle_agent_mention(&self, msg: &ChatMessage) {
+        // Only process @agent mentions from the local user — never from remote peers
+        if msg.user_id != self.user.profile.user_id {
+            return;
+        }
+
         let content = &msg.content;
         // Match @agent, @claude, @claude-code (case insensitive)
         let agent_patterns = ["@agent", "@claude-code", "@claude"];
@@ -447,11 +457,10 @@ impl AppState {
 
         for pattern in &agent_patterns {
             if let Some(pos) = content_lower.find(pattern) {
-                let after = &content[pos + pattern.len()..].trim();
+                let after = content_lower[pos + pattern.len()..].trim();
                 if !after.is_empty() {
                     instruction = Some(after.to_string());
                 } else {
-                    // Just "@agent" with no message — send a generic read prompt
                     instruction = Some(
                         "Read .syncvibe/chat-digest.md to understand the team's current discussion"
                             .to_string(),
@@ -462,11 +471,18 @@ impl AppState {
         }
 
         if let Some(text) = instruction {
+            // Sanitize: strip shell metacharacters to prevent command injection
+            let safe_text: String = text
+                .chars()
+                .filter(|c| !matches!(c, ';' | '&' | '|' | '`' | '$' | '(' | ')' | '{' | '}' | '<' | '>' | '!' | '\\'))
+                .collect();
+            if safe_text.trim().is_empty() {
+                return;
+            }
             let session_name = format!("sv-{}", self.project_name);
             let agent_pane = format!("{}:0.1", session_name);
-            // Fire and forget — don't block the TUI
             let _ = std::process::Command::new("tmux")
-                .args(["send-keys", "-t", &agent_pane, &text, "Enter"])
+                .args(["send-keys", "-t", &agent_pane, &safe_text, "Enter"])
                 .env_remove("TMUX")
                 .spawn();
         }
@@ -844,6 +860,10 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
             if state.chat_messages.iter().any(|m| m.id == msg.id) {
                 return;
             }
+            // Reject spoofed system message types from remote peers
+            if !matches!(msg.message_type, MessageType::User | MessageType::Image) {
+                return;
+            }
             // Only ring bell when current user is @mentioned
             if msg.content.to_lowercase().contains(&format!("@{}", state.user.profile.name.to_lowercase())) {
                 state.ring_bell();
@@ -851,6 +871,10 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
             let _ = state.storage.append_chat_message(&msg);
             state.disk_msg_count += 1;
             state.chat_messages.push(msg);
+            // Cap to prevent unbounded growth
+            if state.chat_messages.len() > MAX_DISPLAY_MESSAGES {
+                state.chat_messages.remove(0);
+            }
         }
         WsMessage::ConflictWarning { file, users } => {
             state.system_msg_typed(
@@ -875,6 +899,11 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
                     MessageType::GitCommit,
                 );
             }
+        }
+        WsMessage::AuthFail { reason } => {
+            state.is_online = false;
+            state.ws_client = None;
+            state.system_msg(&format!("Auth rejected: {}", reason));
         }
         _ => {}
     }
@@ -902,7 +931,8 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
                         // At the top — load more history
                         let loaded = state.load_more_history();
                         if loaded > 0 {
-                            state.chat_selected = Some(loaded.saturating_sub(1));
+                            // Point to the message the user was looking at (now shifted by `loaded`)
+                            state.chat_selected = Some(loaded);
                         }
                     }
                     Some(idx) => {

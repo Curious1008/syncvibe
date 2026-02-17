@@ -1,5 +1,17 @@
 use ratatui::style::Color;
 
+/// Truncate a string to at most `max_chars` characters, appending "..." if truncated.
+/// Safe for multi-byte/emoji content — never slices on a non-char boundary.
+pub fn truncate_str(s: &str, max_chars: usize) -> String {
+    let char_count = s.chars().count();
+    if char_count <= max_chars {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(max_chars.saturating_sub(3)).collect();
+        format!("{}...", truncated)
+    }
+}
+
 pub fn parse_hex_color(hex: &str) -> Color {
     let hex = hex.trim_start_matches('#');
     if hex.len() != 6 {

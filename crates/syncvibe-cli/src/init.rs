@@ -1,5 +1,3 @@
-use std::env;
-
 use anyhow::Result;
 
 use syncvibe_core::models::RoomConfig;
@@ -63,7 +61,7 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
         let gitignore_path = cwd.join(".gitignore");
         let has_entry = gitignore_path.exists()
             && std::fs::read_to_string(&gitignore_path)
-                .map(|c| c.contains(".syncvibe/") || c.contains(".syncvibe\n"))
+                .map(|c| gitignore_has_syncvibe(&c))
                 .unwrap_or(false);
         if !has_entry {
             changes.push((".gitignore", "Add .syncvibe/ to gitignore"));
@@ -84,11 +82,28 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
     }
 
     // Perform the actual setup
+    let canonical_cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
     let storage = match Storage::find(cwd) {
-        Ok(s) if s.project_root() == cwd => s,
+        Ok(s) => {
+            let canonical_root = s
+                .project_root()
+                .canonicalize()
+                .unwrap_or_else(|_| s.project_root().to_path_buf());
+            if canonical_root == canonical_cwd {
+                s
+            } else {
+                Storage::init(cwd)?
+            }
+        }
         _ => Storage::init(cwd)?,
     };
-    let room = room.unwrap_or_else(RoomConfig::new);
+    // Preserve existing room config on re-init (don't generate a new secret)
+    let room = match room {
+        Some(r) => r,
+        None => storage
+            .read_room_config()
+            .unwrap_or_else(|_| RoomConfig::new()),
+    };
     storage.write_room_config(&room)?;
 
     setup_gitignore(cwd)?;
@@ -99,11 +114,21 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
     Ok(room)
 }
 
+/// Check if gitignore content already covers .syncvibe (handles CRLF, no-slash, root-anchored)
+fn gitignore_has_syncvibe(content: &str) -> bool {
+    content
+        .lines()
+        .any(|line| {
+            let trimmed = line.trim();
+            trimmed == ".syncvibe" || trimmed == ".syncvibe/" || trimmed == "/.syncvibe/" || trimmed == "/.syncvibe"
+        })
+}
+
 fn setup_gitignore(cwd: &std::path::Path) -> Result<()> {
     let gitignore_path = cwd.join(".gitignore");
     if gitignore_path.exists() {
         let content = std::fs::read_to_string(&gitignore_path)?;
-        if !content.contains(".syncvibe/") && !content.contains(".syncvibe\n") {
+        if !gitignore_has_syncvibe(&content) {
             let mut file = std::fs::OpenOptions::new()
                 .append(true)
                 .open(&gitignore_path)?;
@@ -120,21 +145,32 @@ fn setup_gitignore(cwd: &std::path::Path) -> Result<()> {
 
 fn setup_mcp_json(cwd: &std::path::Path) -> Result<()> {
     let mcp_path = cwd.join(".mcp.json");
-    let bin_path = env::current_exe()
-        .unwrap_or_else(|_| "syncvibe".into())
-        .to_string_lossy()
-        .to_string();
 
+    // Use plain command name — avoids leaking absolute paths into committed files
     let syncvibe_entry = serde_json::json!({
-        "command": bin_path,
+        "command": "syncvibe",
         "args": ["mcp-server"]
     });
 
     if mcp_path.exists() {
-        // Merge: add syncvibe to existing config
         let content = std::fs::read_to_string(&mcp_path)?;
-        let mut config: serde_json::Value = serde_json::from_str(&content)?;
-        if let Some(servers) = config.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
+        // Tolerate non-JSON files — skip merge, warn user
+        let mut config: serde_json::Value = match serde_json::from_str(&content) {
+            Ok(v) => v,
+            Err(_) => {
+                eprintln!(
+                    "  Warning: .mcp.json is not valid JSON, skipping merge. \
+                     You may need to add SyncVibe manually."
+                );
+                return Ok(());
+            }
+        };
+        // Ensure mcpServers object exists
+        let servers = config
+            .as_object_mut()
+            .map(|o| o.entry("mcpServers").or_insert(serde_json::json!({})))
+            .and_then(|v| v.as_object_mut());
+        if let Some(servers) = servers {
             if !servers.contains_key("syncvibe") {
                 servers.insert("syncvibe".to_string(), syncvibe_entry);
                 std::fs::write(&mcp_path, serde_json::to_string_pretty(&config)?)?;
@@ -160,34 +196,47 @@ fn setup_claude_settings(cwd: &std::path::Path) -> Result<()> {
         "hooks": [
             {
                 "type": "command",
-                "command": "if echo \"$TOOL_INPUT\" | grep -q '.syncvibe/'; then touch .syncvibe/.updated; fi",
+                "command": "case \"$TOOL_INPUT\" in *.syncvibe/*) touch \"$PWD/.syncvibe/.updated\" ;; esac",
                 "async": true
             }
         ]
     });
 
     if settings_path.exists() {
-        // Merge: add hook to existing config
         let content = std::fs::read_to_string(&settings_path)?;
-        let mut config: serde_json::Value = serde_json::from_str(&content)?;
 
         // Check if our hook already exists
         if content.contains(".syncvibe/") {
             return Ok(());
         }
 
-        let hooks = config
-            .as_object_mut()
-            .and_then(|o| o.entry("hooks").or_insert(serde_json::json!({})).as_object_mut())
-            .map(|h| h.entry("PostToolUse").or_insert(serde_json::json!([])));
-
-        if let Some(post_tool_use) = hooks {
-            if let Some(arr) = post_tool_use.as_array_mut() {
-                arr.push(syncvibe_hook);
+        // Tolerate non-JSON files
+        let mut config: serde_json::Value = match serde_json::from_str(&content) {
+            Ok(v) => v,
+            Err(_) => {
+                eprintln!(
+                    "  Warning: .claude/settings.json is not valid JSON, skipping merge."
+                );
+                return Ok(());
             }
-        }
+        };
 
-        std::fs::write(&settings_path, serde_json::to_string_pretty(&config)?)?;
+        // Ensure hooks.PostToolUse array exists, create if needed
+        let inserted = config.as_object_mut().map(|obj| {
+            let hooks = obj.entry("hooks").or_insert(serde_json::json!({}));
+            if let Some(hooks_obj) = hooks.as_object_mut() {
+                let post = hooks_obj.entry("PostToolUse").or_insert(serde_json::json!([]));
+                if let Some(arr) = post.as_array_mut() {
+                    arr.push(syncvibe_hook.clone());
+                    return true;
+                }
+            }
+            false
+        });
+
+        if inserted == Some(true) {
+            std::fs::write(&settings_path, serde_json::to_string_pretty(&config)?)?;
+        }
     } else {
         std::fs::create_dir_all(&claude_dir)?;
         let config = serde_json::json!({

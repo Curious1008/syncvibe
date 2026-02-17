@@ -14,7 +14,13 @@ pub struct RoomConfig {
 impl RoomConfig {
     pub fn new() -> Self {
         let mut secret_bytes = [0u8; 32];
-        getrandom::getrandom(&mut secret_bytes).expect("failed to generate random bytes");
+        // getrandom only fails in very unusual environments (no OS entropy source)
+        if getrandom::getrandom(&mut secret_bytes).is_err() {
+            // Fallback: use uuid bytes repeated (still random via uuid v4)
+            let uuid_bytes = *uuid::Uuid::new_v4().as_bytes();
+            secret_bytes[..16].copy_from_slice(&uuid_bytes);
+            secret_bytes[16..].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
+        }
         Self {
             room_id: uuid::Uuid::new_v4().to_string(),
             room_secret: hex_encode(&secret_bytes),

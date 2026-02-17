@@ -27,6 +27,13 @@ pub async fn connect_ws(
     user_name: &str,
     user_color: &str,
 ) -> Result<(WsClient, mpsc::Receiver<WsMessage>, watch::Receiver<bool>)> {
+    // Enforce TLS to protect room_secret in transit
+    if !relay_url.starts_with("wss://") {
+        return Err(anyhow::anyhow!(
+            "Relay URL must use wss:// (got {})",
+            relay_url
+        ));
+    }
     let url = format!("{}/ws/{}", relay_url, room_id);
     let (ws_stream, _) = time::timeout(Duration::from_secs(5), connect_async(&url))
         .await
