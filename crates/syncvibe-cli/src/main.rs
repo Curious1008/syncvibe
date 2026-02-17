@@ -55,9 +55,8 @@ fn cmd_init() -> Result<()> {
 
     let room = init::perform_init(&cwd, None)?;
 
-    if !config::user_config_exists() {
-        println!("\n  No user profile found. Run `syncvibe join --name <your-name>` to set up your profile.");
-    }
+    // Ensure user profile exists (prompt interactively if needed)
+    let _user = session::ensure_user_profile()?;
 
     println!("\n  SyncVibe room initialized!");
     println!("  Room ID: {}", room.room_id);
@@ -67,8 +66,10 @@ fn cmd_init() -> Result<()> {
         println!("\n  They just run `syncvibe` and paste it.");
     }
     println!("\n  AI agents auto-read your chat — just discuss, then assign tasks.");
+    println!("  Launching...\n");
 
-    Ok(())
+    // Launch the TUI directly
+    tmux::launch_project(&cwd)
 }
 
 fn cmd_join(name: Option<String>, color: Option<String>) -> Result<()> {
