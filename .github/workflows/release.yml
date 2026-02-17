@@ -1,0 +1,128 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+            use_cross: false
+          - target: x86_64-apple-darwin
+            runner: macos-13
+            use_cross: false
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            use_cross: false
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-latest
+            use_cross: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.use_cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build
+        run: |
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }} -p syncvibe-cli
+          else
+            cargo build --release --target ${{ matrix.target }} -p syncvibe-cli
+          fi
+
+      - name: Strip binary
+        run: |
+          BIN="target/${{ matrix.target }}/release/syncvibe"
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
+            # For cross-compiled binaries, use llvm-strip
+            llvm-strip "$BIN" 2>/dev/null || true
+          else
+            strip "$BIN"
+          fi
+
+      - name: Package
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../syncvibe-${{ matrix.target }}.tar.gz syncvibe
+          cd ../../..
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: syncvibe-${{ matrix.target }}
+          path: syncvibe-${{ matrix.target }}.tar.gz
+
+  universal-macos:
+    name: Universal macOS binary
+    needs: build
+    runs-on: macos-latest
+    steps:
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: syncvibe-*-apple-darwin
+          merge-multiple: false
+
+      - name: Create universal binary
+        run: |
+          mkdir -p arm64 x86_64 universal
+
+          tar xzf syncvibe-aarch64-apple-darwin/syncvibe-aarch64-apple-darwin.tar.gz -C arm64
+          tar xzf syncvibe-x86_64-apple-darwin/syncvibe-x86_64-apple-darwin.tar.gz -C x86_64
+
+          lipo -create arm64/syncvibe x86_64/syncvibe -output universal/syncvibe
+
+          cd universal
+          tar czf ../syncvibe-darwin-universal.tar.gz syncvibe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: syncvibe-darwin-universal
+          path: syncvibe-darwin-universal.tar.gz
+
+  release:
+    name: Create Release
+    needs: [build, universal-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: syncvibe-*
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            syncvibe-aarch64-apple-darwin.tar.gz
+            syncvibe-x86_64-apple-darwin.tar.gz
+            syncvibe-darwin-universal.tar.gz
+            syncvibe-x86_64-unknown-linux-gnu.tar.gz
+            syncvibe-aarch64-unknown-linux-gnu.tar.gz
