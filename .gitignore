@@ -1,7 +1,6 @@
 # Build
 /target/
-worker/node_modules/
-worker/dist/
+worker/
 
 # IDE
 .idea/
