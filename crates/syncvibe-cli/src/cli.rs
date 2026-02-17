@@ -53,7 +53,7 @@ pub enum Command {
     /// Launch just the dashboard TUI (used inside tmux pane)
     Dashboard,
 
-    /// Switch between SyncVibe projects
+    /// Switch between SyncVibe rooms
     Switch,
 
     /// Generate shell completions

@@ -60,7 +60,7 @@ pub fn cmd_session() -> Result<()> {
         return tmux::launch_project(&cwd);
     }
 
-    // Step 3: No room in cwd — show home screen
+    // Step 3: No room in cwd — build interactive menu
     let registry = config::load_registry().unwrap_or_default();
     let valid_projects: Vec<_> = registry
         .projects
@@ -72,67 +72,52 @@ pub fn cmd_session() -> Result<()> {
 
     if valid_projects.is_empty() && !in_git_repo {
         anyhow::bail!(
-            "No SyncVibe projects found.\n  cd into a git repo and run `syncvibe` to get started."
+            "No SyncVibe rooms found.\n  cd into a git repo and run `syncvibe` to get started."
         );
     }
 
-    println!();
-
-    if !valid_projects.is_empty() {
-        println!("  Your projects:\n");
-        for (i, p) in valid_projects.iter().enumerate() {
-            println!("  {}) {} ({})", i + 1, p.name, p.path);
-        }
-        println!();
+    // Build menu items
+    let mut menu_items = Vec::new();
+    for p in &valid_projects {
+        menu_items.push(onboarding::MenuItem {
+            label: p.name.clone(),
+            hint: format!("({})", p.path),
+        });
     }
-
     if in_git_repo {
-        println!("  n) Create a new room here");
-        println!("  j) Join with an invite code\n");
+        menu_items.push(onboarding::MenuItem {
+            label: "Create a new room".to_string(),
+            hint: String::new(),
+        });
+        menu_items.push(onboarding::MenuItem {
+            label: "Join with invite code".to_string(),
+            hint: String::new(),
+        });
     }
 
-    let default = if !valid_projects.is_empty() {
-        "1"
-    } else if in_git_repo {
-        "n"
-    } else {
-        "1"
-    };
-    let choice = onboarding::prompt(&format!("  Choice [{}]: ", default))?;
-    let choice = if choice.is_empty() {
-        default.to_string()
-    } else {
-        choice
-    };
+    println!();
+    let choice = onboarding::select_menu(&menu_items)?;
 
-    match choice.as_str() {
-        "n" | "N" if in_git_repo => {
-            let room = init::perform_init(&cwd, None)?;
-            println!("\n  Room created! \u{1F389}\n");
-            if let Ok(code) = room.to_invite_code() {
-                println!("  Share this invite code with your team:");
-                println!("  {}\n", code);
-                println!("  They just run `syncvibe` and paste it.");
-            }
-            println!("  AI agents auto-read your chat — just discuss, then assign tasks.\n");
-            tmux::launch_project(&cwd)
+    match choice {
+        None => anyhow::bail!("Cancelled."),
+        Some(idx) if idx < valid_projects.len() => {
+            let path = valid_projects[idx].path.clone();
+            tmux::launch_project(std::path::Path::new(&path))
         }
-        "j" | "J" if in_git_repo => {
-            let code = onboarding::prompt("  Paste invite code: ")?;
-            let room = RoomConfig::from_invite_code(&code).map_err(|e| anyhow::anyhow!(e))?;
-            init::perform_init(&cwd, Some(room))?;
-            println!("\n  Joined room! \u{1F389}");
-            println!("  AI agents auto-read your chat — just discuss, then assign tasks.\n");
-            tmux::launch_project(&cwd)
-        }
-        num => {
-            if let Ok(idx) = num.parse::<usize>() {
-                if idx >= 1 && idx <= valid_projects.len() {
-                    let path = valid_projects[idx - 1].path.clone();
-                    return tmux::launch_project(std::path::Path::new(&path));
-                }
+        Some(idx) => {
+            let action = idx - valid_projects.len();
+            if action == 0 {
+                // Create new room
+                init::perform_init(&cwd, None)?;
+                tmux::launch_project(&cwd)
+            } else {
+                // Join with invite code
+                let code = onboarding::prompt("  Paste invite code: ")?;
+                let room =
+                    RoomConfig::from_invite_code(&code).map_err(|e| anyhow::anyhow!(e))?;
+                init::perform_init(&cwd, Some(room))?;
+                tmux::launch_project(&cwd)
             }
-            anyhow::bail!("Invalid choice. Run `syncvibe` again.");
         }
     }
 }

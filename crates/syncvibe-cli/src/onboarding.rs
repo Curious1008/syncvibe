@@ -50,6 +50,100 @@ pub fn is_valid_color(color: &str) -> bool {
         && color[1..].chars().all(|c| c.is_ascii_hexdigit())
 }
 
+// ── Interactive menu ──────────────────────────────────────────────
+
+/// A menu item for the interactive selector.
+pub struct MenuItem {
+    pub label: String,
+    pub hint: String,
+}
+
+/// Interactive arrow-key menu. Returns selected index or None if cancelled.
+pub fn select_menu(items: &[MenuItem]) -> io::Result<Option<usize>> {
+    if items.is_empty() {
+        return Ok(None);
+    }
+    // Reserve screen space: items + blank + hint
+    reserve_lines(items.len() + 2)?;
+    terminal::enable_raw_mode()?;
+    let result = run_menu(items);
+    terminal::disable_raw_mode()?;
+    print!("\r");
+    io::stdout().flush()?;
+    result
+}
+
+fn run_menu(items: &[MenuItem]) -> io::Result<Option<usize>> {
+    let mut cursor = 0;
+    let mut prev_lines = 0;
+
+    loop {
+        prev_lines = render_menu(items, cursor, prev_lines)?;
+
+        if let Event::Key(key) = event::read()? {
+            if key.kind != KeyEventKind::Press {
+                continue;
+            }
+            match key.code {
+                KeyCode::Up => {
+                    if cursor > 0 {
+                        cursor -= 1;
+                    }
+                }
+                KeyCode::Down => {
+                    if cursor + 1 < items.len() {
+                        cursor += 1;
+                    }
+                }
+                KeyCode::Enter => {
+                    clear_lines(prev_lines)?;
+                    return Ok(Some(cursor));
+                }
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    clear_lines(prev_lines)?;
+                    return Ok(None);
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn render_menu(items: &[MenuItem], cursor: usize, prev_lines: usize) -> io::Result<usize> {
+    let mut out = io::stdout();
+    clear_up(&mut out, prev_lines)?;
+
+    let mut lines = 0;
+    for (i, item) in items.iter().enumerate() {
+        let arrow = if i == cursor {
+            "\x1b[36m>\x1b[0m"
+        } else {
+            " "
+        };
+        if item.hint.is_empty() {
+            write!(out, "  {} {}\r\n", arrow, item.label)?;
+        } else {
+            write!(
+                out,
+                "  {} {} \x1b[90m{}\x1b[0m\r\n",
+                arrow, item.label, item.hint
+            )?;
+        }
+        lines += 1;
+    }
+
+    write!(
+        out,
+        "\r\n  \x1b[90m↑↓ navigate · enter select · esc cancel\x1b[0m\r\n"
+    )?;
+    lines += 2;
+
+    out.flush()?;
+    Ok(lines)
+}
+
+// ── Interactive checklist ─────────────────────────────────────────
+
 /// A setup item shown in the interactive checklist.
 pub struct SetupItem {
     pub file: String,
@@ -61,10 +155,8 @@ pub struct SetupItem {
     pub already_done: bool,
 }
 
-/// Show an interactive checklist and return which items the user confirmed.
-/// Returns Ok(vec of checked states) or Err if cancelled.
+/// Show an interactive checklist and return whether the user confirmed.
 pub fn confirm_setup(items: &mut [SetupItem]) -> io::Result<bool> {
-    // Filter to only items that need action
     let actionable: Vec<usize> = items
         .iter()
         .enumerate()
@@ -76,11 +168,13 @@ pub fn confirm_setup(items: &mut [SetupItem]) -> io::Result<bool> {
         return Ok(true);
     }
 
+    // Reserve screen space: items + 1 hover + 1 blank + 1 confirm + 2 (blank+hint)
+    reserve_lines(actionable.len() + 5)?;
+
     terminal::enable_raw_mode()?;
     let result = run_checklist(items, &actionable);
     terminal::disable_raw_mode()?;
 
-    // Clear the checklist area and print final state
     print!("\r");
     io::stdout().flush()?;
 
@@ -88,11 +182,12 @@ pub fn confirm_setup(items: &mut [SetupItem]) -> io::Result<bool> {
 }
 
 fn run_checklist(items: &mut [SetupItem], actionable: &[usize]) -> io::Result<bool> {
-    let mut cursor = 0; // index into actionable
-    let confirm_idx = actionable.len(); // virtual index for [Confirm]
+    let mut cursor = 0;
+    let confirm_idx = actionable.len();
+    let mut prev_lines = 0;
 
     loop {
-        render_checklist(items, actionable, cursor, confirm_idx)?;
+        prev_lines = render_checklist(items, actionable, cursor, confirm_idx, prev_lines)?;
 
         if let Event::Key(key) = event::read()? {
             if key.kind != KeyEventKind::Press {
@@ -119,11 +214,9 @@ fn run_checklist(items: &mut [SetupItem], actionable: &[usize]) -> io::Result<bo
                 }
                 KeyCode::Enter => {
                     if cursor == confirm_idx {
-                        // Clear display
-                        clear_checklist(actionable.len())?;
+                        clear_lines(prev_lines)?;
                         return Ok(true);
                     }
-                    // Enter on an item toggles it (same as space)
                     if cursor < confirm_idx {
                         let idx = actionable[cursor];
                         if !items[idx].required {
@@ -132,7 +225,7 @@ fn run_checklist(items: &mut [SetupItem], actionable: &[usize]) -> io::Result<bo
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('q') => {
-                    clear_checklist(actionable.len())?;
+                    clear_lines(prev_lines)?;
                     return Ok(false);
                 }
                 _ => {}
@@ -146,67 +239,99 @@ fn render_checklist(
     actionable: &[usize],
     cursor: usize,
     confirm_idx: usize,
-) -> io::Result<()> {
+    prev_lines: usize,
+) -> io::Result<usize> {
     let mut out = io::stdout();
+    clear_up(&mut out, prev_lines)?;
 
-    // Move to start of checklist area
-    let total_lines = actionable.len() + 3; // items + blank + confirm + hint
-    write!(out, "\r")?;
-    for _ in 0..total_lines {
-        write!(out, "\x1b[2K\r\x1b[A")?; // clear line, move up
-    }
-    write!(out, "\x1b[2K\r")?; // clear current line
+    let mut lines = 0;
 
     for (i, &idx) in actionable.iter().enumerate() {
         let item = &items[idx];
         let is_cursor = i == cursor;
-        let arrow = if is_cursor { "\x1b[36m>\x1b[0m" } else { " " };
-        let check = if item.checked { "\x1b[32m✓\x1b[0m" } else { " " };
+        let arrow = if is_cursor {
+            "\x1b[36m>\x1b[0m"
+        } else {
+            " "
+        };
+        let check = if item.checked {
+            "\x1b[32m✓\x1b[0m"
+        } else {
+            " "
+        };
         let tag = if item.required {
             "\x1b[33mrequired\x1b[0m"
         } else {
             "\x1b[90moptional\x1b[0m"
         };
-        let lock = if item.required { " \x1b[90m(locked)\x1b[0m" } else { "" };
+        let lock = if item.required {
+            " \x1b[90m(locked)\x1b[0m"
+        } else {
+            ""
+        };
 
         write!(
             out,
             "  {} [{}] {:<16} {} ({}){}\r\n",
             arrow, check, item.file, item.description, tag, lock
         )?;
+        lines += 1;
 
-        // Show reason on cursor hover
         if is_cursor {
             write!(out, "    \x1b[90m{}\x1b[0m\r\n", item.reason)?;
+            lines += 1;
         }
     }
 
     write!(out, "\r\n")?;
+    lines += 1;
 
-    // Confirm button
     if cursor == confirm_idx {
         write!(out, "  \x1b[36m> \x1b[1m[ Confirm ]\x1b[0m\r\n")?;
     } else {
         write!(out, "    \x1b[90m[ Confirm ]\x1b[0m\r\n")?;
     }
+    lines += 1;
 
     write!(
         out,
         "\r\n  \x1b[90m↑↓ navigate · space toggle · enter confirm · esc cancel\x1b[0m\r\n"
     )?;
+    lines += 2;
 
     out.flush()?;
+    Ok(lines)
+}
+
+// ── Shared terminal helpers ───────────────────────────────────────
+
+/// Print blank lines then move cursor back up, reserving screen space.
+fn reserve_lines(count: usize) -> io::Result<()> {
+    let mut out = io::stdout();
+    for _ in 0..count {
+        write!(out, "\r\n")?;
+    }
+    for _ in 0..count {
+        write!(out, "\x1b[A")?;
+    }
+    write!(out, "\r")?;
+    out.flush()
+}
+
+/// Move cursor up N lines, clearing each line. Used before re-rendering.
+fn clear_up(out: &mut io::Stdout, count: usize) -> io::Result<()> {
+    for _ in 0..count {
+        write!(out, "\x1b[A\x1b[2K")?;
+    }
+    if count > 0 {
+        write!(out, "\r")?;
+    }
     Ok(())
 }
 
-fn clear_checklist(item_count: usize) -> io::Result<()> {
+/// Clear N lines above cursor and flush.
+fn clear_lines(count: usize) -> io::Result<()> {
     let mut out = io::stdout();
-    // +5 for extra lines (blank, confirm, hint, hover lines, etc)
-    let total = item_count * 2 + 5;
-    for _ in 0..total {
-        write!(out, "\x1b[2K\x1b[A")?;
-    }
-    write!(out, "\x1b[2K\r")?;
-    out.flush()?;
-    Ok(())
+    clear_up(&mut out, count)?;
+    out.flush()
 }

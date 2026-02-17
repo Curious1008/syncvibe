@@ -78,12 +78,6 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
     println!("\n  SyncVibe Setup\n");
     println!("  Select what to set up for this project:\n");
 
-    // Pre-render lines so the checklist has space to draw
-    let actionable_count = items.iter().filter(|i| !i.already_done).count();
-    for _ in 0..(actionable_count * 2 + 5) {
-        println!();
-    }
-
     let confirmed = onboarding::confirm_setup(&mut items)?;
     if !confirmed {
         anyhow::bail!("Setup cancelled.");

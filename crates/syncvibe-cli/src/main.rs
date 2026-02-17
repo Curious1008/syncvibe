@@ -53,22 +53,8 @@ fn cmd_init() -> Result<()> {
         anyhow::bail!("Not in a git repository. Run `git init` first.");
     }
 
-    let room = init::perform_init(&cwd, None)?;
-
-    // Ensure user profile exists (prompt interactively if needed)
+    init::perform_init(&cwd, None)?;
     let _user = session::ensure_user_profile()?;
-
-    println!("\n  SyncVibe room initialized!");
-    println!("  Room ID: {}", room.room_id);
-    if let Ok(code) = room.to_invite_code() {
-        println!("\n  Share this invite code with your team:");
-        println!("  {}", code);
-        println!("\n  They just run `syncvibe` and paste it.");
-    }
-    println!("\n  AI agents auto-read your chat — just discuss, then assign tasks.");
-    println!("  Launching...\n");
-
-    // Launch the TUI directly
     tmux::launch_project(&cwd)
 }
 

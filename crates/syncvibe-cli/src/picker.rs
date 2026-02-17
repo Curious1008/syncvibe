@@ -20,15 +20,14 @@ pub fn pick_project(current_path: Option<&str>) -> anyhow::Result<Option<Project
         .collect();
 
     if projects.is_empty() {
-        println!("  No projects found.");
-        println!("  Go to a project directory and run `syncvibe` to get started.");
+        println!("  No rooms found. Use /new to create one.");
         return Ok(None);
     }
 
     // Sort by last_opened (most recent first)
     projects.sort_by(|a, b| b.last_opened.cmp(&a.last_opened));
 
-    // Check which projects have active tmux sessions
+    // Check which rooms have active tmux sessions
     let session_status: Vec<bool> = projects
         .iter()
         .map(|p| has_tmux_session(&p.path))
@@ -121,7 +120,7 @@ fn draw_picker(
         ),
         Span::styled(
             format!(
-                "  {} project{}  ·  {} running",
+                "  {} room{}  ·  {} running",
                 projects.len(),
                 if projects.len() == 1 { "" } else { "s" },
                 active_count,
@@ -201,7 +200,7 @@ fn draw_picker(
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::DarkGray))
         .title(Span::styled(
-            " Projects ",
+            " Chats ",
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),

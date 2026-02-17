@@ -6,7 +6,8 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 pub const COMMANDS: &[(&str, &str)] = &[
     ("/help", "Show all commands"),
     ("/invite", "Show invite code"),
-    ("/projects", "Switch between rooms"),
+    ("/new", "Create a new room"),
+    ("/chats", "Switch between rooms"),
     ("/name", "Change display name"),
     ("/color", "Change chat color"),
     ("/mute", "Toggle notification bell"),

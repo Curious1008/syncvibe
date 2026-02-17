@@ -32,7 +32,7 @@ const LOAD_MORE_BATCH: usize = 50;
 /// "Did you know?" tips — shown once per session, not persisted to disk
 const TIPS: &[&str] = &[
     "Tip: /invite (/i) shows your room's invite code — share it to add teammates",
-    "Tip: /projects (/p) lets you switch between SyncVibe rooms",
+    "Tip: /chats lets you switch between SyncVibe rooms",
     "Tip: /mute (/m) toggles the @mention notification bell",
     "Tip: @agent <task> sends a task directly to Claude Code — no pane switching needed",
     "Tip: Drop a file path into chat to share images with your team",
@@ -54,6 +54,7 @@ pub struct AppState {
     pub focus: Panel,
     pub should_quit: bool,
     pub show_picker: bool,
+    pub want_new_project: bool,
     pub want_reconnect: bool,
     pub muted: bool,
 
@@ -116,6 +117,7 @@ impl AppState {
             focus: Panel::Input,
             should_quit: false,
             show_picker: false,
+            want_new_project: false,
             want_reconnect: false,
             muted: false,
             chat_messages,
@@ -234,7 +236,8 @@ impl AppState {
         match cmd {
             "/help" | "/h" | "/?" => {
                 self.system_msg("/invite   — show room invite code  (/i)");
-                self.system_msg("/projects — switch between rooms   (/p)");
+                self.system_msg("/new      — create a new room             (/n)");
+                self.system_msg("/chats    — switch between rooms");
                 self.system_msg("/name <n> — change display name");
                 self.system_msg("/color <#hex> — change your color");
                 self.system_msg("/mute     — toggle @mention bell     (/m)");
@@ -260,8 +263,11 @@ impl AppState {
                     }
                 }
             }
-            "/projects" | "/p" => {
+            "/chats" => {
                 self.show_picker = true;
+            }
+            "/new" | "/n" => {
+                self.want_new_project = true;
             }
             "/name" => {
                 if arg.is_empty() {
@@ -570,7 +576,18 @@ pub async fn run() -> Result<()> {
         }
     }
 
-    // Show hint if multiple projects are active
+    // New room: show invite code so user can share it
+    if state.chat_messages.is_empty() {
+        if let Some(ref room) = room_config {
+            if let Ok(code) = room.to_invite_code() {
+                state.system_msg(&format!("Invite code: {}", code));
+                state.system_msg("Share it with your team — they run `syncvibe` and paste it.");
+                state.system_msg("You can always get it again with /invite");
+            }
+        }
+    }
+
+    // Show hint if multiple rooms are active
     if let Ok(registry) = config::load_registry() {
         let active_count = registry
             .projects
@@ -589,7 +606,7 @@ pub async fn run() -> Result<()> {
             .count();
         if active_count > 1 {
             state.system_msg(&format!(
-                "{} projects active · /projects to see all",
+                "{} rooms active · /chats to switch",
                 active_count
             ));
         }
@@ -777,6 +794,25 @@ pub async fn run() -> Result<()> {
             }
         }
 
+        // Handle /new — create room in another project directory
+        if state.want_new_project {
+            state.want_new_project = false;
+            tui::teardown(&mut terminal)?;
+
+            let switched = handle_new_project();
+            if !switched {
+                // User cancelled or error — restore current TUI
+                terminal = tui::setup()?;
+                event_stream = EventStream::new();
+                continue;
+            }
+
+            // Switched to new tmux session — restore current TUI (runs in background)
+            terminal = tui::setup()?;
+            event_stream = EventStream::new();
+            continue;
+        }
+
         // Handle project picker request (requires leaving TUI temporarily)
         if state.show_picker {
             state.show_picker = false;
@@ -821,6 +857,82 @@ pub async fn run() -> Result<()> {
 
     tui::teardown(&mut terminal)?;
     Ok(())
+}
+
+/// Handle /new command: prompt for path, init, launch new tmux session.
+/// Returns true if we switched to a new tmux session.
+fn handle_new_project() -> bool {
+    use crate::{init, onboarding, session, tmux};
+
+    println!("\n  Create a new SyncVibe room\n");
+    let path_str = match onboarding::prompt("  Project path: ") {
+        Ok(p) if !p.is_empty() => p,
+        _ => {
+            println!("  Cancelled.");
+            return false;
+        }
+    };
+
+    let path = std::path::Path::new(&path_str);
+
+    // Expand ~ to home directory
+    let path = if path_str.starts_with("~/") {
+        match dirs::home_dir() {
+            Some(home) => home.join(&path_str[2..]),
+            None => path.to_path_buf(),
+        }
+    } else {
+        path.to_path_buf()
+    };
+
+    // Create directory if it doesn't exist
+    if !path.exists() {
+        println!("  Directory doesn't exist. Creating...");
+        if let Err(e) = std::fs::create_dir_all(&path) {
+            println!("  Error: {}", e);
+            return false;
+        }
+    }
+
+    if !path.is_dir() {
+        println!("  Error: {} is not a directory.", path.display());
+        return false;
+    }
+
+    // Ensure git repo
+    if !path.join(".git").exists() {
+        println!("  Initializing git repository...");
+        let status = std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(&path)
+            .status();
+        match status {
+            Ok(s) if s.success() => {}
+            _ => {
+                println!("  Error: Failed to initialize git repo.");
+                return false;
+            }
+        }
+    }
+
+    // Ensure user profile
+    if session::ensure_user_profile().is_err() {
+        return false;
+    }
+
+    // Run init with checklist
+    if init::perform_init(&path, None).is_err() {
+        println!("  Setup cancelled or failed.");
+        return false;
+    }
+
+    // Launch new tmux session and switch to it
+    if tmux::launch_or_attach(&path.to_string_lossy()).is_err() {
+        println!("  Error: Failed to launch tmux session.");
+        return false;
+    }
+
+    true
 }
 
 fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
