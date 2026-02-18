@@ -916,13 +916,15 @@ pub async fn run() -> Result<()> {
             continue;
         }
 
-        // Handle /leave — leave current room, then offer room selection
+        // Handle /leave — leave current room, kill tmux session, offer room selection
         if state.want_leave {
             state.want_leave = false;
             tui::teardown(&mut terminal)?;
 
             let left = handle_leave_room(&state.storage);
             if left {
+                // Kill the tmux session (both panes) to avoid stale processes
+                kill_current_tmux_session(state.in_tmux);
                 // Re-enter the session menu (choose room / create / join)
                 let _ = crate::session::cmd_session();
                 return Ok(());
@@ -978,21 +980,27 @@ pub async fn run() -> Result<()> {
     tui::teardown(&mut terminal)?;
 
     // Kill the entire tmux session (dashboard + agent panes) on /quit
-    if state.in_tmux {
-        if let Ok(output) = std::process::Command::new("tmux")
-            .args(["display-message", "-p", "#{session_name}"])
-            .output()
-        {
-            let session = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !session.is_empty() {
-                let _ = std::process::Command::new("tmux")
-                    .args(["kill-session", "-t", &session])
-                    .status();
-            }
-        }
-    }
+    kill_current_tmux_session(state.in_tmux);
 
     Ok(())
+}
+
+/// Kill the current tmux session (both panes) to avoid stale processes.
+fn kill_current_tmux_session(in_tmux: bool) {
+    if !in_tmux {
+        return;
+    }
+    if let Ok(output) = std::process::Command::new("tmux")
+        .args(["display-message", "-p", "#{session_name}"])
+        .output()
+    {
+        let session = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !session.is_empty() {
+            let _ = std::process::Command::new("tmux")
+                .args(["kill-session", "-t", &session])
+                .status();
+        }
+    }
 }
 
 /// Handle /new command: prompt for path, init, launch new tmux session.
