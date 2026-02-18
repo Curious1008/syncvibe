@@ -237,7 +237,7 @@ fn apply_tmux_config(session_name: &str, agent_name: &str) -> Result<()> {
         ("pane-border-style", "fg=#333333"),
         ("pane-active-border-style", "fg=#333333"),
         ("pane-border-status", "top"),
-        ("pane-border-format", "#{?pane_active,#[fg=#888888] #{pane_title} ,#[fg=#555555] Ctrl+G → #{pane_title} }"),
+        ("pane-border-format", "#{?pane_active,#{?pane_at_left,#[align=left fg=#888888] #{pane_title} ,#[align=right fg=#888888] #{pane_title} },#{?pane_at_left,#[align=left fg=#555555] #{pane_title} #[align=right fg=#00d9ff bold]Ctrl+G → ,#[align=left fg=#00d9ff bold] ← Ctrl+G#[align=right fg=#555555] #{pane_title} }}"),
         ("mouse", "on"),
         ("status", "off"),
     ] {
