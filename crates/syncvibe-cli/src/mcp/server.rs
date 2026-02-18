@@ -345,7 +345,7 @@ impl SyncVibeMcp {
         }
         // If the message is too long, auto-replace with a short redirect
         let actual_content = if content.len() > 500 {
-            "回复较长，请到右边的 agent pane (Ctrl+G) 查看完整输出 ✦".to_string()
+            "Response is long — check the agent pane (Ctrl+G) for full output.".to_string()
         } else {
             content.clone()
         };
@@ -538,7 +538,7 @@ impl ServerHandler for SyncVibeMcp {
                  - Task done → \"Done — [one-line summary]\"\n\
                  - Need clarification → ask ONE short question.\n\
                  - NEVER paste code, logs, diffs, or anything over 2-3 lines.\n\
-                 - For detailed output → \"详情请看 agent pane (Ctrl+G)\"\n\
+                 - For detailed output → \"Check the agent pane (Ctrl+G) for details.\"\n\
                  - Long messages are auto-shortened. The tool always returns success.\n\
                  \n\
                  ═══ RULES ═══\n\

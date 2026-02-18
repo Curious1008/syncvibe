@@ -345,7 +345,7 @@ This project uses SyncVibe for real-time team collaboration.\n\
 - `send_chat` messages go to a shared chat window. Keep them to 1-2 sentences.\n\
   - Task done → \"Done — [one-line summary]\"\n\
   - Need info → ask one short question.\n\
-  - Long output → \"详情请看 agent pane (Ctrl+G)\"\n\
+  - Long output → \"Check the agent pane (Ctrl+G) for details.\"\n\
 - Do not write to `.syncvibe/` files directly. Always use MCP tools.\n";
 
 fn file_contains_syncvibe(path: &std::path::Path) -> bool {
