@@ -171,12 +171,6 @@ syncvibe/
 │           ├── models/            # Data types (chat, room, user)
 │           ├── protocol.rs        # WsMessage enum (WebSocket types)
 │           └── storage.rs         # .syncvibe/ file I/O (atomic writes, file locking)
-│
-└── worker/                        # Cloudflare Worker (TypeScript)
-    └── src/
-        ├── index.ts               # HTTP routing → Durable Object
-        ├── room.ts                # Durable Object: WS relay + presence
-        └── types.ts
 ```
 
 ---
@@ -247,7 +241,6 @@ cargo build --release
 
 - `crates/syncvibe-cli/` — Main binary (TUI, tmux, MCP, onboarding)
 - `crates/syncvibe-core/` — Shared library (models, storage, protocol)
-- `worker/` — Cloudflare Worker relay server
 
 ---
 
