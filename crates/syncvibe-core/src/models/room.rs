@@ -11,6 +11,8 @@ pub struct RoomConfig {
     pub relay_url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub room_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
 }
 
 impl RoomConfig {
@@ -28,6 +30,7 @@ impl RoomConfig {
             room_secret: hex_encode(&secret_bytes),
             relay_url: DEFAULT_RELAY_URL.to_string(),
             room_name: None,
+            agent: None,
         }
     }
 
@@ -90,6 +93,7 @@ impl RoomConfig {
             room_secret: secret,
             relay_url: DEFAULT_RELAY_URL.to_string(),
             room_name,
+            agent: None,
         })
     }
 }

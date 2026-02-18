@@ -74,7 +74,7 @@ pub fn cmd_session() -> Result<()> {
             if onboarding::confirm(
                 &format!("  {TEAL}◆{R} Found invite code in clipboard — join this room?"),
             )? {
-                let room = crate::invite::resolve_short_invite(trimmed)?;
+                let mut room = crate::invite::resolve_short_invite(trimmed)?;
                 let name = room.room_name.clone().unwrap_or_else(|| "syncvibe-room".to_string());
                 println!("  {GREEN}✓{R} Code accepted — {B}{name}{R}\n");
                 let proj = init::projects_dir().join(&name);
@@ -86,6 +86,8 @@ pub fn cmd_session() -> Result<()> {
                     );
                     return tmux::launch_project(&proj);
                 }
+                let agent_id = crate::agents::select_agent()?;
+                room.agent = Some(agent_id);
                 let path = init::prepare_project_dir(&name)?;
                 init::perform_init(&path, Some(room))?;
                 return tmux::launch_project(&path);
@@ -140,9 +142,11 @@ pub fn cmd_session() -> Result<()> {
                 if name.is_empty() {
                     anyhow::bail!("Cancelled.");
                 }
+                let agent_id = crate::agents::select_agent()?;
                 let path = init::prepare_project_dir(&name)?;
                 let mut room = RoomConfig::new();
                 room.room_name = Some(name);
+                room.agent = Some(agent_id);
                 init::perform_init(&path, Some(room))?;
                 tmux::launch_project(&path)
             } else {
@@ -150,7 +154,7 @@ pub fn cmd_session() -> Result<()> {
                 let code = onboarding::prompt(
                     &format!("  {TEAL}Invite code:{R} "),
                 )?;
-                let room = crate::invite::resolve_short_invite(&code)?;
+                let mut room = crate::invite::resolve_short_invite(&code)?;
                 let name = room.room_name.clone().unwrap_or_else(|| "syncvibe-room".to_string());
                 println!("  {GREEN}✓{R} Code accepted — {B}{name}{R}\n");
                 let proj = init::projects_dir().join(&name);
@@ -162,6 +166,8 @@ pub fn cmd_session() -> Result<()> {
                     );
                     return tmux::launch_project(&proj);
                 }
+                let agent_id = crate::agents::select_agent()?;
+                room.agent = Some(agent_id);
                 let path = init::prepare_project_dir(&name)?;
                 init::perform_init(&path, Some(room))?;
                 tmux::launch_project(&path)

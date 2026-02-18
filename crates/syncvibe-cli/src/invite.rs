@@ -83,6 +83,7 @@ pub fn resolve_short_invite(code: &str) -> Result<RoomConfig> {
         room_secret,
         relay_url,
         room_name,
+        agent: None,
     })
 }
 

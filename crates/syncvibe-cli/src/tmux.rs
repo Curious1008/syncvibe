@@ -2,6 +2,7 @@ use std::env;
 
 use anyhow::Result;
 
+use crate::agents;
 use crate::config;
 
 /// Generate a unique tmux session name from project name + full path hash.
@@ -23,16 +24,24 @@ pub fn launch_project(project_path: &std::path::Path) -> Result<()> {
         .unwrap_or_else(|| "project".to_string());
     let _ = config::register_project(&project_name, &project_path.to_string_lossy());
 
-    // Best-effort sync to Supabase
+    // Read room config to determine agent
     let room_json = project_path.join(".syncvibe").join("room.json");
-    if let Ok(content) = std::fs::read_to_string(&room_json) {
+    let agent = if let Ok(content) = std::fs::read_to_string(&room_json) {
         if let Ok(room) = serde_json::from_str::<syncvibe_core::models::RoomConfig>(&content) {
+            // Best-effort sync to Supabase
             let name = project_name.clone();
+            let room_id = room.room_id.clone();
+            let room_secret = room.room_secret.clone();
             std::thread::spawn(move || {
-                crate::sync::sync_room(&room.room_id, &name, &room.room_secret);
+                crate::sync::sync_room(&room_id, &name, &room_secret);
             });
+            agents::for_room(room.agent.as_deref())
+        } else {
+            agents::default()
         }
-    }
+    } else {
+        agents::default()
+    };
 
     let tmux_available = std::process::Command::new("tmux")
         .arg("-V")
@@ -47,11 +56,27 @@ pub fn launch_project(project_path: &std::path::Path) -> Result<()> {
         return rt.block_on(crate::app::run());
     }
 
-    launch_or_attach(&project_path.to_string_lossy())
+    launch_or_attach_with_agent(&project_path.to_string_lossy(), agent.command, agent.name)
 }
 
-/// Launch a new tmux session for a project or attach/switch to an existing one
+/// Launch a new tmux session for a project or attach/switch to an existing one.
+/// Uses default agent (Claude) — called from picker/switch flows.
 pub fn launch_or_attach(project_path: &str) -> Result<()> {
+    // Read room config to determine agent
+    let room_json = std::path::Path::new(project_path).join(".syncvibe").join("room.json");
+    let agent = if let Ok(content) = std::fs::read_to_string(&room_json) {
+        if let Ok(room) = serde_json::from_str::<syncvibe_core::models::RoomConfig>(&content) {
+            agents::for_room(room.agent.as_deref())
+        } else {
+            agents::default()
+        }
+    } else {
+        agents::default()
+    };
+    launch_or_attach_with_agent(project_path, agent.command, agent.name)
+}
+
+fn launch_or_attach_with_agent(project_path: &str, agent_cmd: &str, agent_name: &str) -> Result<()> {
     let project_dir = std::path::Path::new(project_path);
     let project_name = project_dir
         .file_name()
@@ -82,7 +107,7 @@ pub fn launch_or_attach(project_path: &str) -> Result<()> {
 
         if pane_count >= 2 {
             // Session is healthy — just enforce config
-            apply_tmux_config(&session_name)?;
+            apply_tmux_config(&session_name, agent_name)?;
         } else {
             // Stale session (1 pane after /quit). Check if we're inside it.
             let in_this_session = inside_tmux && {
@@ -95,18 +120,18 @@ pub fn launch_or_attach(project_path: &str) -> Result<()> {
 
             if in_this_session {
                 // Can't kill our own session — add split dynamically
-                ensure_split(&session_name, project_path, &bin_str)?;
+                ensure_split(&session_name, project_path, &bin_str, agent_name)?;
             } else {
                 // Kill stale session and recreate with clean layout
                 let _ = std::process::Command::new("tmux")
                     .args(["kill-session", "-t", &session_name])
                     .env_remove("TMUX")
                     .status();
-                create_session(&session_name, project_path, &bin_str)?;
+                create_session(&session_name, project_path, &bin_str, agent_cmd, agent_name)?;
             }
         }
     } else {
-        create_session(&session_name, project_path, &bin_str)?;
+        create_session(&session_name, project_path, &bin_str, agent_cmd, agent_name)?;
     }
 
     if inside_tmux {
@@ -122,7 +147,7 @@ pub fn launch_or_attach(project_path: &str) -> Result<()> {
     Ok(())
 }
 
-fn create_session(session_name: &str, project_path: &str, bin_str: &str) -> Result<()> {
+fn create_session(session_name: &str, project_path: &str, bin_str: &str, agent_cmd: &str, agent_name: &str) -> Result<()> {
     let status = std::process::Command::new("tmux")
         .args([
             "new-session",
@@ -131,7 +156,7 @@ fn create_session(session_name: &str, project_path: &str, bin_str: &str) -> Resu
             session_name,
             "-c",
             project_path,
-            "claude",
+            agent_cmd,
         ])
         .env_remove("TMUX")
         .status()?;
@@ -160,10 +185,10 @@ fn create_session(session_name: &str, project_path: &str, bin_str: &str) -> Resu
         .env_remove("TMUX")
         .status();
 
-    apply_tmux_config(session_name)
+    apply_tmux_config(session_name, agent_name)
 }
 
-fn ensure_split(session_name: &str, project_path: &str, bin_str: &str) -> Result<()> {
+fn ensure_split(session_name: &str, project_path: &str, bin_str: &str, agent_name: &str) -> Result<()> {
     let pane_count = std::process::Command::new("tmux")
         .args(["list-panes", "-t", session_name])
         .env_remove("TMUX")
@@ -173,7 +198,7 @@ fn ensure_split(session_name: &str, project_path: &str, bin_str: &str) -> Result
 
     if pane_count >= 2 {
         // Both panes exist — just enforce ratio and config
-        return apply_tmux_config(session_name);
+        return apply_tmux_config(session_name, agent_name);
     }
 
     let _ = std::process::Command::new("tmux")
@@ -191,10 +216,10 @@ fn ensure_split(session_name: &str, project_path: &str, bin_str: &str) -> Result
         .env_remove("TMUX")
         .status();
 
-    apply_tmux_config(session_name)
+    apply_tmux_config(session_name, agent_name)
 }
 
-fn apply_tmux_config(session_name: &str) -> Result<()> {
+fn apply_tmux_config(session_name: &str, agent_name: &str) -> Result<()> {
     // Keybindings
     for cmd in &[
         "bind -n C-g select-pane -t :.+",
@@ -261,9 +286,9 @@ fn apply_tmux_config(session_name: &str) -> Result<()> {
 
     if panes.len() >= 2 {
         let left = format!("{}:0.{}", session_name, panes[0].1); // dashboard
-        let right = format!("{}:0.{}", session_name, panes[1].1); // claude
+        let right = format!("{}:0.{}", session_name, panes[1].1); // agent
 
-        // Enforce ratio: dashboard 30%, claude 70%
+        // Enforce ratio: dashboard 30%, agent 70%
         let _ = std::process::Command::new("tmux")
             .args(["resize-pane", "-t", &left, "-x", "30%"])
             .env_remove("TMUX")
@@ -275,7 +300,7 @@ fn apply_tmux_config(session_name: &str) -> Result<()> {
             .env_remove("TMUX")
             .status();
         let _ = std::process::Command::new("tmux")
-            .args(["select-pane", "-t", &right, "-T", "Claude Code"])
+            .args(["select-pane", "-t", &right, "-T", agent_name])
             .env_remove("TMUX")
             .status();
     }

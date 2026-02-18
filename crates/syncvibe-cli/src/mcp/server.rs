@@ -17,7 +17,16 @@ use tokio::sync::Mutex;
 use syncvibe_core::models::{ChatMessage, MessageType, UserConfig};
 use syncvibe_core::storage::Storage;
 
+use crate::agents;
 use crate::config;
+
+/// Agent identity used for send_chat and mention matching
+struct AgentIdentity {
+    user_id: String,
+    user_name: String,
+    user_color: String,
+    mentions: Vec<String>, // mentions this agent responds to (including @agent)
+}
 
 /// Incremental read state — persists across calls within one MCP session
 struct ReadState {
@@ -31,6 +40,7 @@ struct ReadState {
 pub struct SyncVibeMcp {
     storage: Arc<Mutex<Storage>>,
     user: UserConfig,
+    agent_identity: Arc<AgentIdentity>,
     state: Arc<Mutex<ReadState>>,
     tool_router: ToolRouter<Self>,
 }
@@ -58,20 +68,43 @@ fn err(msg: String) -> ErrorData {
     ErrorData::internal_error(msg, None)
 }
 
-/// Check if a message is directed at the AI agent.
-fn is_agent_task(m: &ChatMessage) -> bool {
+/// Try multiple common timestamp formats so the AI doesn't get tripped up.
+fn parse_flexible_timestamp(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    // ISO 8601 with timezone
+    if let Ok(dt) = s.parse::<chrono::DateTime<chrono::Utc>>() {
+        return Some(dt);
+    }
+    // ISO 8601 with fixed offset (e.g. +08:00)
+    if let Ok(dt) = s.parse::<chrono::DateTime<chrono::FixedOffset>>() {
+        return Some(dt.with_timezone(&chrono::Utc));
+    }
+    // Naive datetime → assume UTC: "2025-01-15T14:30:00" or "2025-01-15 14:30:00"
+    if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S") {
+        return Some(naive.and_utc());
+    }
+    if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
+        return Some(naive.and_utc());
+    }
+    // Date only → start of day UTC: "2025-01-15"
+    if let Ok(date) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        let naive = date.and_hms_opt(0, 0, 0)?;
+        return Some(naive.and_utc());
+    }
+    None
+}
+
+/// Check if a message is directed at this AI agent.
+fn is_agent_task(m: &ChatMessage, agent_mentions: &[String]) -> bool {
     if m.message_type != MessageType::User {
         return false;
     }
     let lower = m.content.to_lowercase();
-    ["@agent", "@claude-code", "@claude"]
-        .iter()
-        .any(|p| lower.contains(p))
+    agent_mentions.iter().any(|p| lower.contains(p))
 }
 
 /// Collect @agent task messages and format a prominent header section.
-fn agent_task_header(msgs: &[&ChatMessage]) -> String {
-    let tasks: Vec<&ChatMessage> = msgs.iter().copied().filter(|m| is_agent_task(m)).collect();
+fn agent_task_header(msgs: &[&ChatMessage], agent_mentions: &[String]) -> String {
+    let tasks: Vec<&ChatMessage> = msgs.iter().copied().filter(|m| is_agent_task(m, agent_mentions)).collect();
     if tasks.is_empty() {
         return String::new();
     }
@@ -85,7 +118,7 @@ fn agent_task_header(msgs: &[&ChatMessage]) -> String {
 }
 
 /// Format a single message line (without name/time prefix, for grouped output).
-fn format_message_body(m: &ChatMessage) -> String {
+fn format_message_body(m: &ChatMessage, agent_mentions: &[String]) -> String {
     let quote_prefix = if let Some(ref q) = m.quote {
         format!("> {}: {}\n", q.user_name, q.content)
     } else {
@@ -93,7 +126,7 @@ fn format_message_body(m: &ChatMessage) -> String {
     };
     let body = match m.message_type {
         MessageType::User => {
-            if is_agent_task(m) {
+            if is_agent_task(m, agent_mentions) {
                 format!("⚡ {}", m.content)
             } else {
                 m.content.clone()
@@ -114,7 +147,7 @@ fn format_message_body(m: &ChatMessage) -> String {
 
 /// Format messages in compact grouped form.
 /// Consecutive messages from the same user are grouped under one header.
-fn format_compact(msgs: &[&ChatMessage]) -> String {
+fn format_compact(msgs: &[&ChatMessage], agent_mentions: &[String]) -> String {
     if msgs.is_empty() {
         return String::new();
     }
@@ -126,10 +159,10 @@ fn format_compact(msgs: &[&ChatMessage]) -> String {
         let time = m.timestamp.with_timezone(&Local).format("%H:%M");
 
         // Collect consecutive messages from same user
-        let mut group = vec![format_message_body(m)];
+        let mut group = vec![format_message_body(m, agent_mentions)];
         let mut j = i + 1;
         while j < msgs.len() && msgs[j].user_name == m.user_name {
-            group.push(format_message_body(msgs[j]));
+            group.push(format_message_body(msgs[j], agent_mentions));
             j += 1;
         }
 
@@ -172,11 +205,11 @@ fn collect_participants(msgs: &[&ChatMessage]) -> Vec<String> {
 }
 
 /// Format the output, choosing compact or json based on params.
-fn format_output(msgs: &[&ChatMessage], is_json: bool) -> std::result::Result<String, ErrorData> {
+fn format_output(msgs: &[&ChatMessage], is_json: bool, agent_mentions: &[String]) -> std::result::Result<String, ErrorData> {
     if is_json {
         serde_json::to_string_pretty(&msgs).map_err(|e| err(e.to_string()))
     } else {
-        Ok(format_compact(msgs))
+        Ok(format_compact(msgs, agent_mentions))
     }
 }
 
@@ -227,17 +260,18 @@ fn build_response(
     header: &str,
     is_json: bool,
     storage: &Storage,
+    agent_mentions: &[String],
 ) -> std::result::Result<String, ErrorData> {
-    let task_header = agent_task_header(msgs);
+    let task_header = agent_task_header(msgs, agent_mentions);
 
     if msgs.len() < DIGEST_THRESHOLD {
         // Small: inline everything
-        let body = format_output(msgs, is_json)?;
+        let body = format_output(msgs, is_json, agent_mentions)?;
         return Ok(format!("{}{}{}", task_header, header, body));
     }
 
     // Large: write full content to digest file, return brief response
-    let body = format_output(msgs, is_json)?;
+    let body = format_output(msgs, is_json, agent_mentions)?;
     let digest_content = format!("{}{}{}", task_header, header, body);
     storage
         .write_chat_digest(&digest_content)
@@ -264,9 +298,30 @@ fn build_response(
 #[tool_router]
 impl SyncVibeMcp {
     fn new(storage: Storage, user: UserConfig) -> Self {
+        // Read room config to determine which agent this MCP server represents
+        let agent = storage
+            .read_room_config()
+            .ok()
+            .and_then(|room| room.agent.as_deref().and_then(agents::find))
+            .unwrap_or_else(agents::default);
+
+        // Build mentions list: @agent (universal) + agent-specific mentions
+        let mut mentions: Vec<String> = vec!["@agent".to_string()];
+        for m in agent.mentions {
+            mentions.push(m.to_string());
+        }
+
+        let agent_identity = AgentIdentity {
+            user_id: format!("agent-{}", agent.id),
+            user_name: agent.name.to_string(),
+            user_color: agent.color.to_string(),
+            mentions,
+        };
+
         Self {
             storage: Arc::new(Mutex::new(storage)),
             user,
+            agent_identity: Arc::new(agent_identity),
             state: Arc::new(Mutex::new(ReadState {
                 byte_offset: 0,
                 session_id: None,
@@ -277,18 +332,23 @@ impl SyncVibeMcp {
         }
     }
 
-    #[tool(description = "Send a chat message to the room. Use this instead of writing to the chat log file directly.")]
+    #[tool(description = "Send a short chat message to your team. Keep it 1-2 sentences. Examples: 'Done — refactored auth module', 'Question: should I use Redis or Memcached?'. Never paste code/logs. This tool always succeeds.")]
     async fn send_chat(
         &self,
         Parameters(params): Parameters<SendChatParams>,
     ) -> Result<CallToolResult, ErrorData> {
         let content = params.content.trim().to_string();
         if content.is_empty() {
-            return Err(ErrorData::invalid_params("Message content cannot be empty", None));
+            return Ok(CallToolResult::success(vec![Content::text(
+                "Nothing to send (empty message). No action taken.",
+            )]));
         }
-        if content.len() > 10_000 {
-            return Err(ErrorData::invalid_params("Message too long (max 10,000 chars)", None));
-        }
+        // If the message is too long, auto-replace with a short redirect
+        let actual_content = if content.len() > 500 {
+            "回复较长，请到右边的 agent pane (Ctrl+G) 查看完整输出 ✦".to_string()
+        } else {
+            content.clone()
+        };
 
         let storage = self.storage.lock().await;
         let state = self.state.lock().await;
@@ -298,11 +358,12 @@ impl SyncVibeMcp {
             .clone()
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
+        // Send as the agent identity, not the human user
         let msg = ChatMessage::new_user_message(
-            self.user.profile.user_id.clone(),
-            self.user.profile.name.clone(),
-            self.user.profile.color.clone(),
-            content.clone(),
+            self.agent_identity.user_id.clone(),
+            self.agent_identity.user_name.clone(),
+            self.agent_identity.user_color.clone(),
+            actual_content.clone(),
             session_id,
             None,
         );
@@ -313,17 +374,18 @@ impl SyncVibeMcp {
 
         Ok(CallToolResult::success(vec![Content::text(format!(
             "Message sent: {}",
-            content
+            actual_content
         ))]))
     }
 
-    #[tool(description = "Read chat messages. Call with no parameters for smart defaults: returns current session messages, then only new messages on subsequent calls. For large conversations, full content is written to .syncvibe/chat-digest.md — use Read tool to access it. Use 'all: true' for full history, 'since' for time-based filtering.")]
+    #[tool(description = "Read chat messages. Call with NO parameters for best results — it auto-returns current session, then incrementally returns only new messages. Optional: 'all: true' for full history, 'since: <ISO 8601>' for time filter. If response mentions a file path, use your Read tool to access it. This tool always succeeds.")]
     async fn read_chat(
         &self,
         Parameters(params): Parameters<ReadChatParams>,
     ) -> Result<CallToolResult, ErrorData> {
         let storage = self.storage.lock().await;
         let is_json = params.format.as_deref() == Some("json");
+        let agent_mentions = &self.agent_identity.mentions;
 
         // --- Explicit modes: all / since ---
 
@@ -334,16 +396,21 @@ impl SyncVibeMcp {
             let refs: Vec<&ChatMessage> = all.iter().collect();
             let refs = filter_for_agent(&refs);
             let header = format!("── all: {} messages ──\n", refs.len());
-            let text = build_response(&refs, &header, is_json, &storage)?;
+            let text = build_response(&refs, &header, is_json, &storage, agent_mentions)?;
             return Ok(CallToolResult::success(vec![Content::text(text)]));
         }
 
         if let Some(ref since_str) = params.since {
-            let since = since_str
-                .parse::<chrono::DateTime<chrono::Utc>>()
-                .map_err(|_| {
-                    ErrorData::invalid_params("Invalid timestamp. Use ISO 8601.", None)
-                })?;
+            let since = parse_flexible_timestamp(since_str);
+            let since = match since {
+                Some(ts) => ts,
+                None => {
+                    return Ok(CallToolResult::success(vec![Content::text(format!(
+                        "Could not parse '{}' as a timestamp. Use ISO 8601 format, e.g. '2025-01-15T14:30:00Z'. Calling read_chat with no parameters will return the current session instead.",
+                        since_str
+                    ))]));
+                }
+            };
             let all = storage
                 .read_chat_messages()
                 .map_err(|e| err(e.to_string()))?;
@@ -351,7 +418,7 @@ impl SyncVibeMcp {
                 all.iter().filter(|m| m.timestamp >= since).collect();
             let refs = filter_for_agent(&refs);
             let header = format!("── since {}: {} messages ──\n", since_str, refs.len());
-            let text = build_response(&refs, &header, is_json, &storage)?;
+            let text = build_response(&refs, &header, is_json, &storage, agent_mentions)?;
             return Ok(CallToolResult::success(vec![Content::text(text)]));
         }
 
@@ -394,7 +461,7 @@ impl SyncVibeMcp {
                 "── session: {} msgs · {} ──\n",
                 state.total_read, participants
             );
-            let text = build_response(&session_msgs, &header, is_json, &storage)?;
+            let text = build_response(&session_msgs, &header, is_json, &storage, agent_mentions)?;
 
             Ok(CallToolResult::success(vec![Content::text(text)]))
         } else {
@@ -434,8 +501,8 @@ impl SyncVibeMcp {
             state.total_read += filtered.len();
 
             // Incremental reads are typically small, always inline
-            let body = format_output(&filtered, is_json)?;
-            let task_header = agent_task_header(&filtered);
+            let body = format_output(&filtered, is_json, agent_mentions)?;
+            let task_header = agent_task_header(&filtered, agent_mentions);
             let header = format!("── {} new ──\n", filtered.len());
 
             Ok(CallToolResult::success(vec![Content::text(format!(
@@ -452,22 +519,34 @@ impl ServerHandler for SyncVibeMcp {
         ServerInfo {
             protocol_version: ProtocolVersion::default(),
             instructions: Some(
-                "SyncVibe: Terminal-native collaboration for vibe coding.\n\
+                "SyncVibe — team chat for vibe coding. You are an AI agent collaborating with humans.\n\
                  \n\
-                 IMPORTANT: Before starting ANY task, call read_chat to understand\n\
-                 your team's discussion. If it returns a file path, Read that file.\n\
-                 Then briefly acknowledge what the team is discussing.\n\
+                 ═══ WORKFLOW ═══\n\
+                 1. On startup: call read_chat (no parameters) to see what your team is discussing.\n\
+                 2. If the response mentions a file path → use your Read tool on that file.\n\
+                 3. If you see ⚡ TASKS FOR YOU → these are direct requests. Do them first.\n\
+                 4. After completing work, use send_chat to briefly tell your team.\n\
                  \n\
-                 read_chat behavior:\n\
-                 - Small conversations: messages returned inline.\n\
-                 - Large conversations (30+): full content in .syncvibe/chat-digest.md.\n\
-                 - Subsequent calls: only new messages (incremental).\n\
+                 ═══ read_chat ═══\n\
+                 - Call with NO parameters. It auto-handles sessions and incremental reads.\n\
+                 - Second call onward → returns only NEW messages since last read.\n\
+                 - Large conversations → content saved to a file. Read that file.\n\
+                 - All parameters are optional. When in doubt, call with no parameters.\n\
                  \n\
-                 When read_chat shows ⚡ TASKS FOR YOU, these are direct requests from\n\
-                 team members. Prioritize completing these tasks and reply in chat when done.\n\
+                 ═══ send_chat ═══\n\
+                 - This is a CHAT WINDOW shared with humans. Keep messages SHORT.\n\
+                 - Task done → \"Done — [one-line summary]\"\n\
+                 - Need clarification → ask ONE short question.\n\
+                 - NEVER paste code, logs, diffs, or anything over 2-3 lines.\n\
+                 - For detailed output → \"详情请看 agent pane (Ctrl+G)\"\n\
+                 - Long messages are auto-shortened. The tool always returns success.\n\
                  \n\
-                 To send chat: use the send_chat tool with your message content.\n\
-                 Never write directly to .syncvibe/chat-log.jsonl."
+                 ═══ RULES ═══\n\
+                 - NEVER write directly to .syncvibe/ files. Always use these MCP tools.\n\
+                 - NEVER retry a tool call if it returned a success response.\n\
+                 - Do NOT call read_chat in a loop. Call once, do your work, call again only when needed.\n\
+                 - Both tools are designed to always succeed. If you get an unexpected result, \
+                 just continue your work — do not retry."
                     .to_string(),
             ),
             capabilities: ServerCapabilities::builder()

@@ -34,7 +34,7 @@ const TIPS: &[&str] = &[
     "Tip: /invite (/i) shows your room's invite code — share it to add teammates",
     "Tip: /chats lets you switch between SyncVibe rooms",
     "Tip: /mute (/m) toggles the @mention notification bell",
-    "Tip: @agent <task> sends a task directly to Claude Code — no pane switching needed",
+    "Tip: @agent <task> sends a task directly to your AI agent — no pane switching needed",
     "Tip: Drop a file path into chat to share images with your team",
     "Tip: /clear wipes the chat view — messages stay safe on disk",
     "Tip: AI agents auto-read this chat before starting work — just discuss here, then assign tasks",
@@ -91,6 +91,9 @@ pub struct AppState {
 
     // tmux mode (agent pane available)
     pub in_tmux: bool,
+
+    // Local agent (from room.json)
+    pub local_agent_id: Option<String>,
 }
 
 impl AppState {
@@ -112,10 +115,17 @@ impl AppState {
         let chat_messages = all_msgs[split_at..].to_vec();
         let project_name = crate::git::ops::repo_name().unwrap_or_else(|_| "project".to_string());
 
+        // Read local agent from room config
+        let local_agent_id = storage
+            .read_room_config()
+            .ok()
+            .and_then(|r| r.agent);
+
         let presence = vec![PresenceInfo {
             user_id: user.profile.user_id.clone(),
             user_name: user.profile.name.clone(),
             user_color: user.profile.color.clone(),
+            agent_id: local_agent_id.clone(),
         }];
 
         Ok(Self {
@@ -146,6 +156,7 @@ impl AppState {
             presence_offset: 0,
             last_presence_rotate: std::time::Instant::now(),
             in_tmux: std::env::var("TMUX").is_ok(),
+            local_agent_id: local_agent_id,
         })
     }
 
@@ -263,7 +274,7 @@ impl AppState {
                 self.system_msg("/quit     — exit SyncVibe  (/q)");
                 self.system_msg("");
                 self.system_msg("@name     — mention a teammate (highlights + bell)");
-                self.system_msg("@agent    — send task directly to Claude Code");
+                self.system_msg("@agent    — send task to your AI agent");
             }
             "/invite" | "/i" => {
                 match self.storage.read_room_config() {
@@ -497,8 +508,8 @@ impl AppState {
         Ok(())
     }
 
-    /// If message contains @agent, show confirmation.
-    /// The task is already saved to chat-log.jsonl — Claude Code picks it up
+    /// If message contains an @agent mention, show confirmation.
+    /// The task is already saved to chat-log.jsonl — the AI agent picks it up
     /// via read_chat MCP tool which highlights @agent mentions as pending tasks.
     fn handle_agent_mention(&mut self, msg: &ChatMessage) {
         if msg.user_id != self.user.profile.user_id {
@@ -506,12 +517,11 @@ impl AppState {
         }
 
         let content_lower = msg.content.to_lowercase();
-        let has_agent = ["@agent", "@claude-code", "@claude"]
-            .iter()
-            .any(|p| content_lower.contains(p));
-
-        if has_agent {
-            self.system_msg("\u{26a1} Highlighted for agent — Claude will prioritize this message");
+        if let Some(agent_name) = crate::agents::find_mentioned_agent(&content_lower) {
+            self.tip_msg(&format!(
+                "\u{26a1} Task sent — switch to {} pane (Ctrl+G) and ask it to check chat",
+                agent_name
+            ));
         }
     }
 
@@ -616,6 +626,7 @@ pub async fn run() -> Result<()> {
             &state.user.profile.user_id,
             &state.user.profile.name,
             &state.user.profile.color,
+            room.agent.clone(),
         )
         .await
         {
@@ -758,10 +769,12 @@ pub async fn run() -> Result<()> {
                         let user_id = state.user.profile.user_id.clone();
                         let user_name = state.user.profile.name.clone();
                         let user_color = state.user.profile.color.clone();
+                        let agent_id = room.agent.clone();
                         tokio::spawn(async move {
                             let result = ws_client::connect_ws(
                                 &relay_url, &room_id, &room_secret,
                                 &user_id, &user_name, &user_color,
+                                agent_id,
                             ).await;
                             let _ = tx.send(result).await;
                         });
@@ -985,7 +998,7 @@ pub async fn run() -> Result<()> {
 /// Handle /new command: prompt for path, init, launch new tmux session.
 /// Returns true if we switched to a new tmux session.
 fn handle_new_project() -> bool {
-    use crate::{config, init, onboarding, session, tmux};
+    use crate::{agents, config, init, onboarding, session, tmux};
     use crate::onboarding::{TEAL, RED, DIM, R};
     use syncvibe_core::models::RoomConfig;
 
@@ -1007,6 +1020,14 @@ fn handle_new_project() -> bool {
         }
     };
 
+    let agent_id = match agents::select_agent() {
+        Ok(id) => id,
+        Err(_) => {
+            println!("  {DIM}Cancelled.{R}");
+            return false;
+        }
+    };
+
     let path = match init::prepare_project_dir(&name) {
         Ok(p) => p,
         Err(_) => return false,
@@ -1018,6 +1039,7 @@ fn handle_new_project() -> bool {
 
     let mut room = RoomConfig::new();
     room.room_name = Some(name);
+    room.agent = Some(agent_id);
 
     if init::perform_init(&path, Some(room)).is_err() {
         println!("  {DIM}Setup cancelled or failed.{R}");
@@ -1034,7 +1056,7 @@ fn handle_new_project() -> bool {
 
 /// Handle /join command: prompt for invite code + room name, init, launch.
 fn handle_join_project() -> bool {
-    use crate::{init, onboarding, session, tmux};
+    use crate::{agents, init, onboarding, session, tmux};
     use crate::onboarding::{TEAL, GREEN, RED, DIM, B, R};
 
     println!();
@@ -1050,7 +1072,7 @@ fn handle_join_project() -> bool {
         }
     };
 
-    let room = match crate::invite::resolve_short_invite(&code) {
+    let mut room = match crate::invite::resolve_short_invite(&code) {
         Ok(r) => r,
         Err(e) => {
             println!("  {RED}✗{R} Invalid invite code: {e}");
@@ -1079,6 +1101,15 @@ fn handle_join_project() -> bool {
         }
         return true;
     }
+
+    let agent_id = match agents::select_agent() {
+        Ok(id) => id,
+        Err(_) => {
+            println!("  {DIM}Cancelled.{R}");
+            return false;
+        }
+    };
+    room.agent = Some(agent_id);
 
     let path = match init::prepare_project_dir(&name) {
         Ok(p) => p,
@@ -1182,6 +1213,7 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
                     user_id: state.user.profile.user_id.clone(),
                     user_name: state.user.profile.name.clone(),
                     user_color: state.user.profile.color.clone(),
+                    agent_id: state.local_agent_id.clone(),
                 });
             }
         }

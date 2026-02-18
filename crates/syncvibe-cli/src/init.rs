@@ -122,6 +122,9 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
 
     let has_git = cwd.join(".git").exists();
 
+    let claude_md_done = file_contains_syncvibe(&cwd.join("CLAUDE.md"));
+    let agents_md_done = file_contains_syncvibe(&cwd.join("AGENTS.md"));
+
     let mut items = vec![
         SetupItem {
             file: ".syncvibe/".to_string(),
@@ -144,10 +147,26 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
         SetupItem {
             file: ".mcp.json".to_string(),
             description: "Register MCP server for AI agents".to_string(),
-            reason: "Lets AI agents (Claude Code) call read_chat to see team discussion. Instructions are delivered via MCP protocol — no other config files needed.".to_string(),
+            reason: "Lets AI agents call read_chat/send_chat to collaborate with your team.".to_string(),
             required: false,
             checked: true,
             already_done: mcp_done,
+        },
+        SetupItem {
+            file: "CLAUDE.md".to_string(),
+            description: "SyncVibe hint for Claude Code".to_string(),
+            reason: "Minimal pointer so Claude knows MCP chat tools are available.".to_string(),
+            required: false,
+            checked: true,
+            already_done: claude_md_done,
+        },
+        SetupItem {
+            file: "AGENTS.md".to_string(),
+            description: "SyncVibe hint for Codex / other agents".to_string(),
+            reason: "Minimal pointer so Codex knows MCP chat tools are available.".to_string(),
+            required: false,
+            checked: true,
+            already_done: agents_md_done,
         },
     ];
 
@@ -200,6 +219,8 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
         match item.file.as_str() {
             ".gitignore" => setup_gitignore(cwd)?,
             ".mcp.json" => setup_mcp_json(cwd)?,
+            "CLAUDE.md" => append_syncvibe_hint(&cwd.join("CLAUDE.md"))?,
+            "AGENTS.md" => append_syncvibe_hint(&cwd.join("AGENTS.md"))?,
             _ => {} // .syncvibe/ is handled above via find_or_init_storage
         }
     }
@@ -308,6 +329,45 @@ fn setup_mcp_json(cwd: &std::path::Path) -> Result<()> {
             }
         });
         std::fs::write(&mcp_path, serde_json::to_string_pretty(&mcp_config)?)?;
+    }
+    Ok(())
+}
+
+const SYNCVIBE_HINT_MARKER: &str = "## SyncVibe";
+
+const SYNCVIBE_HINT: &str = "\n\
+## SyncVibe\n\
+This project uses SyncVibe for real-time team collaboration.\n\
+\n\
+### How to participate\n\
+- When the user asks you to \"check chat\" or \"read messages\", call `read_chat` (MCP tool, no parameters).\n\
+- Messages marked with ⚡ are tasks assigned to you. Complete them, then report back with `send_chat`.\n\
+- `send_chat` messages go to a shared chat window. Keep them to 1-2 sentences.\n\
+  - Task done → \"Done — [one-line summary]\"\n\
+  - Need info → ask one short question.\n\
+  - Long output → \"详情请看 agent pane (Ctrl+G)\"\n\
+- Do not write to `.syncvibe/` files directly. Always use MCP tools.\n";
+
+fn file_contains_syncvibe(path: &std::path::Path) -> bool {
+    path.exists()
+        && std::fs::read_to_string(path)
+            .map(|c| c.contains(SYNCVIBE_HINT_MARKER))
+            .unwrap_or(false)
+}
+
+fn append_syncvibe_hint(path: &std::path::Path) -> Result<()> {
+    if path.exists() {
+        let content = std::fs::read_to_string(path)?;
+        if content.contains(SYNCVIBE_HINT_MARKER) {
+            return Ok(());
+        }
+        let mut file = std::fs::OpenOptions::new().append(true).open(path)?;
+        if !content.ends_with('\n') {
+            std::io::Write::write_all(&mut file, b"\n")?;
+        }
+        std::io::Write::write_all(&mut file, SYNCVIBE_HINT.as_bytes())?;
+    } else {
+        std::fs::write(path, SYNCVIBE_HINT.trim_start())?;
     }
     Ok(())
 }

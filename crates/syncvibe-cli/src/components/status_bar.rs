@@ -1,9 +1,12 @@
+use std::collections::HashSet;
+
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use unicode_width::UnicodeWidthStr;
 
+use crate::agents;
 use crate::app::AppState;
 use crate::components::util::parse_hex_color;
 
@@ -44,10 +47,19 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
     presence_len += me_text.width() + you_text.width();
     let me_color = parse_hex_color(&state.user.profile.color);
 
-    // 2. Agent indicator (if in tmux)
-    let agent_text = " ◆ Agent ";
-    if state.in_tmux {
-        presence_len += agent_text.width();
+    // 2. Collect unique agents from presence (only agents brought by users in the room)
+    let mut agent_entries: Vec<(&str, Color)> = Vec::new();
+    let mut seen_agents = HashSet::new();
+    for p in &state.presence {
+        if let Some(ref aid) = p.agent_id {
+            if seen_agents.insert(aid.clone()) {
+                if let Some(agent) = agents::find(aid) {
+                    let text = format!(" ◆ {} ", agent.name);
+                    presence_len += text.width();
+                    agent_entries.push((agent.name, parse_hex_color(agent.color)));
+                }
+            }
+        }
     }
 
     // 3. Other users — carousel
@@ -105,11 +117,11 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
         Style::default().fg(Color::Rgb(60, 60, 60)),
     ));
 
-    // Render: agent → others → hidden indicator → current user
-    if state.in_tmux {
+    // Render: agents → others → hidden indicator → current user
+    for (name, color) in &agent_entries {
         presence_spans.push(Span::styled(
-            agent_text.to_string(),
-            Style::default().fg(Color::Rgb(78, 205, 196)), // teal #4ECDC4
+            format!(" ◆ {} ", name),
+            Style::default().fg(*color),
         ));
     }
 

@@ -219,6 +219,8 @@ const RESERVED_NAMES: &[&str] = &[
     "claude code",
     "claude-code",
     "claudecode",
+    "codex",
+    "openai",
     "bot",
     "system",
     "syncvibe",

@@ -26,6 +26,7 @@ pub async fn connect_ws(
     user_id: &str,
     user_name: &str,
     user_color: &str,
+    agent_id: Option<String>,
 ) -> Result<(WsClient, mpsc::Receiver<WsMessage>, watch::Receiver<bool>)> {
     // Enforce TLS to protect room_secret in transit
     if !relay_url.starts_with("wss://") {
@@ -66,6 +67,7 @@ pub async fn connect_ws(
         user_id: user_id.to_string(),
         user_name: user_name.to_string(),
         user_color: user_color.to_string(),
+        agent_id,
     };
     let auth_json = serde_json::to_string(&auth)?;
     write.send(Message::Text(auth_json.into())).await?;

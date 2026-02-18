@@ -5,6 +5,8 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use syncvibe_core::protocol::PresenceInfo;
 
+use crate::agents;
+
 pub const COMMANDS: &[(&str, &str)] = &[
     ("/help", "Show all commands"),
     ("/invite", "Show invite code"),
@@ -97,17 +99,39 @@ pub struct MentionItem {
     pub color: Color,   // user color or cyan for agent
 }
 
-/// Build the mention list from presence + always include @agent.
+/// Build the mention list from presence — only agents actually in the room.
 pub fn build_mentions(presence: &[PresenceInfo], self_id: &str) -> Vec<MentionItem> {
     let mut items = Vec::new();
 
-    // Agent is always first
-    items.push(MentionItem {
-        handle: "@agent".to_string(),
-        name: "agent".to_string(),
-        hint: "Claude Code".to_string(),
-        color: Color::Cyan,
-    });
+    // Collect which agents are present in the room (from presence data)
+    let mut seen_agents = std::collections::HashSet::new();
+    for p in presence {
+        if let Some(ref aid) = p.agent_id {
+            seen_agents.insert(aid.clone());
+        }
+    }
+
+    // Only show @agent if at least one agent is present
+    if !seen_agents.is_empty() {
+        items.push(MentionItem {
+            handle: "@agent".to_string(),
+            name: "agent".to_string(),
+            hint: "AI agent".to_string(),
+            color: Color::Cyan,
+        });
+
+        // Only show specific agent mentions for agents in the room
+        for aid in &seen_agents {
+            if let Some(agent) = agents::find(aid) {
+                items.push(MentionItem {
+                    handle: format!("@{}", agent.id),
+                    name: agent.id.to_string(),
+                    hint: agent.name.to_string(),
+                    color: parse_hex_color(agent.color),
+                });
+            }
+        }
+    }
 
     // Online users (excluding self)
     for p in presence {

@@ -1,3 +1,4 @@
+mod agents;
 mod app;
 mod auth;
 mod cli;
@@ -63,7 +64,10 @@ fn cmd_init() -> Result<()> {
         anyhow::bail!("Not in a git repository. Run `git init` first.");
     }
 
-    init::perform_init(&cwd, None)?;
+    let agent_id = agents::select_agent()?;
+    let mut room = syncvibe_core::models::RoomConfig::new();
+    room.agent = Some(agent_id);
+    init::perform_init(&cwd, Some(room))?;
     let _user = session::ensure_user_profile()?;
     tmux::launch_project(&cwd)
 }
@@ -192,7 +196,7 @@ fn cmd_invite() -> Result<()> {
 }
 
 fn cmd_connect(code: String) -> Result<()> {
-    let room = invite::resolve_short_invite(&code)?;
+    let mut room = invite::resolve_short_invite(&code)?;
 
     if let Some(ref name) = room.room_name {
         println!("  {GREEN}✓{R} Code accepted — {B}{name}{R}\n");
@@ -217,6 +221,9 @@ fn cmd_connect(code: String) -> Result<()> {
         );
         return tmux::launch_project(&proj);
     }
+
+    let agent_id = agents::select_agent()?;
+    room.agent = Some(agent_id);
 
     let path = init::prepare_project_dir(&name)?;
     init::perform_init(&path, Some(room))?;

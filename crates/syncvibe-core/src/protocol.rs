@@ -14,6 +14,8 @@ pub enum WsMessage {
         user_id: String,
         user_name: String,
         user_color: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_id: Option<String>,
     },
     AuthOk {
         users: Vec<PresenceInfo>,
@@ -58,4 +60,6 @@ pub struct PresenceInfo {
     pub user_id: String,
     pub user_name: String,
     pub user_color: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
 }
