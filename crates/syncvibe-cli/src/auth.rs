@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use syncvibe_core::models::AccountConfig;
 
 use crate::config;
+use crate::onboarding::{TEAL, GREEN, DIM, R};
 
 const WEB_BASE: &str = "https://syncvibe.online";
 
@@ -18,7 +19,7 @@ pub fn run_auth() -> Result<()> {
     // Check if already authenticated
     if let Ok(cfg) = config::load_user_config() {
         if cfg.account.is_some() {
-            println!("  Already authenticated. Re-authenticating...\n");
+            println!("  {DIM}Already authenticated. Re-authenticating...{R}\n");
         }
     }
 
@@ -31,13 +32,13 @@ pub fn run_auth() -> Result<()> {
 
     let url = format!("{}/authorize?cli_port={}", WEB_BASE, port);
 
-    println!("  Opening browser for authentication...\n");
-    println!("  If the browser doesn't open, visit:");
-    println!("  \x1b[36m{}\x1b[0m\n", url);
+    println!("  {TEAL}◆{R} Opening browser for authentication...\n");
+    println!("  {DIM}If the browser doesn't open, visit:{R}");
+    println!("  {TEAL}{url}{R}\n");
 
     open_browser(&url);
 
-    println!("  Waiting for authorization...");
+    println!("  {DIM}Waiting for authorization...{R}");
 
     // Set a 5-minute timeout for the whole auth flow
     listener
@@ -60,8 +61,8 @@ pub fn run_auth() -> Result<()> {
 
     save_token(&token)?;
 
-    println!("\n  \x1b[38;2;80;200;120m✓\x1b[0m Authenticated successfully!");
-    println!("  Token saved to ~/.syncvibe/config.toml\n");
+    println!("\n  {GREEN}✓{R} Authenticated successfully!");
+    println!("  {DIM}Token saved to ~/.syncvibe/config.toml{R}\n");
 
     Ok(())
 }

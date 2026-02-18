@@ -60,18 +60,33 @@ pub fn is_authenticated() -> bool {
         .unwrap_or(false)
 }
 
-/// Bail with a friendly message if not authenticated. Used to gate room creation.
+/// Check auth and interactively offer to sign up if not authenticated.
 pub fn require_auth(action: &str) -> Result<()> {
+    use crate::onboarding::{TEAL, DIM, R};
+
     if is_authenticated() {
         return Ok(());
     }
     println!(
-        "\n  \x1b[38;2;78;205;196m◆\x1b[0m {} requires a free SyncVibe account.\n",
-        action
+        "\n  {TEAL}◆{R} {action} requires a free SyncVibe account.\n",
     );
-    println!("  Run \x1b[1msyncvibe auth\x1b[0m to sign up — takes 30 seconds.\n");
-    println!("  \x1b[38;2;100;100;115mJoining rooms with an invite code is always free.\x1b[0m\n");
-    anyhow::bail!("Authentication required.")
+    println!("  {DIM}Joining rooms with an invite code is always free.{R}\n");
+
+    let choice = crate::onboarding::prompt(
+        &format!("  {TEAL}◆{R} Sign up now? {TEAL}[Y/n]{R} "),
+    )?;
+
+    if choice.is_empty() || choice.starts_with('y') || choice.starts_with('Y') {
+        println!();
+        crate::auth::run_auth()?;
+        // Verify auth succeeded
+        if is_authenticated() {
+            return Ok(());
+        }
+        anyhow::bail!("Authentication was not completed.")
+    } else {
+        anyhow::bail!("Authentication required.")
+    }
 }
 
 // --- Project Registry ---

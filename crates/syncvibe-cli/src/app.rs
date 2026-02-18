@@ -946,18 +946,24 @@ pub async fn run() -> Result<()> {
 /// Handle /new command: prompt for path, init, launch new tmux session.
 /// Returns true if we switched to a new tmux session.
 fn handle_new_project() -> bool {
-    use crate::{init, onboarding, session, tmux};
+    use crate::{config, init, onboarding, session, tmux};
+    use crate::onboarding::{TEAL, RED, DIM, R};
     use syncvibe_core::models::RoomConfig;
+
+    // Auth gate — offers inline sign-up
+    if config::require_auth("Creating a room").is_err() {
+        return false;
+    }
 
     println!();
     onboarding::print_section("New Room");
     println!();
     let name = match onboarding::prompt(
-        "  \x1b[38;2;78;205;196mRoom name:\x1b[0m ",
+        &format!("  {TEAL}Room name:{R} "),
     ) {
         Ok(n) if !n.is_empty() => n,
         _ => {
-            println!("  Cancelled.");
+            println!("  {DIM}Cancelled.{R}");
             return false;
         }
     };
@@ -975,12 +981,12 @@ fn handle_new_project() -> bool {
     room.room_name = Some(name);
 
     if init::perform_init(&path, Some(room)).is_err() {
-        println!("  Setup cancelled or failed.");
+        println!("  {DIM}Setup cancelled or failed.{R}");
         return false;
     }
 
     if tmux::launch_or_attach(&path.to_string_lossy()).is_err() {
-        println!("  \x1b[38;2;255;100;100mError:\x1b[0m Failed to launch tmux session.");
+        println!("  {RED}✗{R} Failed to launch tmux session.");
         return false;
     }
 
@@ -990,16 +996,17 @@ fn handle_new_project() -> bool {
 /// Handle /join command: prompt for invite code + room name, init, launch.
 fn handle_join_project() -> bool {
     use crate::{init, onboarding, session, tmux};
+    use crate::onboarding::{TEAL, GREEN, RED, DIM, B, R};
 
     println!();
     onboarding::print_section("Join Room");
     println!();
     let code = match onboarding::prompt(
-        "  \x1b[38;2;78;205;196mInvite code:\x1b[0m ",
+        &format!("  {TEAL}Invite code:{R} "),
     ) {
         Ok(c) if !c.is_empty() => c,
         _ => {
-            println!("  Cancelled.");
+            println!("  {DIM}Cancelled.{R}");
             return false;
         }
     };
@@ -1007,7 +1014,7 @@ fn handle_join_project() -> bool {
     let room = match crate::invite::resolve_short_invite(&code) {
         Ok(r) => r,
         Err(e) => {
-            println!("  \x1b[38;2;255;100;100mInvalid invite code:\x1b[0m {}", e);
+            println!("  {RED}✗{R} Invalid invite code: {e}");
             return false;
         }
     };
@@ -1015,14 +1022,9 @@ fn handle_join_project() -> bool {
     let name = room.room_name.clone().unwrap_or_else(|| "syncvibe-room".to_string());
 
     if room.room_name.is_some() {
-        println!(
-            "  \x1b[38;2;80;200;120m✓\x1b[0m Code accepted — \x1b[1m{}\x1b[0m\n",
-            name
-        );
+        println!("  {GREEN}✓{R} Code accepted — {B}{name}{R}\n");
     } else {
-        println!(
-            "  \x1b[38;2;80;200;120m✓\x1b[0m Code accepted\n"
-        );
+        println!("  {GREEN}✓{R} Code accepted\n");
     }
 
     let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
@@ -1030,11 +1032,11 @@ fn handle_join_project() -> bool {
     // Already joined — just launch
     if home.join(&name).join(".syncvibe").is_dir() {
         println!(
-            "  \x1b[38;2;100;100;115m→ {} (already set up)\x1b[0m\n",
+            "  {DIM}→ {} (already set up){R}\n",
             home.join(&name).display()
         );
         if tmux::launch_or_attach(&home.join(&name).to_string_lossy()).is_err() {
-            println!("  \x1b[38;2;255;100;100mError:\x1b[0m Failed to launch tmux session.");
+            println!("  {RED}✗{R} Failed to launch tmux session.");
         }
         return true;
     }
@@ -1049,12 +1051,12 @@ fn handle_join_project() -> bool {
     }
 
     if init::perform_init(&path, Some(room)).is_err() {
-        println!("  Setup cancelled or failed.");
+        println!("  {DIM}Setup cancelled or failed.{R}");
         return false;
     }
 
     if tmux::launch_or_attach(&path.to_string_lossy()).is_err() {
-        println!("  \x1b[38;2;255;100;100mError:\x1b[0m Failed to launch tmux session.");
+        println!("  {RED}✗{R} Failed to launch tmux session.");
         return false;
     }
 

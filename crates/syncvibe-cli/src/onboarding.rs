@@ -7,15 +7,16 @@ const MAX_NAME_LEN: usize = 32;
 
 // ── Color palette (RGB true color) ───────────────────────────────
 
-const TEAL: &str = "\x1b[38;2;78;205;196m";
-const DIM_TEAL: &str = "\x1b[38;2;50;100;95m";
-const GREEN: &str = "\x1b[38;2;80;200;120m";
-const YELLOW: &str = "\x1b[38;2;255;214;102m";
-const DIM: &str = "\x1b[38;2;100;100;115m";
-const MED: &str = "\x1b[38;2;155;155;170m";
-const BRIGHT: &str = "\x1b[38;2;225;225;235m";
-const B: &str = "\x1b[1m";
-const R: &str = "\x1b[0m";
+pub(crate) const TEAL: &str = "\x1b[38;2;78;205;196m";
+pub(crate) const DIM_TEAL: &str = "\x1b[38;2;50;100;95m";
+pub(crate) const GREEN: &str = "\x1b[38;2;80;200;120m";
+pub(crate) const RED: &str = "\x1b[38;2;255;100;100m";
+pub(crate) const YELLOW: &str = "\x1b[38;2;255;214;102m";
+pub(crate) const DIM: &str = "\x1b[38;2;100;100;115m";
+pub(crate) const MED: &str = "\x1b[38;2;155;155;170m";
+pub(crate) const BRIGHT: &str = "\x1b[38;2;225;225;235m";
+pub(crate) const B: &str = "\x1b[1m";
+pub(crate) const R: &str = "\x1b[0m";
 
 // ── Brand banner ─────────────────────────────────────────────────
 

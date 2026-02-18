@@ -5,7 +5,7 @@ use anyhow::Result;
 use syncvibe_core::models::RoomConfig;
 use syncvibe_core::storage::Storage;
 
-use crate::onboarding::{self, SetupItem};
+use crate::onboarding::{self, SetupItem, TEAL, DIM_TEAL, GREEN, RED, DIM, MED, BRIGHT, R};
 
 /// Validate that a room name is safe for use as a directory name.
 fn validate_room_name(name: &str) -> Result<()> {
@@ -34,24 +34,19 @@ pub fn prepare_project_dir(name: &str) -> Result<PathBuf> {
 
     loop {
         println!(
-            "\n  \x1b[38;2;78;205;196m◆ Project folder\x1b[0m\n  \x1b[38;2;225;225;235m{}\x1b[0m\n",
+            "\n  {TEAL}◆ Project folder{R}\n  {BRIGHT}{}{R}\n",
             path.display()
         );
 
         match try_create_project_dir(&path) {
             Ok(()) => {
-                println!(
-                    "  \x1b[38;2;80;200;120m✓\x1b[0m Folder ready\n"
-                );
+                println!("  {GREEN}✓{R} Folder ready\n");
                 return Ok(path);
             }
             Err(e) => {
-                println!(
-                    "  \x1b[38;2;255;100;100m✗\x1b[0m Cannot create folder: {}\n",
-                    e
-                );
+                println!("  {RED}✗{R} Cannot create folder: {e}\n");
                 let alt = onboarding::prompt(
-                    "  \x1b[38;2;78;205;196mEnter a different path (or 'q' to cancel):\x1b[0m ",
+                    &format!("  {TEAL}Enter a different path (or 'q' to cancel):{R} "),
                 )?;
                 let alt = alt.trim();
                 if alt.is_empty() || alt == "q" || alt == "Q" {
@@ -171,7 +166,7 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
     // Show header
     println!();
     onboarding::print_section("Room Setup");
-    println!("  \x1b[38;2;155;155;170mSelect what to set up for this project:\x1b[0m\n");
+    println!("  {MED}Select what to set up for this project:{R}\n");
 
     let confirmed = onboarding::confirm_setup(&mut items)?;
     if !confirmed {
@@ -205,31 +200,19 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
 
     // Print summary
     println!();
-    println!(
-        "  \x1b[38;2;50;100;95m──────────────────────────────────────\x1b[0m"
-    );
+    println!("  {DIM_TEAL}──────────────────────────────────────{R}");
     for item in &items {
         if item.already_done {
             continue;
         }
         if item.checked {
-            println!(
-                "  \x1b[38;2;80;200;120m✓\x1b[0m \x1b[38;2;225;225;235m{}\x1b[0m",
-                item.file
-            );
+            println!("  {GREEN}✓{R} {BRIGHT}{}{R}", item.file);
         } else {
-            println!(
-                "  \x1b[38;2;100;100;115m- {} (skipped)\x1b[0m",
-                item.file
-            );
+            println!("  {DIM}- {} (skipped){R}", item.file);
         }
     }
-    println!(
-        "  \x1b[38;2;50;100;95m──────────────────────────────────────\x1b[0m"
-    );
-    println!(
-        "\n  \x1b[38;2;78;205;196m◆\x1b[0m \x1b[38;2;80;200;120mRoom ready!\x1b[0m\n"
-    );
+    println!("  {DIM_TEAL}──────────────────────────────────────{R}");
+    println!("\n  {TEAL}◆{R} {GREEN}Room ready!{R}\n");
 
     Ok(room)
 }
@@ -296,7 +279,7 @@ fn setup_mcp_json(cwd: &std::path::Path) -> Result<()> {
             Ok(v) => v,
             Err(_) => {
                 eprintln!(
-                    "  \x1b[33mWarning:\x1b[0m .mcp.json is not valid JSON, skipping. \
+                    "  {RED}✗{R} .mcp.json is not valid JSON, skipping. \
                      Add SyncVibe manually."
                 );
                 return Ok(());

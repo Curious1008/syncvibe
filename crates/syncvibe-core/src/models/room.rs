@@ -1,7 +1,7 @@
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 
-pub const DEFAULT_RELAY_URL: &str = "wss://syncvibe-relay.business-a9e.workers.dev";
+pub const DEFAULT_RELAY_URL: &str = "wss://relay.syncvibe.online";
 const INVITE_PREFIX: &str = "syncvibe://";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

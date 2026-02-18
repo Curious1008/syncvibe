@@ -4,7 +4,8 @@ use anyhow::Result;
 
 use syncvibe_core::models::{RoomConfig, UserConfig};
 
-use crate::{config, init, onboarding, tmux};
+use crate::onboarding::{self, TEAL, GREEN, DIM, B, R};
+use crate::{config, init, tmux};
 
 /// Ensure user profile exists, prompting interactively if needed.
 pub fn ensure_user_profile() -> Result<UserConfig> {
@@ -24,10 +25,10 @@ pub fn ensure_user_profile() -> Result<UserConfig> {
     onboarding::print_banner();
 
     let raw_name = if git_name.is_empty() {
-        onboarding::prompt("  \x1b[38;2;78;205;196mYour name:\x1b[0m ")?
+        onboarding::prompt(&format!("  {TEAL}Your name:{R} "))?
     } else {
         onboarding::prompt_with_default(
-            "  \x1b[38;2;78;205;196mYour name\x1b[0m",
+            &format!("  {TEAL}Your name{R}"),
             &git_name,
         )?
     };
@@ -49,10 +50,7 @@ pub fn ensure_user_profile() -> Result<UserConfig> {
     let user_config = UserConfig::new(name.clone(), color);
     config::save_user_config(&user_config)?;
 
-    println!(
-        "  \x1b[38;2;80;200;120m✓\x1b[0m Profile saved \x1b[38;2;100;100;115m({})\x1b[0m\n",
-        name
-    );
+    println!("  {GREEN}✓{R} Profile saved {DIM}({name}){R}\n");
     Ok(user_config)
 }
 
@@ -74,22 +72,19 @@ pub fn cmd_session() -> Result<()> {
         let trimmed = clip.trim();
         if crate::invite::looks_like_short_code(trimmed) || trimmed.starts_with("syncvibe://") {
             println!(
-                "  \x1b[38;2;78;205;196m?\x1b[0m Found invite code in clipboard — join this room? [Y/n] ",
+                "  {TEAL}◆{R} Found invite code in clipboard — join this room? {TEAL}[Y/n]{R} ",
             );
             let answer = onboarding::prompt("")?;
             if answer.is_empty() || answer.starts_with('y') || answer.starts_with('Y') {
                 let room = crate::invite::resolve_short_invite(trimmed)?;
                 let name = room.room_name.clone().unwrap_or_else(|| "syncvibe-room".to_string());
-                println!(
-                    "  \x1b[38;2;80;200;120m✓\x1b[0m Code accepted — \x1b[1m{}\x1b[0m\n",
-                    name
-                );
+                println!("  {GREEN}✓{R} Code accepted — {B}{name}{R}\n");
                 let home = dirs::home_dir()
                     .unwrap_or_else(|| std::path::PathBuf::from("."));
                 // Already joined — just launch
                 if home.join(&name).join(".syncvibe").is_dir() {
                     println!(
-                        "  \x1b[38;2;100;100;115m→ {} (already set up)\x1b[0m\n",
+                        "  {DIM}→ {} (already set up){R}\n",
                         home.join(&name).display()
                     );
                     return tmux::launch_project(&home.join(&name));
@@ -143,7 +138,7 @@ pub fn cmd_session() -> Result<()> {
                 crate::config::require_auth("Creating a room")?;
                 println!();
                 let name = onboarding::prompt(
-                    "  \x1b[38;2;78;205;196mRoom name:\x1b[0m ",
+                    &format!("  {TEAL}Room name:{R} "),
                 )?;
                 if name.is_empty() {
                     anyhow::bail!("Cancelled.");
@@ -156,20 +151,17 @@ pub fn cmd_session() -> Result<()> {
             } else {
                 // Join with invite code
                 let code = onboarding::prompt(
-                    "  \x1b[38;2;78;205;196mInvite code:\x1b[0m ",
+                    &format!("  {TEAL}Invite code:{R} "),
                 )?;
                 let room = crate::invite::resolve_short_invite(&code)?;
                 let name = room.room_name.clone().unwrap_or_else(|| "syncvibe-room".to_string());
-                println!(
-                    "  \x1b[38;2;80;200;120m✓\x1b[0m Code accepted — \x1b[1m{}\x1b[0m\n",
-                    name
-                );
+                println!("  {GREEN}✓{R} Code accepted — {B}{name}{R}\n");
                 let home = dirs::home_dir()
                     .unwrap_or_else(|| std::path::PathBuf::from("."));
                 // Already joined — just launch
                 if home.join(&name).join(".syncvibe").is_dir() {
                     println!(
-                        "  \x1b[38;2;100;100;115m→ {} (already set up)\x1b[0m\n",
+                        "  {DIM}→ {} (already set up){R}\n",
                         home.join(&name).display()
                     );
                     return tmux::launch_project(&home.join(&name));

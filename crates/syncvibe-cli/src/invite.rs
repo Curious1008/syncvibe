@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use syncvibe_core::models::{RoomConfig, DEFAULT_RELAY_URL};
 
 /// Derive the HTTP base URL from the relay WebSocket URL.
-/// e.g. "wss://syncvibe-relay.business-a9e.workers.dev" → "https://syncvibe-relay.business-a9e.workers.dev"
+/// e.g. "wss://relay.syncvibe.online" → "https://relay.syncvibe.online"
 fn http_url(relay_url: &str) -> String {
     relay_url
         .replace("wss://", "https://")

@@ -1,6 +1,6 @@
 #!/bin/sh
 # SyncVibe installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/Curious1008/syncvibe/main/install.sh | sh
+# Usage: curl -fsSL https://syncvibe.online/install.sh | sh
 set -eu
 
 REPO="Curious1008/syncvibe"

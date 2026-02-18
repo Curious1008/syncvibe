@@ -24,6 +24,8 @@ use cli::{Cli, Command};
 use syncvibe_core::models::{ChatMessage, UserConfig};
 use syncvibe_core::storage::Storage;
 
+use onboarding::{TEAL, GREEN, DIM, B, R};
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -101,10 +103,10 @@ fn cmd_join(name: Option<String>, color: Option<String>) -> Result<()> {
     let user_config = UserConfig::new(name.clone(), color);
     config::save_user_config(&user_config)?;
 
-    println!("  Profile saved!");
-    println!("  Name:  {}", name);
-    println!("  ID:    {}", user_config.profile.user_id);
-    println!("\n  Launch the TUI with: syncvibe");
+    println!("  {GREEN}✓{R} Profile saved!");
+    println!("  {DIM}Name:{R}  {name}");
+    println!("  {DIM}ID:{R}    {}", user_config.profile.user_id);
+    println!("\n  {DIM}Launch the TUI with:{R} {TEAL}syncvibe{R}");
 
     Ok(())
 }
@@ -117,10 +119,10 @@ fn cmd_profile(name: Option<String>, color: Option<String>) -> Result<()> {
     let mut user = config::load_user_config()?;
 
     if name.is_none() && color.is_none() {
-        println!("  Name:  {}", user.profile.name);
-        println!("  Color: {}", user.profile.color);
-        println!("  ID:    {}", user.profile.user_id);
-        println!("\n  Update with: syncvibe profile --name <name> --color <hex>");
+        println!("  {DIM}Name:{R}  {}", user.profile.name);
+        println!("  {DIM}Color:{R} {}", user.profile.color);
+        println!("  {DIM}ID:{R}    {}", user.profile.user_id);
+        println!("\n  {DIM}Update with:{R} {TEAL}syncvibe profile --name <name> --color <hex>{R}");
         return Ok(());
     }
 
@@ -139,9 +141,9 @@ fn cmd_profile(name: Option<String>, color: Option<String>) -> Result<()> {
     }
     config::save_user_config(&user)?;
 
-    println!("  Profile updated!");
-    println!("  Name:  {}", user.profile.name);
-    println!("  Color: {}", user.profile.color);
+    println!("  {GREEN}✓{R} Profile updated!");
+    println!("  {DIM}Name:{R}  {}", user.profile.name);
+    println!("  {DIM}Color:{R} {}", user.profile.color);
 
     Ok(())
 }
@@ -191,12 +193,9 @@ fn cmd_connect(code: String) -> Result<()> {
     let room = invite::resolve_short_invite(&code)?;
 
     if let Some(ref name) = room.room_name {
-        println!(
-            "  \x1b[38;2;80;200;120m✓\x1b[0m Code accepted — \x1b[1m{}\x1b[0m\n",
-            name
-        );
+        println!("  {GREEN}✓{R} Code accepted — {B}{name}{R}\n");
     } else {
-        println!("  \x1b[38;2;80;200;120m✓\x1b[0m Code accepted\n");
+        println!("  {GREEN}✓{R} Code accepted\n");
     }
 
     let _user = session::ensure_user_profile()?;
@@ -211,7 +210,7 @@ fn cmd_connect(code: String) -> Result<()> {
     // Already joined — just launch
     if home.join(&name).join(".syncvibe").is_dir() {
         println!(
-            "  \x1b[38;2;100;100;115m→ {} (already set up)\x1b[0m\n",
+            "  {DIM}→ {} (already set up){R}\n",
             home.join(&name).display()
         );
         return tmux::launch_project(&home.join(&name));
@@ -231,9 +230,7 @@ fn cmd_status() -> Result<()> {
 
     let short_id = if room.room_id.len() >= 8 { &room.room_id[..8] } else { &room.room_id };
     println!(
-        "  {} · room:{} · {} messages",
-        project_name,
-        short_id,
+        "  {B}{project_name}{R} {DIM}· room:{short_id} · {} messages{R}",
         messages.len()
     );
 

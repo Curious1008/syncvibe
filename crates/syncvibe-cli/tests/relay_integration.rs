@@ -10,7 +10,7 @@ use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 
-const RELAY_URL: &str = "wss://syncvibe-relay.business-a9e.workers.dev";
+const RELAY_URL: &str = "wss://relay.syncvibe.online";
 
 fn new_room_id() -> String {
     uuid::Uuid::new_v4().to_string()

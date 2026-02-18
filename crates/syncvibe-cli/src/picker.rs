@@ -20,7 +20,7 @@ pub fn pick_project(current_path: Option<&str>) -> anyhow::Result<Option<Project
         .collect();
 
     if projects.is_empty() {
-        println!("  No rooms found. Use /new to create one.");
+        println!("  \x1b[38;2;100;100;115mNo rooms found. Use /new to create one.\x1b[0m");
         return Ok(None);
     }
 
