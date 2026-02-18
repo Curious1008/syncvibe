@@ -963,6 +963,22 @@ pub async fn run() -> Result<()> {
     }
 
     tui::teardown(&mut terminal)?;
+
+    // Kill the entire tmux session (dashboard + agent panes) on /quit
+    if state.in_tmux {
+        if let Ok(output) = std::process::Command::new("tmux")
+            .args(["display-message", "-p", "#{session_name}"])
+            .output()
+        {
+            let session = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !session.is_empty() {
+                let _ = std::process::Command::new("tmux")
+                    .args(["kill-session", "-t", &session])
+                    .status();
+            }
+        }
+    }
+
     Ok(())
 }
 
