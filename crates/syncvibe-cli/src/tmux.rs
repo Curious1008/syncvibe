@@ -40,8 +40,8 @@ pub fn launch_project(project_path: &std::path::Path) -> Result<()> {
         .map(|o| o.status.success())
         .unwrap_or(false);
 
-    if !tmux_available || env::var("TMUX").is_ok() {
-        // Ensure cwd is the project directory so app::run() finds .syncvibe/
+    if !tmux_available {
+        // No tmux — run TUI inline in the current terminal
         env::set_current_dir(project_path)?;
         let rt = tokio::runtime::Runtime::new()?;
         return rt.block_on(crate::app::run());

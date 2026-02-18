@@ -7,6 +7,12 @@ use syncvibe_core::storage::Storage;
 
 use crate::onboarding::{self, SetupItem, TEAL, DIM_TEAL, GREEN, RED, DIM, MED, BRIGHT, R};
 
+/// Base directory for SyncVibe projects: ~/SyncVibe/
+pub fn projects_dir() -> PathBuf {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    home.join("SyncVibe")
+}
+
 /// Validate that a room name is safe for use as a directory name.
 fn validate_room_name(name: &str) -> Result<()> {
     if name.is_empty() {
@@ -30,7 +36,7 @@ fn validate_room_name(name: &str) -> Result<()> {
 pub fn prepare_project_dir(name: &str) -> Result<PathBuf> {
     validate_room_name(name)?;
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let mut path = home.join(name);
+    let mut path = projects_dir().join(name);
 
     loop {
         println!(

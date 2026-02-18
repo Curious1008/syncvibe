@@ -120,17 +120,29 @@ pub fn confirm(msg: &str) -> io::Result<bool> {
 /// After 5 seconds the full Yes/No prompt activates.
 pub fn confirm_destructive(msg: &str) -> io::Result<bool> {
     println!("{msg}\n");
-    println!("  {TEAL}1{R} {DIM}Yes{R}");
+    println!("  {DIM}1 Yes{R}");
     println!("  {DIM}2{R} No\n");
 
     terminal::enable_raw_mode()?;
 
-    // 5-second countdown — only cancel is accepted
-    for remaining in (1..=5).rev() {
-        print!("\r  {DIM}Wait {remaining}s... (2 to cancel){R}  ");
-        io::stdout().flush()?;
+    // 5-second countdown using wall-clock time (immune to keypresses)
+    let start = std::time::Instant::now();
+    let cooldown = Duration::from_secs(5);
+    let mut last_shown = 0u64;
 
-        if event::poll(Duration::from_secs(1))? {
+    loop {
+        let elapsed = start.elapsed();
+        if elapsed >= cooldown {
+            break;
+        }
+        let remaining = (cooldown - elapsed).as_secs() + 1;
+        if remaining != last_shown {
+            print!("\r  {DIM}Wait {remaining}s... (2 to cancel){R}  ");
+            io::stdout().flush()?;
+            last_shown = remaining;
+        }
+
+        if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
                     match key.code {
@@ -148,7 +160,8 @@ pub fn confirm_destructive(msg: &str) -> io::Result<bool> {
         }
     }
 
-    // Countdown complete — accept input
+    // Countdown complete — light up "Yes" option (3 lines up)
+    print!("\x1b[3A\r  {TEAL}1{R} Yes\x1b[3B");
     print!("\r  {DIM}Press 1 or 2:{R}              ");
     io::stdout().flush()?;
 
@@ -168,11 +181,11 @@ pub fn confirm_destructive(msg: &str) -> io::Result<bool> {
     terminal::disable_raw_mode()?;
 
     if result {
-        print!("\r  {GREEN}Yes{R}                        ");
+        println!("\r  {GREEN}Yes{R}                        ");
     } else {
-        print!("\r  {DIM}No{R}                          ");
+        println!("\r  {DIM}No{R}                          ");
     }
-    println!("\n");
+    println!();
 
     Ok(result)
 }

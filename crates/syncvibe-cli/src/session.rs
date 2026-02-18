@@ -77,15 +77,14 @@ pub fn cmd_session() -> Result<()> {
                 let room = crate::invite::resolve_short_invite(trimmed)?;
                 let name = room.room_name.clone().unwrap_or_else(|| "syncvibe-room".to_string());
                 println!("  {GREEN}✓{R} Code accepted — {B}{name}{R}\n");
-                let home = dirs::home_dir()
-                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                let proj = init::projects_dir().join(&name);
                 // Already joined — just launch
-                if home.join(&name).join(".syncvibe").is_dir() {
+                if proj.join(".syncvibe").is_dir() {
                     println!(
                         "  {DIM}→ {} (already set up){R}\n",
-                        home.join(&name).display()
+                        proj.display()
                     );
-                    return tmux::launch_project(&home.join(&name));
+                    return tmux::launch_project(&proj);
                 }
                 let path = init::prepare_project_dir(&name)?;
                 init::perform_init(&path, Some(room))?;
@@ -154,15 +153,14 @@ pub fn cmd_session() -> Result<()> {
                 let room = crate::invite::resolve_short_invite(&code)?;
                 let name = room.room_name.clone().unwrap_or_else(|| "syncvibe-room".to_string());
                 println!("  {GREEN}✓{R} Code accepted — {B}{name}{R}\n");
-                let home = dirs::home_dir()
-                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                let proj = init::projects_dir().join(&name);
                 // Already joined — just launch
-                if home.join(&name).join(".syncvibe").is_dir() {
+                if proj.join(".syncvibe").is_dir() {
                     println!(
                         "  {DIM}→ {} (already set up){R}\n",
-                        home.join(&name).display()
+                        proj.display()
                     );
-                    return tmux::launch_project(&home.join(&name));
+                    return tmux::launch_project(&proj);
                 }
                 let path = init::prepare_project_dir(&name)?;
                 init::perform_init(&path, Some(room))?;

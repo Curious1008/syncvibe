@@ -903,14 +903,16 @@ pub async fn run() -> Result<()> {
             continue;
         }
 
-        // Handle /leave — leave current room
+        // Handle /leave — leave current room, then offer room selection
         if state.want_leave {
             state.want_leave = false;
             tui::teardown(&mut terminal)?;
 
             let left = handle_leave_room(&state.storage);
             if left {
-                return Ok(()); // Exit TUI after leaving
+                // Re-enter the session menu (choose room / create / join)
+                let _ = crate::session::cmd_session();
+                return Ok(());
             }
 
             terminal = tui::setup()?;
@@ -1048,15 +1050,15 @@ fn handle_join_project() -> bool {
         println!("  {GREEN}✓{R} Code accepted\n");
     }
 
-    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    let proj = crate::init::projects_dir().join(&name);
 
     // Already joined — just launch
-    if home.join(&name).join(".syncvibe").is_dir() {
+    if proj.join(".syncvibe").is_dir() {
         println!(
             "  {DIM}→ {} (already set up){R}\n",
-            home.join(&name).display()
+            proj.display()
         );
-        if tmux::launch_or_attach(&home.join(&name).to_string_lossy()).is_err() {
+        if tmux::launch_or_attach(&proj.to_string_lossy()).is_err() {
             println!("  {RED}✗{R} Failed to launch tmux session.");
         }
         return true;
