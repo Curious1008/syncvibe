@@ -72,10 +72,41 @@ pub fn launch_or_attach(project_path: &str) -> Result<()> {
     let inside_tmux = env::var("TMUX").is_ok();
     let bin_str = env::current_exe()?.to_string_lossy().to_string();
 
-    if !has_session {
-        create_session(&session_name, project_path, &bin_str)?;
+    if has_session {
+        let pane_count = std::process::Command::new("tmux")
+            .args(["list-panes", "-t", &session_name])
+            .env_remove("TMUX")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).lines().count())
+            .unwrap_or(0);
+
+        if pane_count >= 2 {
+            // Session is healthy — just enforce config
+            apply_tmux_config(&session_name)?;
+        } else {
+            // Stale session (1 pane after /quit). Check if we're inside it.
+            let in_this_session = inside_tmux && {
+                std::process::Command::new("tmux")
+                    .args(["display-message", "-p", "#{session_name}"])
+                    .output()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string() == session_name)
+                    .unwrap_or(false)
+            };
+
+            if in_this_session {
+                // Can't kill our own session — add split dynamically
+                ensure_split(&session_name, project_path, &bin_str)?;
+            } else {
+                // Kill stale session and recreate with clean layout
+                let _ = std::process::Command::new("tmux")
+                    .args(["kill-session", "-t", &session_name])
+                    .env_remove("TMUX")
+                    .status();
+                create_session(&session_name, project_path, &bin_str)?;
+            }
+        }
     } else {
-        ensure_split(&session_name, project_path, &bin_str)?;
+        create_session(&session_name, project_path, &bin_str)?;
     }
 
     if inside_tmux {
@@ -160,15 +191,6 @@ fn ensure_split(session_name: &str, project_path: &str, bin_str: &str) -> Result
         .env_remove("TMUX")
         .status();
 
-    let _ = std::process::Command::new("tmux")
-        .args([
-            "select-pane",
-            "-t",
-            &format!("{}:0.1", session_name),
-        ])
-        .env_remove("TMUX")
-        .status();
-
     apply_tmux_config(session_name)
 }
 
@@ -191,6 +213,7 @@ fn apply_tmux_config(session_name: &str) -> Result<()> {
         ("pane-active-border-style", "fg=#333333"),
         ("pane-border-status", "top"),
         ("pane-border-format", "#{?pane_active,#[fg=#888888] #{pane_title} ,#[fg=#555555] Ctrl+G → #{pane_title} }"),
+        ("mouse", "on"),
         ("status", "off"),
     ] {
         let _ = std::process::Command::new("tmux")
@@ -199,39 +222,63 @@ fn apply_tmux_config(session_name: &str) -> Result<()> {
             .status();
     }
 
-    // Enforce pane ratio: left (Chat) = 30%, right (Claude) = 70%
-    let _ = std::process::Command::new("tmux")
-        .args([
-            "resize-pane",
-            "-t",
-            &format!("{}:0.0", session_name),
-            "-x",
-            "30%",
-        ])
-        .env_remove("TMUX")
-        .status();
+    // Mouse drag-select → copy to system clipboard (macOS pbcopy)
+    for cmd in &[
+        &["bind-key", "-T", "copy-mode", "MouseDragEnd1Pane",
+          "send-keys", "-X", "copy-pipe-and-cancel", "pbcopy"][..],
+        &["bind-key", "-T", "copy-mode-vi", "MouseDragEnd1Pane",
+          "send-keys", "-X", "copy-pipe-and-cancel", "pbcopy"],
+    ] {
+        let _ = std::process::Command::new("tmux")
+            .args(*cmd)
+            .env_remove("TMUX")
+            .status();
+    }
 
-    // Pane titles
-    let _ = std::process::Command::new("tmux")
+    // Query actual pane indices sorted by horizontal position (left → right).
+    // Pane indices can drift after /quit + re-split (e.g. 2,1 instead of 0,1).
+    let pane_output = std::process::Command::new("tmux")
         .args([
-            "select-pane",
+            "list-panes",
             "-t",
-            &format!("{}:0.0", session_name),
-            "-T",
-            "SyncVibe Chat",
+            &format!("{}:0", session_name),
+            "-F",
+            "#{pane_left}:#{pane_index}",
         ])
         .env_remove("TMUX")
-        .status();
-    let _ = std::process::Command::new("tmux")
-        .args([
-            "select-pane",
-            "-t",
-            &format!("{}:0.1", session_name),
-            "-T",
-            "Claude Code",
-        ])
-        .env_remove("TMUX")
-        .status();
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_default();
+
+    let mut panes: Vec<(u32, String)> = pane_output
+        .lines()
+        .filter_map(|line| {
+            let (left, idx) = line.split_once(':')?;
+            Some((left.parse().ok()?, idx.to_string()))
+        })
+        .collect();
+    panes.sort_by_key(|(x, _)| *x);
+
+    if panes.len() >= 2 {
+        let left = format!("{}:0.{}", session_name, panes[0].1); // dashboard
+        let right = format!("{}:0.{}", session_name, panes[1].1); // claude
+
+        // Enforce ratio: dashboard 30%, claude 70%
+        let _ = std::process::Command::new("tmux")
+            .args(["resize-pane", "-t", &left, "-x", "30%"])
+            .env_remove("TMUX")
+            .status();
+
+        // Pane titles
+        let _ = std::process::Command::new("tmux")
+            .args(["select-pane", "-t", &left, "-T", "SyncVibe Chat"])
+            .env_remove("TMUX")
+            .status();
+        let _ = std::process::Command::new("tmux")
+            .args(["select-pane", "-t", &right, "-T", "Claude Code"])
+            .env_remove("TMUX")
+            .status();
+    }
 
     Ok(())
 }
