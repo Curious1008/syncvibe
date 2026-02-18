@@ -5,6 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux-lightgrey.svg)]()
 [![Website](https://img.shields.io/badge/Web-syncvibe.online-teal.svg)](https://syncvibe.online)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2.svg?logo=discord&logoColor=white)](https://discord.gg/Nb3wkCBZ55)
 
 SyncVibe is a real-time terminal chat and coordination layer for teams doing vibe coding with AI agents. It connects teammates and their AI agents (Claude Code, Codex, or any MCP-compatible agent) in a shared chat room — without making a single LLM API call. All AI costs stay with whatever agent each person already uses.
 
