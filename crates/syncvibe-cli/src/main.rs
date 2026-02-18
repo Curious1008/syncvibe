@@ -51,6 +51,8 @@ fn main() -> Result<()> {
 // --- Simple command handlers ---
 
 fn cmd_init() -> Result<()> {
+    config::require_auth("Creating a room")?;
+
     let cwd = env::current_dir()?;
 
     if !cwd.join(".git").exists() {

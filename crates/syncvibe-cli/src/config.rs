@@ -53,6 +53,27 @@ pub fn user_config_exists() -> bool {
     config_path().map(|p| p.exists()).unwrap_or(false)
 }
 
+/// Check if user has authenticated with a web account (has cli_token).
+pub fn is_authenticated() -> bool {
+    load_user_config()
+        .map(|c| c.account.is_some())
+        .unwrap_or(false)
+}
+
+/// Bail with a friendly message if not authenticated. Used to gate room creation.
+pub fn require_auth(action: &str) -> Result<()> {
+    if is_authenticated() {
+        return Ok(());
+    }
+    println!(
+        "\n  \x1b[38;2;78;205;196m◆\x1b[0m {} requires a free SyncVibe account.\n",
+        action
+    );
+    println!("  Run \x1b[1msyncvibe auth\x1b[0m to sign up — takes 30 seconds.\n");
+    println!("  \x1b[38;2;100;100;115mJoining rooms with an invite code is always free.\x1b[0m\n");
+    anyhow::bail!("Authentication required.")
+}
+
 // --- Project Registry ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -139,7 +139,8 @@ pub fn cmd_session() -> Result<()> {
         Some(idx) => {
             let action = idx - valid_projects.len();
             if action == 0 {
-                // Create new room — prompt for name, create ~/name
+                // Create new room — requires auth
+                crate::config::require_auth("Creating a room")?;
                 println!();
                 let name = onboarding::prompt(
                     "  \x1b[38;2;78;205;196mRoom name:\x1b[0m ",
