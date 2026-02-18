@@ -1,4 +1,5 @@
 mod app;
+mod auth;
 mod cli;
 mod components;
 mod config;
@@ -34,6 +35,7 @@ fn main() -> Result<()> {
         Some(Command::Connect { code }) => cmd_connect(code)?,
         Some(Command::Invite) => cmd_invite()?,
         Some(Command::Status) => cmd_status()?,
+        Some(Command::Auth) => auth::run_auth()?,
         Some(Command::McpServer) => cmd_mcp_server()?,
         Some(Command::Dashboard) => cmd_dashboard()?,
         Some(Command::Switch) => cmd_switch()?,

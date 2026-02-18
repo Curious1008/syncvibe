@@ -62,6 +62,9 @@ pub enum Command {
     /// Switch between SyncVibe rooms
     Switch,
 
+    /// Authenticate CLI with your SyncVibe web account
+    Auth,
+
     /// Generate shell completions
     Completions {
         /// Shell to generate completions for

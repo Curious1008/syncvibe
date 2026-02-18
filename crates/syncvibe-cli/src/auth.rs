@@ -1,0 +1,214 @@
+use std::io::{BufRead, BufReader, Read as _, Write};
+use std::net::TcpListener;
+use std::time::Duration;
+
+use anyhow::{Context, Result};
+use syncvibe_core::models::AccountConfig;
+
+use crate::config;
+
+const WEB_BASE: &str = "https://syncvibe.online";
+
+/// Run the CLI auth flow:
+/// 1. Start a local HTTP server on a random port
+/// 2. Open browser to /authorize?cli_port={port}
+/// 3. Handle CORS preflight + POST /callback with { "token": "..." }
+/// 4. Save token to ~/.syncvibe/config.toml
+pub fn run_auth() -> Result<()> {
+    // Check if already authenticated
+    if let Ok(cfg) = config::load_user_config() {
+        if cfg.account.is_some() {
+            println!("  Already authenticated. Re-authenticating...\n");
+        }
+    }
+
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .context("Failed to start local server")?;
+    listener
+        .set_nonblocking(false)
+        .context("Failed to set blocking mode")?;
+    let port = listener.local_addr()?.port();
+
+    let url = format!("{}/authorize?cli_port={}", WEB_BASE, port);
+
+    println!("  Opening browser for authentication...\n");
+    println!("  If the browser doesn't open, visit:");
+    println!("  \x1b[36m{}\x1b[0m\n", url);
+
+    open_browser(&url);
+
+    println!("  Waiting for authorization...");
+
+    // Set a 5-minute timeout for the whole auth flow
+    listener
+        .set_nonblocking(false)
+        .ok();
+
+    // Accept connections in a loop: handle OPTIONS preflight, then POST with token
+    let token = loop {
+        let (stream, _) = listener.accept().context("Failed to accept connection")?;
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .ok();
+
+        match handle_connection(stream) {
+            ConnectionResult::Token(t) => break t,
+            ConnectionResult::Preflight => continue, // CORS preflight handled, wait for POST
+            ConnectionResult::Ignored => continue,
+        }
+    };
+
+    save_token(&token)?;
+
+    println!("\n  \x1b[38;2;80;200;120m✓\x1b[0m Authenticated successfully!");
+    println!("  Token saved to ~/.syncvibe/config.toml\n");
+
+    Ok(())
+}
+
+enum ConnectionResult {
+    Token(String),
+    Preflight,
+    Ignored,
+}
+
+fn handle_connection(mut stream: std::net::TcpStream) -> ConnectionResult {
+    let mut reader = match stream.try_clone() {
+        Ok(s) => BufReader::new(s),
+        Err(_) => return ConnectionResult::Ignored,
+    };
+
+    // Read request line
+    let mut request_line = String::new();
+    if reader.read_line(&mut request_line).is_err() {
+        return ConnectionResult::Ignored;
+    }
+
+    let is_options = request_line.starts_with("OPTIONS");
+    let is_post = request_line.starts_with("POST");
+
+    // Read headers
+    let mut content_length: usize = 0;
+    loop {
+        let mut header = String::new();
+        if reader.read_line(&mut header).is_err() {
+            break;
+        }
+        if header.trim().is_empty() {
+            break;
+        }
+        let lower = header.to_lowercase();
+        if let Some(val) = lower.strip_prefix("content-length:") {
+            content_length = val.trim().parse().unwrap_or(0);
+        }
+    }
+
+    if is_options {
+        // CORS preflight response
+        let resp = "HTTP/1.1 204 No Content\r\n\
+            Access-Control-Allow-Origin: *\r\n\
+            Access-Control-Allow-Methods: POST, OPTIONS\r\n\
+            Access-Control-Allow-Headers: Content-Type\r\n\
+            Content-Length: 0\r\n\
+            Connection: close\r\n\
+            \r\n";
+        let _ = stream.write_all(resp.as_bytes());
+        let _ = stream.flush();
+        return ConnectionResult::Preflight;
+    }
+
+    if is_post && content_length > 0 {
+        let mut body = vec![0u8; content_length];
+        if reader.read_exact(&mut body).is_err() {
+            return ConnectionResult::Ignored;
+        }
+        let body_str = String::from_utf8_lossy(&body);
+
+        if let Some(token) = parse_token(&body_str) {
+            // Success response
+            let body = r#"{"status":"ok"}"#;
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\n\
+                 Access-Control-Allow-Origin: *\r\n\
+                 Content-Type: application/json\r\n\
+                 Content-Length: {}\r\n\
+                 Connection: close\r\n\
+                 \r\n\
+                 {}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(resp.as_bytes());
+            let _ = stream.flush();
+            return ConnectionResult::Token(token);
+        }
+    }
+
+    // Unknown request — send 400
+    let resp = "HTTP/1.1 400 Bad Request\r\n\
+        Connection: close\r\n\
+        Content-Length: 0\r\n\
+        \r\n";
+    let _ = stream.write_all(resp.as_bytes());
+    let _ = stream.flush();
+    ConnectionResult::Ignored
+}
+
+fn parse_token(body: &str) -> Option<String> {
+    // Expects: {"token":"hexstring"}
+    // Using serde_json since it's already a dependency
+    let v: serde_json::Value = serde_json::from_str(body).ok()?;
+    let token = v.get("token")?.as_str()?;
+    if !token.is_empty() && token.chars().all(|c| c.is_ascii_hexdigit()) {
+        Some(token.to_string())
+    } else {
+        None
+    }
+}
+
+fn save_token(token: &str) -> Result<()> {
+    let mut cfg = config::load_user_config()
+        .unwrap_or_else(|_| syncvibe_core::models::UserConfig::new("user".into(), "#4ECDC4".into()));
+
+    cfg.account = Some(AccountConfig {
+        cli_token: token.to_string(),
+    });
+
+    config::save_user_config(&cfg)?;
+    Ok(())
+}
+
+fn open_browser(url: &str) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(url).spawn();
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", url])
+            .spawn();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_token() {
+        assert_eq!(
+            parse_token(r#"{"token":"abc123def456"}"#),
+            Some("abc123def456".to_string())
+        );
+        assert_eq!(parse_token(r#"{"token":""}"#), None);
+        assert_eq!(parse_token(r#"{"bad":"data"}"#), None);
+        assert_eq!(parse_token("not json"), None);
+    }
+}
