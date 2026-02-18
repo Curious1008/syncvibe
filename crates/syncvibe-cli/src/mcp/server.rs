@@ -318,6 +318,13 @@ impl SyncVibeMcp {
             mentions,
         };
 
+        // Handshake: announce agent connection in chat
+        let handshake = ChatMessage::new_system_message(
+            format!("{} connected", agent.name),
+            String::new(),
+        );
+        let _ = storage.append_chat_message(&handshake);
+
         Self {
             storage: Arc::new(Mutex::new(storage)),
             user,
