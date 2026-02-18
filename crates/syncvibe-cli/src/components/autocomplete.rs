@@ -14,6 +14,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/name", "Change display name"),
     ("/color", "Change chat color"),
     ("/mute", "Toggle notification bell"),
+    ("/leave", "Leave current room"),
     ("/clear", "Clear chat view"),
     ("/rc", "Reconnect to chat"),
     ("/quit", "Exit SyncVibe"),

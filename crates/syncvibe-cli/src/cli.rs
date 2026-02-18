@@ -62,6 +62,9 @@ pub enum Command {
     /// Switch between SyncVibe rooms
     Switch,
 
+    /// Leave the current room (removes from your list, keeps files)
+    Leave,
+
     /// Authenticate CLI with your SyncVibe web account
     Auth,
 

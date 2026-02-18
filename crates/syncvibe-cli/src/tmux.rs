@@ -23,6 +23,17 @@ pub fn launch_project(project_path: &std::path::Path) -> Result<()> {
         .unwrap_or_else(|| "project".to_string());
     let _ = config::register_project(&project_name, &project_path.to_string_lossy());
 
+    // Best-effort sync to Supabase
+    let room_json = project_path.join(".syncvibe").join("room.json");
+    if let Ok(content) = std::fs::read_to_string(&room_json) {
+        if let Ok(room) = serde_json::from_str::<syncvibe_core::models::RoomConfig>(&content) {
+            let name = project_name.clone();
+            std::thread::spawn(move || {
+                crate::sync::sync_room(&room.room_id, &name, &room.room_secret);
+            });
+        }
+    }
+
     let tmux_available = std::process::Command::new("tmux")
         .arg("-V")
         .output()

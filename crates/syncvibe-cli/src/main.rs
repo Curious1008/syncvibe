@@ -11,6 +11,7 @@ mod network;
 mod onboarding;
 mod picker;
 mod session;
+mod sync;
 mod tmux;
 mod tui;
 
@@ -37,6 +38,7 @@ fn main() -> Result<()> {
         Some(Command::Connect { code }) => cmd_connect(code)?,
         Some(Command::Invite) => cmd_invite()?,
         Some(Command::Status) => cmd_status()?,
+        Some(Command::Leave) => cmd_leave()?,
         Some(Command::Auth) => auth::run_auth()?,
         Some(Command::McpServer) => cmd_mcp_server()?,
         Some(Command::Dashboard) => cmd_dashboard()?,
@@ -251,6 +253,45 @@ fn cmd_switch() -> Result<()> {
     if let Some(entry) = picker::pick_project(None)? {
         tmux::launch_or_attach(&entry.path)?;
     }
+    Ok(())
+}
+
+fn cmd_leave() -> Result<()> {
+    let cwd = env::current_dir()?;
+    let storage = Storage::find(&cwd)?;
+    let room = storage.read_room_config()?;
+    let project_name = crate::git::ops::repo_name().unwrap_or_else(|_| "project".to_string());
+
+    println!("\n  {TEAL}◆{R} Leave {B}{project_name}{R}?\n");
+    println!("  {DIM}This removes it from your room list.{R}");
+    println!("  {DIM}Files and chat history are NOT deleted.{R}\n");
+
+    if !onboarding::confirm(&format!("  {TEAL}◆{R} Confirm leave?"))? {
+        println!("  {DIM}Cancelled.{R}");
+        return Ok(());
+    }
+
+    // Remove from local registry
+    let project_path = storage
+        .project_root()
+        .canonicalize()
+        .unwrap_or_else(|_| storage.project_root().to_path_buf())
+        .to_string_lossy()
+        .to_string();
+    let mut registry = config::load_registry()?;
+    registry.projects.retain(|p| p.path != project_path);
+    config::save_registry(&registry)?;
+
+    // Remove from Supabase (best-effort)
+    if config::is_authenticated() {
+        let room_id = room.room_id.clone();
+        std::thread::spawn(move || {
+            sync::leave_room_remote(&room_id);
+        });
+    }
+
+    println!("  {GREEN}✓{R} Left {B}{project_name}{R}");
+    println!("  {DIM}Files preserved at {project_path}{R}");
     Ok(())
 }
 

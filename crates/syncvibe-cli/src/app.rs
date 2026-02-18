@@ -56,6 +56,7 @@ pub struct AppState {
     pub show_picker: bool,
     pub want_new_project: bool,
     pub want_join_project: bool,
+    pub want_leave: bool,
     pub want_reconnect: bool,
     pub muted: bool,
 
@@ -126,6 +127,7 @@ impl AppState {
             show_picker: false,
             want_new_project: false,
             want_join_project: false,
+            want_leave: false,
             want_reconnect: false,
             muted: false,
             chat_messages,
@@ -257,6 +259,7 @@ impl AppState {
                 self.system_msg("/mute     — toggle @mention bell     (/m)");
                 self.system_msg("/clear    — clear chat view");
                 self.system_msg("/rc       — reconnect to chat");
+                self.system_msg("/leave    — leave current room");
                 self.system_msg("/quit     — exit SyncVibe  (/q)");
                 self.system_msg("");
                 self.system_msg("@name     — mention a teammate (highlights + bell)");
@@ -303,6 +306,9 @@ impl AppState {
             }
             "/join" | "/j" => {
                 self.want_join_project = true;
+            }
+            "/leave" => {
+                self.want_leave = true;
             }
             "/name" => {
                 if arg.is_empty() {
@@ -897,6 +903,21 @@ pub async fn run() -> Result<()> {
             continue;
         }
 
+        // Handle /leave — leave current room
+        if state.want_leave {
+            state.want_leave = false;
+            tui::teardown(&mut terminal)?;
+
+            let left = handle_leave_room(&state.storage);
+            if left {
+                return Ok(()); // Exit TUI after leaving
+            }
+
+            terminal = tui::setup()?;
+            event_stream = EventStream::new();
+            continue;
+        }
+
         // Handle project picker request (requires leaving TUI temporarily)
         if state.show_picker {
             state.show_picker = false;
@@ -1060,6 +1081,54 @@ fn handle_join_project() -> bool {
         return false;
     }
 
+    true
+}
+
+/// Handle /leave command: confirm, remove from registry + Supabase, exit TUI.
+fn handle_leave_room(storage: &syncvibe_core::storage::Storage) -> bool {
+    use crate::onboarding::{TEAL, GREEN, DIM, B, R};
+
+    let project_name = crate::git::ops::repo_name().unwrap_or_else(|_| "project".to_string());
+    let room = match storage.read_room_config() {
+        Ok(r) => r,
+        Err(_) => {
+            println!("  {DIM}No room config found.{R}");
+            return false;
+        }
+    };
+
+    println!("\n  {TEAL}◆{R} Leave {B}{project_name}{R}?\n");
+    println!("  {DIM}Removes from your room list. Files are NOT deleted.{R}\n");
+
+    match crate::onboarding::confirm(&format!("  {TEAL}◆{R} Confirm?")) {
+        Ok(true) => {}
+        _ => {
+            println!("  {DIM}Cancelled.{R}");
+            return false;
+        }
+    }
+
+    // Remove from local registry
+    let project_path = storage
+        .project_root()
+        .canonicalize()
+        .unwrap_or_else(|_| storage.project_root().to_path_buf())
+        .to_string_lossy()
+        .to_string();
+    if let Ok(mut registry) = config::load_registry() {
+        registry.projects.retain(|p| p.path != project_path);
+        let _ = config::save_registry(&registry);
+    }
+
+    // Remove from Supabase (best-effort)
+    if config::is_authenticated() {
+        let room_id = room.room_id.clone();
+        std::thread::spawn(move || {
+            crate::sync::leave_room_remote(&room_id);
+        });
+    }
+
+    println!("  {GREEN}✓{R} Left {B}{project_name}{R}");
     true
 }
 

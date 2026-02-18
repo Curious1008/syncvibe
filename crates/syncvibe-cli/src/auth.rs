@@ -46,29 +46,40 @@ pub fn run_auth() -> Result<()> {
         .ok();
 
     // Accept connections in a loop: handle OPTIONS preflight, then POST with token
-    let token = loop {
+    let payload = loop {
         let (stream, _) = listener.accept().context("Failed to accept connection")?;
         stream
             .set_read_timeout(Some(Duration::from_secs(10)))
             .ok();
 
         match handle_connection(stream) {
-            ConnectionResult::Token(t) => break t,
+            ConnectionResult::Auth(p) => break p,
             ConnectionResult::Preflight => continue, // CORS preflight handled, wait for POST
             ConnectionResult::Ignored => continue,
         }
     };
 
-    save_token(&token)?;
+    save_auth(&payload)?;
 
     println!("\n  {GREEN}✓{R} Authenticated successfully!");
     println!("  {DIM}Token saved to ~/.syncvibe/config.toml{R}\n");
 
+    // Bulk sync all local rooms to the newly authenticated account
+    std::thread::spawn(|| {
+        crate::sync::bulk_sync_all_rooms();
+    });
+
     Ok(())
 }
 
+struct AuthPayload {
+    token: String,
+    api_url: Option<String>,
+    api_key: Option<String>,
+}
+
 enum ConnectionResult {
-    Token(String),
+    Auth(AuthPayload),
     Preflight,
     Ignored,
 }
@@ -125,7 +136,7 @@ fn handle_connection(mut stream: std::net::TcpStream) -> ConnectionResult {
         }
         let body_str = String::from_utf8_lossy(&body);
 
-        if let Some(token) = parse_token(&body_str) {
+        if let Some(payload) = parse_auth_payload(&body_str) {
             // Success response
             let body = r#"{"status":"ok"}"#;
             let resp = format!(
@@ -141,7 +152,7 @@ fn handle_connection(mut stream: std::net::TcpStream) -> ConnectionResult {
             );
             let _ = stream.write_all(resp.as_bytes());
             let _ = stream.flush();
-            return ConnectionResult::Token(token);
+            return ConnectionResult::Auth(payload);
         }
     }
 
@@ -155,24 +166,27 @@ fn handle_connection(mut stream: std::net::TcpStream) -> ConnectionResult {
     ConnectionResult::Ignored
 }
 
-fn parse_token(body: &str) -> Option<String> {
-    // Expects: {"token":"hexstring"}
-    // Using serde_json since it's already a dependency
+fn parse_auth_payload(body: &str) -> Option<AuthPayload> {
     let v: serde_json::Value = serde_json::from_str(body).ok()?;
     let token = v.get("token")?.as_str()?;
-    if !token.is_empty() && token.chars().all(|c| c.is_ascii_hexdigit()) {
-        Some(token.to_string())
-    } else {
-        None
+    if token.is_empty() || !token.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
     }
+    Some(AuthPayload {
+        token: token.to_string(),
+        api_url: v.get("supabase_url").and_then(|v| v.as_str()).map(String::from),
+        api_key: v.get("supabase_anon_key").and_then(|v| v.as_str()).map(String::from),
+    })
 }
 
-fn save_token(token: &str) -> Result<()> {
+fn save_auth(payload: &AuthPayload) -> Result<()> {
     let mut cfg = config::load_user_config()
         .unwrap_or_else(|_| syncvibe_core::models::UserConfig::new("user".into(), "#4ECDC4".into()));
 
     cfg.account = Some(AccountConfig {
-        cli_token: token.to_string(),
+        cli_token: payload.token.clone(),
+        api_url: payload.api_url.clone(),
+        api_key: payload.api_key.clone(),
     });
 
     config::save_user_config(&cfg)?;
@@ -203,13 +217,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_token() {
-        assert_eq!(
-            parse_token(r#"{"token":"abc123def456"}"#),
-            Some("abc123def456".to_string())
-        );
-        assert_eq!(parse_token(r#"{"token":""}"#), None);
-        assert_eq!(parse_token(r#"{"bad":"data"}"#), None);
-        assert_eq!(parse_token("not json"), None);
+    fn test_parse_auth_payload() {
+        let p = parse_auth_payload(r#"{"token":"abc123def456"}"#).unwrap();
+        assert_eq!(p.token, "abc123def456");
+        assert!(p.api_url.is_none());
+        assert!(p.api_key.is_none());
+
+        let p = parse_auth_payload(
+            r#"{"token":"abc123","supabase_url":"https://x.supabase.co","supabase_anon_key":"key123"}"#,
+        ).unwrap();
+        assert_eq!(p.token, "abc123");
+        assert_eq!(p.api_url.as_deref(), Some("https://x.supabase.co"));
+        assert_eq!(p.api_key.as_deref(), Some("key123"));
+
+        assert!(parse_auth_payload(r#"{"token":""}"#).is_none());
+        assert!(parse_auth_payload(r#"{"bad":"data"}"#).is_none());
+        assert!(parse_auth_payload("not json").is_none());
     }
 }

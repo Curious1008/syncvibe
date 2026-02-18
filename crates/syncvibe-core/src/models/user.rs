@@ -10,6 +10,10 @@ pub struct UserConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountConfig {
     pub cli_token: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
