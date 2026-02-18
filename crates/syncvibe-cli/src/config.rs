@@ -72,11 +72,9 @@ pub fn require_auth(action: &str) -> Result<()> {
     );
     println!("  {DIM}Joining rooms with an invite code is always free.{R}\n");
 
-    let choice = crate::onboarding::prompt(
-        &format!("  {TEAL}◆{R} Sign up now? {TEAL}[Y/n]{R} "),
-    )?;
-
-    if choice.is_empty() || choice.starts_with('y') || choice.starts_with('Y') {
+    if crate::onboarding::confirm(
+        &format!("  {TEAL}◆{R} Sign up now?"),
+    )? {
         println!();
         crate::auth::run_auth()?;
         // Verify auth succeeded

@@ -71,11 +71,9 @@ pub fn cmd_session() -> Result<()> {
     if let Some(clip) = crate::invite::read_clipboard() {
         let trimmed = clip.trim();
         if crate::invite::looks_like_short_code(trimmed) || trimmed.starts_with("syncvibe://") {
-            println!(
-                "  {TEAL}◆{R} Found invite code in clipboard — join this room? {TEAL}[Y/n]{R} ",
-            );
-            let answer = onboarding::prompt("")?;
-            if answer.is_empty() || answer.starts_with('y') || answer.starts_with('Y') {
+            if onboarding::confirm(
+                &format!("  {TEAL}◆{R} Found invite code in clipboard — join this room?"),
+            )? {
                 let room = crate::invite::resolve_short_invite(trimmed)?;
                 let name = room.room_name.clone().unwrap_or_else(|| "syncvibe-room".to_string());
                 println!("  {GREEN}✓{R} Code accepted — {B}{name}{R}\n");

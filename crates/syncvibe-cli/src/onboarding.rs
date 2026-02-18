@@ -75,6 +75,45 @@ pub fn prompt_with_default(msg: &str, default: &str) -> io::Result<String> {
     }
 }
 
+/// Yes/No confirmation via single keypress (1 = Yes, 2 = No). No Enter needed.
+/// Returns true for Yes, false for No. Esc also returns false.
+pub fn confirm(msg: &str) -> io::Result<bool> {
+    println!("{msg}\n");
+    println!("  {TEAL}1{R} Yes");
+    println!("  {DIM}2{R} No\n");
+    print!("  {DIM}Press 1 or 2:{R} ");
+    io::stdout().flush()?;
+
+    terminal::enable_raw_mode()?;
+    let result = loop {
+        if let Event::Key(key) = event::read()? {
+            if key.kind != KeyEventKind::Press {
+                continue;
+            }
+            match key.code {
+                KeyCode::Char('1') | KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    break true;
+                }
+                KeyCode::Char('2') | KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                    break false;
+                }
+                _ => {}
+            }
+        }
+    };
+    terminal::disable_raw_mode()?;
+
+    // Print the choice and clean up
+    if result {
+        println!("{GREEN}Yes{R}");
+    } else {
+        println!("{DIM}No{R}");
+    }
+    println!();
+
+    Ok(result)
+}
+
 /// Sanitize a display name: strip control chars, trim, enforce max length.
 pub fn sanitize_name(name: &str) -> String {
     let clean: String = name
