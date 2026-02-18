@@ -1,4 +1,5 @@
 use std::io::{self, BufRead, Write};
+use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::terminal;
@@ -110,6 +111,68 @@ pub fn confirm(msg: &str) -> io::Result<bool> {
         println!("{DIM}No{R}");
     }
     println!();
+
+    Ok(result)
+}
+
+/// Destructive-action confirmation with a 5-second cooldown.
+/// During the countdown only Cancel (2/n/Esc) is accepted.
+/// After 5 seconds the full Yes/No prompt activates.
+pub fn confirm_destructive(msg: &str) -> io::Result<bool> {
+    println!("{msg}\n");
+    println!("  {TEAL}1{R} {DIM}Yes{R}");
+    println!("  {DIM}2{R} No\n");
+
+    terminal::enable_raw_mode()?;
+
+    // 5-second countdown — only cancel is accepted
+    for remaining in (1..=5).rev() {
+        print!("\r  {DIM}Wait {remaining}s... (2 to cancel){R}  ");
+        io::stdout().flush()?;
+
+        if event::poll(Duration::from_secs(1))? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind == KeyEventKind::Press {
+                    match key.code {
+                        KeyCode::Char('2') | KeyCode::Char('n') | KeyCode::Char('N')
+                        | KeyCode::Esc => {
+                            terminal::disable_raw_mode()?;
+                            print!("\r  {DIM}No{R}                          ");
+                            println!("\n");
+                            return Ok(false);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    // Countdown complete — accept input
+    print!("\r  {DIM}Press 1 or 2:{R}              ");
+    io::stdout().flush()?;
+
+    let result = loop {
+        if let Event::Key(key) = event::read()? {
+            if key.kind != KeyEventKind::Press {
+                continue;
+            }
+            match key.code {
+                KeyCode::Char('1') | KeyCode::Char('y') | KeyCode::Char('Y') => break true,
+                KeyCode::Char('2') | KeyCode::Char('n') | KeyCode::Char('N')
+                | KeyCode::Esc => break false,
+                _ => {}
+            }
+        }
+    };
+    terminal::disable_raw_mode()?;
+
+    if result {
+        print!("\r  {GREEN}Yes{R}                        ");
+    } else {
+        print!("\r  {DIM}No{R}                          ");
+    }
+    println!("\n");
 
     Ok(result)
 }

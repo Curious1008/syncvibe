@@ -78,17 +78,22 @@ pub fn bulk_sync_all_rooms() {
 }
 
 /// Remove a room from Supabase user_projects.
-pub fn leave_room_remote(room_id: &str) {
-    let Ok(cfg) = config::load_user_config() else { return };
-    let Some(account) = &cfg.account else { return };
+/// Returns the number of remaining members, or `None` on failure.
+pub fn leave_room_remote(room_id: &str) -> Option<i64> {
+    let cfg = config::load_user_config().ok()?;
+    let account = cfg.account.as_ref()?;
 
     let body = serde_json::json!({
         "p_cli_token": account.cli_token,
         "p_room_id": room_id,
     });
 
-    let _ = ureq::post(&rpc_url(account, "leave_room"))
+    let mut resp = ureq::post(&rpc_url(account, "leave_room"))
         .header("apikey", api_key(account))
         .header("Content-Type", "application/json")
-        .send_json(&body);
+        .send_json(&body)
+        .ok()?;
+
+    let val: serde_json::Value = resp.body_mut().read_json().ok()?;
+    val.as_i64()
 }

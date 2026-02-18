@@ -25,7 +25,7 @@ use cli::{Cli, Command};
 use syncvibe_core::models::{ChatMessage, UserConfig};
 use syncvibe_core::storage::Storage;
 
-use onboarding::{TEAL, GREEN, DIM, B, R};
+use onboarding::{TEAL, YELLOW, GREEN, RED, DIM, B, R, print_section, confirm_destructive};
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -262,11 +262,19 @@ fn cmd_leave() -> Result<()> {
     let room = storage.read_room_config()?;
     let project_name = crate::git::ops::repo_name().unwrap_or_else(|_| "project".to_string());
 
-    println!("\n  {TEAL}◆{R} Leave {B}{project_name}{R}?\n");
-    println!("  {DIM}This removes it from your room list.{R}");
-    println!("  {DIM}Files and chat history are NOT deleted.{R}\n");
+    println!();
+    print_section("Leave Room");
+    println!();
+    println!("  {YELLOW}!{R} Without an invite code you won't be able to rejoin.");
+    println!("  {YELLOW}!{R} If all members leave, the room will be closed.");
+    println!();
+    println!("  {DIM}Will be removed:{R} room config, chat history, shared images");
+    println!("  {DIM}Will be kept:{R}    your project code files");
+    println!();
+    println!("  {RED}Chat history will be permanently deleted and cannot be recovered.{R}");
+    println!();
 
-    if !onboarding::confirm(&format!("  {TEAL}◆{R} Confirm leave?"))? {
+    if !confirm_destructive(&format!("  {TEAL}◆{R} Leave {B}{project_name}{R}?"))? {
         println!("  {DIM}Cancelled.{R}");
         return Ok(());
     }
@@ -282,16 +290,21 @@ fn cmd_leave() -> Result<()> {
     registry.projects.retain(|p| p.path != project_path);
     config::save_registry(&registry)?;
 
-    // Remove from Supabase (best-effort)
-    if config::is_authenticated() {
-        let room_id = room.room_id.clone();
-        std::thread::spawn(move || {
-            sync::leave_room_remote(&room_id);
-        });
-    }
+    // Remove from Supabase (synchronous to capture remaining count)
+    let remaining = if config::is_authenticated() {
+        sync::leave_room_remote(&room.room_id)
+    } else {
+        None
+    };
+
+    // Delete .syncvibe/ directory (preserves project code files)
+    let _ = std::fs::remove_dir_all(storage.root());
 
     println!("  {GREEN}✓{R} Left {B}{project_name}{R}");
-    println!("  {DIM}Files preserved at {project_path}{R}");
+    if remaining == Some(0) {
+        println!("  {DIM}Room closed — no remaining members.{R}");
+    }
+    println!("  {DIM}Project files preserved at {project_path}{R}");
     Ok(())
 }
 
