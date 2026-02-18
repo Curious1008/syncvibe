@@ -60,13 +60,40 @@ pub fn is_authenticated() -> bool {
         .unwrap_or(false)
 }
 
+/// Check if the auth token has soft-expired (90 days).
+pub fn is_token_expired() -> bool {
+    load_user_config()
+        .map(|c| c.account.as_ref().map(|a| !a.is_fresh()).unwrap_or(false))
+        .unwrap_or(false)
+}
+
 /// Check auth and interactively offer to sign up if not authenticated.
+/// Also prompts to re-auth if token has soft-expired.
 pub fn require_auth(action: &str) -> Result<()> {
     use crate::onboarding::{TEAL, DIM, R};
 
-    if is_authenticated() {
+    if is_authenticated() && !is_token_expired() {
         return Ok(());
     }
+
+    if is_token_expired() {
+        println!(
+            "\n  {TEAL}◆{R} Your session has expired. Please re-authenticate.\n",
+        );
+        if crate::onboarding::confirm(
+            &format!("  {TEAL}◆{R} Re-authenticate now?"),
+        )? {
+            println!();
+            crate::auth::run_auth()?;
+            if is_authenticated() {
+                return Ok(());
+            }
+            anyhow::bail!("Authentication was not completed.")
+        } else {
+            anyhow::bail!("Authentication expired.")
+        }
+    }
+
     println!(
         "\n  {TEAL}◆{R} {action} requires a free SyncVibe account.\n",
     );
@@ -77,7 +104,6 @@ pub fn require_auth(action: &str) -> Result<()> {
     )? {
         println!();
         crate::auth::run_auth()?;
-        // Verify auth succeeded
         if is_authenticated() {
             return Ok(());
         }

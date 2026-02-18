@@ -187,6 +187,7 @@ fn save_auth(payload: &AuthPayload) -> Result<()> {
         cli_token: payload.token.clone(),
         api_url: payload.api_url.clone(),
         api_key: payload.api_key.clone(),
+        auth_at: Some(chrono::Utc::now()),
     });
 
     config::save_user_config(&cfg)?;

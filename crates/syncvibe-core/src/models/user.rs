@@ -14,6 +14,18 @@ pub struct AccountConfig {
     pub api_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl AccountConfig {
+    /// Token soft-expires after 90 days. Returns true if still valid.
+    pub fn is_fresh(&self) -> bool {
+        match self.auth_at {
+            Some(at) => (chrono::Utc::now() - at).num_days() < 90,
+            None => true, // Legacy configs without auth_at are assumed fresh
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
