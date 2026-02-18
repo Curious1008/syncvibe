@@ -15,7 +15,7 @@ pub const AGENTS: &[AgentDef] = &[
         id: "claude",
         name: "Claude",
         command: "claude",
-        color: "#00D9FF",
+        color: "#E8845C",
         mentions: &["@claude", "@claude-code"],
     },
     AgentDef {

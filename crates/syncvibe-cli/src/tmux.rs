@@ -56,7 +56,7 @@ pub fn launch_project(project_path: &std::path::Path) -> Result<()> {
         return rt.block_on(crate::app::run());
     }
 
-    launch_or_attach_with_agent(&project_path.to_string_lossy(), agent.command, agent.name)
+    launch_or_attach_with_agent(&project_path.to_string_lossy(), agent.command, agent.name, agent.color)
 }
 
 /// Launch a new tmux session for a project or attach/switch to an existing one.
@@ -73,10 +73,10 @@ pub fn launch_or_attach(project_path: &str) -> Result<()> {
     } else {
         agents::default()
     };
-    launch_or_attach_with_agent(project_path, agent.command, agent.name)
+    launch_or_attach_with_agent(project_path, agent.command, agent.name, agent.color)
 }
 
-fn launch_or_attach_with_agent(project_path: &str, agent_cmd: &str, agent_name: &str) -> Result<()> {
+fn launch_or_attach_with_agent(project_path: &str, agent_cmd: &str, agent_name: &str, agent_color: &str) -> Result<()> {
     let project_dir = std::path::Path::new(project_path);
     let project_name = project_dir
         .file_name()
@@ -107,7 +107,7 @@ fn launch_or_attach_with_agent(project_path: &str, agent_cmd: &str, agent_name: 
 
         if pane_count >= 2 {
             // Session is healthy — just enforce config
-            apply_tmux_config(&session_name, agent_name)?;
+            apply_tmux_config(&session_name, agent_name, agent_color)?;
         } else {
             // Stale session (1 pane after /quit). Check if we're inside it.
             let in_this_session = inside_tmux && {
@@ -120,18 +120,18 @@ fn launch_or_attach_with_agent(project_path: &str, agent_cmd: &str, agent_name: 
 
             if in_this_session {
                 // Can't kill our own session — add split dynamically
-                ensure_split(&session_name, project_path, &bin_str, agent_name)?;
+                ensure_split(&session_name, project_path, &bin_str, agent_name, agent_color)?;
             } else {
                 // Kill stale session and recreate with clean layout
                 let _ = std::process::Command::new("tmux")
                     .args(["kill-session", "-t", &session_name])
                     .env_remove("TMUX")
                     .status();
-                create_session(&session_name, project_path, &bin_str, agent_cmd, agent_name)?;
+                create_session(&session_name, project_path, &bin_str, agent_cmd, agent_name, agent_color)?;
             }
         }
     } else {
-        create_session(&session_name, project_path, &bin_str, agent_cmd, agent_name)?;
+        create_session(&session_name, project_path, &bin_str, agent_cmd, agent_name, agent_color)?;
     }
 
     if inside_tmux {
@@ -147,7 +147,7 @@ fn launch_or_attach_with_agent(project_path: &str, agent_cmd: &str, agent_name: 
     Ok(())
 }
 
-fn create_session(session_name: &str, project_path: &str, bin_str: &str, agent_cmd: &str, agent_name: &str) -> Result<()> {
+fn create_session(session_name: &str, project_path: &str, bin_str: &str, agent_cmd: &str, agent_name: &str, agent_color: &str) -> Result<()> {
     let status = std::process::Command::new("tmux")
         .args([
             "new-session",
@@ -185,10 +185,10 @@ fn create_session(session_name: &str, project_path: &str, bin_str: &str, agent_c
         .env_remove("TMUX")
         .status();
 
-    apply_tmux_config(session_name, agent_name)
+    apply_tmux_config(session_name, agent_name, agent_color)
 }
 
-fn ensure_split(session_name: &str, project_path: &str, bin_str: &str, agent_name: &str) -> Result<()> {
+fn ensure_split(session_name: &str, project_path: &str, bin_str: &str, agent_name: &str, agent_color: &str) -> Result<()> {
     let pane_count = std::process::Command::new("tmux")
         .args(["list-panes", "-t", session_name])
         .env_remove("TMUX")
@@ -198,7 +198,7 @@ fn ensure_split(session_name: &str, project_path: &str, bin_str: &str, agent_nam
 
     if pane_count >= 2 {
         // Both panes exist — just enforce ratio and config
-        return apply_tmux_config(session_name, agent_name);
+        return apply_tmux_config(session_name, agent_name, agent_color);
     }
 
     let _ = std::process::Command::new("tmux")
@@ -216,10 +216,10 @@ fn ensure_split(session_name: &str, project_path: &str, bin_str: &str, agent_nam
         .env_remove("TMUX")
         .status();
 
-    apply_tmux_config(session_name, agent_name)
+    apply_tmux_config(session_name, agent_name, agent_color)
 }
 
-fn apply_tmux_config(session_name: &str, agent_name: &str) -> Result<()> {
+fn apply_tmux_config(session_name: &str, agent_name: &str, agent_color: &str) -> Result<()> {
     // Keybindings
     for cmd in &[
         "bind -n C-g select-pane -t :.+",
@@ -232,12 +232,25 @@ fn apply_tmux_config(session_name: &str, agent_name: &str) -> Result<()> {
             .status();
     }
 
+    // Pane border format: Ctrl+G hint color matches the TARGET pane
+    // → toward Chat = cyan (#00d9ff), toward Agent = agent's brand color
+    let border_fmt = format!(
+        "#{{{active},{inactive}}}",
+        active = "?pane_active,\
+            #{?pane_at_left,#[align=left fg=#888888] #{pane_title} ,#[align=right fg=#888888] #{pane_title} }",
+        inactive = format!(
+            "#{{?pane_at_left,\
+                #[align=left fg=#555555] #{{pane_title}} #[align=right fg={ac} bold]Ctrl+G → ,\
+                #[align=left fg=#00d9ff bold] ← Ctrl+G#[align=right fg=#555555] #{{pane_title}} }}",
+            ac = agent_color,
+        ),
+    );
+
     // Styling
     for (key, val) in &[
         ("pane-border-style", "fg=#333333"),
         ("pane-active-border-style", "fg=#333333"),
         ("pane-border-status", "top"),
-        ("pane-border-format", "#{?pane_active,#{?pane_at_left,#[align=left fg=#888888] #{pane_title} ,#[align=right fg=#888888] #{pane_title} },#{?pane_at_left,#[align=left fg=#555555] #{pane_title} #[align=right fg=#00d9ff bold]Ctrl+G → ,#[align=left fg=#00d9ff bold] ← Ctrl+G#[align=right fg=#555555] #{pane_title} }}"),
         ("mouse", "on"),
         ("status", "off"),
     ] {
@@ -246,6 +259,11 @@ fn apply_tmux_config(session_name: &str, agent_name: &str) -> Result<()> {
             .env_remove("TMUX")
             .status();
     }
+    // Set border format separately (dynamic string, not &str)
+    let _ = std::process::Command::new("tmux")
+        .args(["set-option", "-t", session_name, "pane-border-format", &border_fmt])
+        .env_remove("TMUX")
+        .status();
 
     // Mouse drag-select → copy to system clipboard (macOS pbcopy)
     for cmd in &[
