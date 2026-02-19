@@ -44,6 +44,10 @@ fn main() -> Result<()> {
         Some(Command::McpServer) => cmd_mcp_server()?,
         Some(Command::Dashboard) => cmd_dashboard()?,
         Some(Command::Switch) => cmd_switch()?,
+        Some(Command::WatchRender { user_id }) => {
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(cmd_watch_render(user_id))?;
+        }
         Some(Command::Completions { shell }) => {
             generate(shell, &mut Cli::command(), "syncvibe", &mut std::io::stdout());
         }
@@ -312,6 +316,241 @@ fn cmd_leave() -> Result<()> {
         println!("  {DIM}Room closed — no remaining members.{R}");
     }
     println!("  {DIM}Project files preserved at {project_path}{R}");
+    Ok(())
+}
+
+/// Watch-render: connects to relay, receives ScreenFrame messages, renders in terminal.
+/// Launched by /watch inside a new tmux window. Press q or close the window to exit.
+async fn cmd_watch_render(target_user_id: String) -> Result<()> {
+    use crossterm::{
+        execute, cursor, terminal,
+        event::{self, Event, KeyCode, KeyEvent},
+    };
+    use std::io::Write;
+    use syncvibe_core::protocol::WsMessage;
+
+    let cwd = env::current_dir()?;
+    let storage = Storage::find(&cwd)?;
+    let user = config::load_user_config()?;
+    let room = storage.read_room_config()?;
+
+    // Connect to relay
+    let (_client, mut rx, alive_rx) = network::ws_client::connect_ws(
+        &room.relay_url,
+        &room.room_id,
+        &room.room_secret,
+        &user.profile.user_id,
+        &user.profile.name,
+        &user.profile.color,
+        room.agent.clone(),
+    )
+    .await?;
+
+    // Strip dangerous ANSI escape sequences (OSC clipboard, title-set) while preserving SGR colors.
+    // Works on raw bytes and outputs valid UTF-8 via from_utf8_lossy.
+    let sanitize_line = |s: &str| -> String {
+        let mut out: Vec<u8> = Vec::with_capacity(s.len());
+        let bytes = s.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == 0x1b && i + 1 < bytes.len() {
+                if bytes[i + 1] == b']' {
+                    // OSC sequence — skip until ST (\x1b\\) or BEL (\x07)
+                    let mut j = i + 2;
+                    while j < bytes.len() {
+                        if bytes[j] == 0x07 { j += 1; break; }
+                        if bytes[j] == 0x1b && j + 1 < bytes.len() && bytes[j + 1] == b'\\' {
+                            j += 2; break;
+                        }
+                        j += 1;
+                    }
+                    i = j; // skip entire OSC
+                    continue;
+                }
+                // CSI/SGR sequences — allow through
+                out.push(bytes[i]);
+                i += 1;
+            } else {
+                out.push(bytes[i]);
+                i += 1;
+            }
+        }
+        String::from_utf8_lossy(&out).to_string()
+    };
+
+    // Enter raw mode with panic-safe restore guard
+    terminal::enable_raw_mode()?;
+    let mut stdout = std::io::stdout();
+    execute!(stdout, terminal::EnterAlternateScreen, cursor::Hide, terminal::DisableLineWrap)?;
+
+    // Guard ensures terminal is restored even on panic
+    struct TermGuard;
+    impl Drop for TermGuard {
+        fn drop(&mut self) {
+            let _ = terminal::disable_raw_mode();
+            let _ = execute!(std::io::stdout(), cursor::Show, terminal::LeaveAlternateScreen, terminal::EnableLineWrap);
+        }
+    }
+    let _guard = TermGuard;
+
+    let mut screen_buf: Vec<String> = Vec::new();
+    let mut sharer_name = String::new();
+    let mut stream_ended = false;
+
+    // Truncate a string with ANSI escapes to `max_w` visible columns.
+    // Iterates over chars to correctly handle multi-byte UTF-8.
+    let truncate_visible = |s: &str, max_w: usize| -> String {
+        let mut out = String::with_capacity(s.len());
+        let mut vis = 0usize;
+        let mut chars = s.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if vis >= max_w { break; }
+            if ch == '\x1b' {
+                out.push(ch);
+                if chars.peek() == Some(&'[') {
+                    // CSI sequence — copy entirely (zero visible width)
+                    out.push(chars.next().unwrap()); // '['
+                    loop {
+                        match chars.next() {
+                            Some(c) => {
+                                out.push(c);
+                                if c.is_ascii_alphabetic() { break; }
+                            }
+                            None => break,
+                        }
+                    }
+                }
+            } else {
+                out.push(ch);
+                vis += 1;
+            }
+        }
+        // Reset colors at truncation point to avoid bleeding
+        out.push_str("\x1b[0m");
+        out
+    };
+
+    // Full redraw — queries pane width each time to handle resizes
+    let redraw = |stdout: &mut std::io::Stdout, buf: &[String], name: &str, trunc: &dyn Fn(&str, usize) -> String| {
+        let (cols, _rows) = terminal::size().unwrap_or((80, 24));
+        let w = cols as usize;
+        let _ = execute!(stdout, cursor::MoveTo(0, 0));
+        // Status bar (inverted colors) — truncated to pane width
+        let status = format!(" Watching {}'s agent pane — /watch to stop ", name);
+        let status_trunc = if status.len() > w { &status[..w] } else { &status };
+        let _ = write!(stdout, "\x1b[7m{}\x1b[0m\x1b[K\r\n", status_trunc);
+        for line in buf {
+            let _ = write!(stdout, "{}\x1b[K\r\n", trunc(line, w));
+        }
+        // Clear remaining lines
+        let _ = write!(stdout, "\x1b[J");
+        let _ = stdout.flush();
+    };
+
+    {
+        let (cols, _) = terminal::size().unwrap_or((80, 24));
+        let status = " Waiting for screen data... ";
+        let s = if status.len() > cols as usize { &status[..cols as usize] } else { status };
+        let _ = execute!(stdout, cursor::MoveTo(0, 0));
+        let _ = write!(stdout, "\x1b[7m{}\x1b[0m\x1b[K\r\n  Waiting for screen data...", s);
+        let _ = stdout.flush();
+    }
+
+    let mut poll_interval = tokio::time::interval(std::time::Duration::from_millis(50));
+    poll_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    loop {
+        tokio::select! {
+            msg = rx.recv() => {
+                match msg {
+                    Some(WsMessage::ScreenFrame { user_id, lines, cols: _, rows: _ }) if user_id == target_user_id => {
+                        if stream_ended { continue; }
+                        // Patch delta (cap at 500 lines to prevent OOM)
+                        for (line_no, content) in lines {
+                            if line_no >= 500 { continue; }
+                            if line_no >= screen_buf.len() {
+                                screen_buf.resize(line_no + 1, String::new());
+                            }
+                            screen_buf[line_no] = sanitize_line(&content);
+                        }
+                        if sharer_name.is_empty() {
+                            sharer_name = "peer".to_string();
+                        }
+                        redraw(&mut stdout, &screen_buf, &sharer_name, &truncate_visible);
+                    }
+                    Some(WsMessage::ScreenShareStart { user_id, user_name }) if user_id == target_user_id => {
+                        sharer_name = user_name;
+                    }
+                    Some(WsMessage::ScreenShareStop { user_id }) if user_id == target_user_id => {
+                        stream_ended = true;
+                        let _ = execute!(stdout, cursor::MoveTo(0, 0));
+                        let _ = write!(
+                            stdout,
+                            "\x1b[7m Stream ended — {} stopped sharing. \x1b[0m\x1b[K\x1b[J",
+                            sharer_name
+                        );
+                        let _ = stdout.flush();
+                    }
+                    Some(WsMessage::UserLeft { user_id }) if user_id == target_user_id => {
+                        stream_ended = true;
+                        let _ = execute!(stdout, cursor::MoveTo(0, 0));
+                        let _ = write!(
+                            stdout,
+                            "\x1b[7m Stream ended — sharer disconnected. \x1b[0m\x1b[K\x1b[J"
+                        );
+                        let _ = stdout.flush();
+                    }
+                    // Populate sharer name from presence
+                    Some(WsMessage::AuthOk { users }) => {
+                        if let Some(u) = users.iter().find(|u| u.user_id == target_user_id) {
+                            sharer_name = u.user_name.clone();
+                        }
+                    }
+                    None => break,
+                    _ => {}
+                }
+            }
+            _ = poll_interval.tick() => {
+                // Check for key press (non-blocking)
+                if event::poll(std::time::Duration::from_millis(0))? {
+                    if let Event::Key(KeyEvent { code, .. }) = event::read()? {
+                        match code {
+                            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => break,
+                            _ => {}
+                        }
+                    }
+                }
+                // Check connection health
+                if !*alive_rx.borrow() {
+                    let _ = execute!(stdout, cursor::MoveTo(0, 0));
+                    let _ = write!(
+                        stdout,
+                        "\x1b[7m Disconnected from relay. \x1b[0m\x1b[K\x1b[J"
+                    );
+                    let _ = stdout.flush();
+                    stream_ended = true;
+                }
+            }
+        }
+
+        if stream_ended {
+            // Wait for q/Esc to close
+            loop {
+                if event::poll(std::time::Duration::from_millis(100))? {
+                    if let Event::Key(KeyEvent { code, .. }) = event::read()? {
+                        match code {
+                            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => break,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            break;
+        }
+    }
+
+    // Terminal restored by TermGuard drop
+    drop(_guard);
     Ok(())
 }
 

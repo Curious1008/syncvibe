@@ -1,8 +1,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
-use futures_util::StreamExt;
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use notify::{RecursiveMode, Watcher};
 use ratatui::layout::{Constraint, Direction, Layout};
 use tokio::sync::mpsc;
@@ -97,6 +96,27 @@ pub struct AppState {
 
     // Byte offset for incremental file reads
     disk_byte_offset: u64,
+
+    // Screen sharing (sharer side)
+    pub sharing_screen: bool,
+    last_screen_snapshot: Vec<String>,
+    cached_agent_pane: Option<String>,  // e.g. "session:0.1" — cached tmux pane target
+
+    // Screen sharing (viewer side) — latest full frame per user_id
+    pub screen_frames: std::collections::HashMap<String, ScreenFrameState>,
+    watching_pane_id: Option<String>,  // tmux pane ID of active watch overlay
+
+    // Toast notification queue + active display
+    toast_queue: Vec<(String, bool)>,  // (text, is_error) — accumulated during event
+    pub active_toast: Option<(String, bool, std::time::Instant)>,  // (text, is_error, expire_at)
+}
+
+/// Full-screen buffer from a remote sharer
+pub struct ScreenFrameState {
+    pub lines: Vec<String>,
+    pub cols: u16,
+    pub rows: u16,
+    pub user_name: String,
 }
 
 impl AppState {
@@ -162,6 +182,13 @@ impl AppState {
             in_tmux: std::env::var("TMUX").is_ok(),
             local_agent_id: local_agent_id,
             disk_byte_offset,
+            sharing_screen: false,
+            last_screen_snapshot: Vec::new(),
+            cached_agent_pane: None,
+            screen_frames: std::collections::HashMap::new(),
+            watching_pane_id: None,
+            toast_queue: Vec::new(),
+            active_toast: None,
         })
     }
 
@@ -174,6 +201,11 @@ impl AppState {
                 // Deduplicate: skip messages already in memory (e.g. received via WebSocket)
                 for msg in new_msgs {
                     if !self.chat_messages.iter().any(|m| m.id == msg.id) {
+                        // Convert agent connection system messages to toasts
+                        if msg.message_type == MessageType::System && msg.content.ends_with(" connected") {
+                            self.toast(&msg.content);
+                            continue;
+                        }
                         self.chat_messages.push(msg);
                     }
                 }
@@ -215,11 +247,10 @@ impl AppState {
         }
     }
 
-    /// Push a system message (persisted to disk, not broadcast)
+    /// Push a system message (ephemeral — not persisted to disk, not selectable)
     fn system_msg(&mut self, text: &str) {
         let msg = ChatMessage::new_system_message(text.to_string(), self.session_id.clone());
-        let _ = self.storage.append_chat_message(&msg);
-        self.disk_msg_count += 1;
+        // Ephemeral — not persisted to disk, agents can't read, not selectable
         self.chat_messages.push(msg);
     }
 
@@ -227,8 +258,7 @@ impl AppState {
     fn system_msg_typed(&mut self, text: &str, msg_type: MessageType) {
         let mut msg = ChatMessage::new_system_message(text.to_string(), self.session_id.clone());
         msg.message_type = msg_type;
-        let _ = self.storage.append_chat_message(&msg);
-        self.disk_msg_count += 1;
+        // Ephemeral — not persisted to disk
         self.chat_messages.push(msg);
     }
 
@@ -237,6 +267,32 @@ impl AppState {
         let mut msg = ChatMessage::new_system_message(text.to_string(), self.session_id.clone());
         msg.message_type = MessageType::Tip;
         self.chat_messages.push(msg);
+    }
+
+    /// Queue an info toast (shown via tmux display-message after event processing)
+    fn toast(&mut self, text: &str) {
+        self.toast_queue.push((text.to_string(), false));
+    }
+
+    /// Queue an error toast (shown with red highlight)
+    fn toast_err(&mut self, text: &str) {
+        self.toast_queue.push((text.to_string(), true));
+    }
+
+    /// Flush queued toasts into active_toast (displayed in the status bar).
+    /// Multiple messages are joined with " · " so none get lost.
+    fn flush_toasts(&mut self) {
+        if self.toast_queue.is_empty() {
+            return;
+        }
+        let has_error = self.toast_queue.iter().any(|(_, e)| *e);
+        let texts: Vec<String> = self.toast_queue.drain(..).map(|(t, _)| t).collect();
+        let combined = texts.join("  ·  ");
+        self.active_toast = Some((
+            combined,
+            has_error,
+            std::time::Instant::now() + Duration::from_secs(3),
+        ));
     }
 
     /// Handle slash commands. Returns true if input was a command (don't send as chat).
@@ -274,6 +330,8 @@ impl AppState {
                 self.system_msg("/name <n> — change display name");
                 self.system_msg("/color <#hex> — change your color");
                 self.system_msg("/mute     — toggle @mention bell     (/m)");
+                self.system_msg("/share    — toggle agent screen sharing");
+                self.system_msg("/watch    — view a teammate's shared screen");
                 self.system_msg("/clear    — clear chat view");
                 self.system_msg("/rc       — reconnect to chat");
                 self.system_msg("/leave    — leave current room");
@@ -384,10 +442,130 @@ impl AppState {
             }
             "/rc" | "/reconnect" => {
                 if self.is_online {
-                    self.system_msg("Already connected.");
+                    self.toast("Already connected");
                 } else {
-                    self.system_msg("Reconnecting...");
+                    self.toast("Reconnecting...");
                     self.want_reconnect = true;
+                }
+            }
+            "/share" => {
+                if !self.in_tmux {
+                    self.toast_err("Screen sharing requires tmux");
+                    return true;
+                }
+                if self.sharing_screen {
+                    self.sharing_screen = false;
+                    self.last_screen_snapshot.clear();
+                    self.cached_agent_pane = None;
+                    if let Some(ws) = self.ws_client.clone() {
+                        let uid = self.user.profile.user_id.clone();
+                        tokio::spawn(async move {
+                            let _ = ws.send(WsMessage::ScreenShareStop { user_id: uid }).await;
+                        });
+                    }
+                    self.toast("Screen sharing stopped");
+                } else {
+                    self.sharing_screen = true;
+                    if let Some(ws) = self.ws_client.clone() {
+                        let uid = self.user.profile.user_id.clone();
+                        let uname = self.user.profile.name.clone();
+                        tokio::spawn(async move {
+                            let _ = ws.send(WsMessage::ScreenShareStart {
+                                user_id: uid,
+                                user_name: uname,
+                            }).await;
+                        });
+                    }
+                    self.toast("Screen sharing started — /share to stop");
+                }
+            }
+            "/watch" => {
+                // Toggle off — if already watching, kill the watch pane
+                if let Some(ref pane_id) = self.watching_pane_id {
+                    let _ = std::process::Command::new("tmux")
+                        .args(["kill-pane", "-t", pane_id])
+                        .env_remove("TMUX")
+                        .status();
+                    self.watching_pane_id = None;
+                    self.toast("Stopped watching");
+                    return true;
+                }
+                if self.screen_frames.is_empty() {
+                    self.toast_err("No one is sharing right now");
+                    return true;
+                }
+                // Resolve target: if arg given, match by name; otherwise auto-pick if only 1
+                let target = if arg.is_empty() {
+                    if self.screen_frames.len() == 1 {
+                        let (uid, sf) = self.screen_frames.iter().next().unwrap();
+                        Some((uid.clone(), sf.user_name.clone()))
+                    } else {
+                        let names: Vec<String> = self.screen_frames.values()
+                            .map(|sf| sf.user_name.clone())
+                            .collect();
+                        self.toast(&format!("Multiple sharing — /watch {}", names.join(", /watch ")));
+                        None
+                    }
+                } else {
+                    let target_name = arg.to_string();
+                    self.screen_frames.iter()
+                        .find(|(_, sf)| sf.user_name.to_lowercase() == target_name.to_lowercase())
+                        .map(|(uid, sf)| (uid.clone(), sf.user_name.clone()))
+                        .or_else(|| {
+                            self.toast_err(&format!("No active share from '{}'", target_name));
+                            None
+                        })
+                };
+                if let Some((uid, name)) = target {
+                    let safe_name: String = name.chars()
+                        .filter(|c| !c.is_control())
+                        .take(32)
+                        .collect();
+                    if let Some(agent_pane) = discover_agent_pane() {
+                        let bin = std::env::current_exe()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_else(|_| "syncvibe".to_string());
+                        let shell_cmd = format!("{} watch-render {}",
+                            shell_escape(&bin), shell_escape(&uid));
+                        // Split agent pane — watch overlays it. When watch-render exits, pane closes.
+                        let result = std::process::Command::new("tmux")
+                            .args([
+                                "split-window", "-b", "-t", &agent_pane,
+                                "-v", "-l", "99%",
+                                "-P", "-F", "#{pane_id}",
+                                &shell_cmd,
+                            ])
+                            .env_remove("TMUX")
+                            .output();
+                        if let Ok(out) = result {
+                            let pid = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                            if !pid.is_empty() {
+                                self.watching_pane_id = Some(pid);
+                            }
+                        }
+                        // Find chat pane (left-side) and keep focus there
+                        let chat_pane_output = std::process::Command::new("tmux")
+                            .args([
+                                "list-panes", "-F", "#{pane_left}:#{pane_id}",
+                            ])
+                            .env_remove("TMUX")
+                            .output();
+                        if let Ok(out) = chat_pane_output {
+                            let pane_str = String::from_utf8_lossy(&out.stdout);
+                            if let Some(chat_id) = pane_str.lines()
+                                .filter_map(|l| l.split_once(':'))
+                                .filter(|(left, _)| left.trim() == "0")
+                                .map(|(_, id)| id.trim().to_string())
+                                .next()
+                            {
+                                let _ = std::process::Command::new("tmux")
+                                    .args(["select-pane", "-t", &chat_id])
+                                    .env_remove("TMUX")
+                                    .status();
+                            }
+                        }
+                        self.toast(&format!("Watching {} — /watch to stop", safe_name));
+                    }
                 }
             }
             "/quit" | "/q" => {
@@ -604,6 +782,137 @@ fn copy_to_clipboard(text: &str) -> bool {
     child.wait().map(|s| s.success()).unwrap_or(false)
 }
 
+/// Shell-escape a string for safe use in tmux shell commands.
+fn shell_escape(s: &str) -> String {
+    if s.is_empty() {
+        return "''".to_string();
+    }
+    // If the string only contains safe chars, return as-is
+    if s.chars().all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '+' | ',' | '@')) {
+        return s.to_string();
+    }
+    // Wrap in single quotes, escaping any embedded single quotes
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Max lines allowed in a screen frame (prevents OOM from malicious frames).
+const MAX_SCREEN_LINES: usize = 500;
+
+/// Discover the agent pane target (session:window.pane_index).
+fn discover_agent_pane() -> Option<String> {
+    use std::process::{Command, Stdio};
+
+    let session = Command::new("tmux")
+        .args(["display-message", "-p", "#{session_name}"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !session.status.success() { return None; }
+    let session_name = String::from_utf8_lossy(&session.stdout).trim().to_string();
+    if session_name.is_empty() { return None; }
+
+    let pane_output = Command::new("tmux")
+        .args([
+            "list-panes", "-t", &format!("{}:0", session_name),
+            "-F", "#{pane_left}:#{pane_index}",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .env_remove("TMUX")
+        .output()
+        .ok()?;
+    if !pane_output.status.success() { return None; }
+    let pane_str = String::from_utf8_lossy(&pane_output.stdout);
+    let mut panes: Vec<(u32, String)> = pane_str
+        .lines()
+        .filter_map(|line| {
+            let (left, idx) = line.split_once(':')?;
+            Some((left.parse().ok()?, idx.to_string()))
+        })
+        .collect();
+    panes.sort_by_key(|(x, _)| *x);
+    if panes.len() < 2 { return None; }
+    Some(format!("{}:0.{}", session_name, panes[1].1))
+}
+
+/// Capture the agent pane (right-side pane) content and produce a delta frame.
+fn capture_agent_pane(state: &mut AppState) -> Option<WsMessage> {
+    use std::process::{Command, Stdio};
+
+    // Use cached pane target, or discover it once
+    let agent_pane = match &state.cached_agent_pane {
+        Some(p) => p.clone(),
+        None => {
+            let pane = discover_agent_pane()?;
+            state.cached_agent_pane = Some(pane.clone());
+            pane
+        }
+    };
+
+    // Get pane dimensions
+    let size_output = Command::new("tmux")
+        .args(["display", "-t", &agent_pane, "-p", "#{pane_width}:#{pane_height}"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .env_remove("TMUX")
+        .output()
+        .ok()?;
+    if !size_output.status.success() { return None; }
+    let size_str = String::from_utf8_lossy(&size_output.stdout).trim().to_string();
+    let (cols, rows) = size_str.split_once(':')?;
+    let cols: u16 = cols.parse().ok()?;
+    let rows: u16 = rows.parse().ok()?;
+
+    // Capture pane content (with ANSI colors)
+    let capture = Command::new("tmux")
+        .args(["capture-pane", "-t", &agent_pane, "-p", "-e"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .env_remove("TMUX")
+        .output()
+        .ok()?;
+    if !capture.status.success() { return None; }
+    let content = String::from_utf8_lossy(&capture.stdout);
+    let current_lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+
+    // Compute delta — only changed lines
+    let mut delta: Vec<(usize, String)> = Vec::new();
+    for (i, line) in current_lines.iter().enumerate() {
+        let changed = state.last_screen_snapshot
+            .get(i)
+            .map(|old| old != line)
+            .unwrap_or(true);
+        if changed {
+            delta.push((i, line.clone()));
+        }
+    }
+    // If the old snapshot was longer, send empty lines to clear
+    if state.last_screen_snapshot.len() > current_lines.len() {
+        for i in current_lines.len()..state.last_screen_snapshot.len() {
+            delta.push((i, String::new()));
+        }
+    }
+
+    state.last_screen_snapshot = current_lines;
+
+    // Skip if nothing changed
+    if delta.is_empty() {
+        return None;
+    }
+
+    Some(WsMessage::ScreenFrame {
+        user_id: state.user.profile.user_id.clone(),
+        lines: delta,
+        cols,
+        rows,
+    })
+}
+
 pub async fn run() -> Result<()> {
     let cwd = std::env::current_dir()?;
     let storage = Storage::find(&cwd)?;
@@ -646,15 +955,16 @@ pub async fn run() -> Result<()> {
                 state.is_online = true;
                 ws_rx = Some(rx);
                 ws_alive_rx = Some(alive_rx);
-                state.system_msg("Connected to chat");
+                state.toast("Connected to chat");
             }
             Err(e) => {
-                state.system_msg(&format!("Chat unavailable — {}", e));
+                state.toast_err(&format!("Chat unavailable — {}", e));
                 reconnect_attempts = 1;
                 reconnect_at = Some(tokio::time::Instant::now() + Duration::from_secs(10));
             }
         }
     }
+    state.flush_toasts();
 
     // New room: copy invite message to clipboard
     if is_new_room {
@@ -719,26 +1029,50 @@ pub async fn run() -> Result<()> {
     let mut tip_expire_at: Option<tokio::time::Instant> = None;
 
     let mut terminal = tui::setup()?;
-    let mut event_stream = EventStream::new();
-    let mut last_draw = tokio::time::Instant::now();
+
+    // Bridge crossterm events into a tokio channel via a dedicated OS thread.
+    // Uses poll() with timeout so the thread exits promptly when the receiver
+    // is dropped (e.g. during /new, /join, or teardown), preventing stale
+    // threads from stealing key events.
+    fn spawn_key_bridge() -> mpsc::UnboundedReceiver<Event> {
+        let (tx, rx) = mpsc::unbounded_channel::<Event>();
+        std::thread::spawn(move || {
+            loop {
+                // Poll with 100ms timeout — allows checking if receiver dropped
+                match crossterm::event::poll(std::time::Duration::from_millis(100)) {
+                    Ok(true) => {
+                        if let Ok(event) = crossterm::event::read() {
+                            if tx.send(event).is_err() { break; }
+                        }
+                    }
+                    Ok(false) => {
+                        if tx.is_closed() { break; }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+        rx
+    }
+    let mut key_rx = spawn_key_bridge();
 
     // Tick interval for sleep detection and periodic checks
     let mut tick = tokio::time::interval(Duration::from_millis(100));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
+    // Screen sharing capture interval (1 second)
+    let mut capture_tick = tokio::time::interval(Duration::from_secs(1));
+    capture_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
     // Main event loop — fully async, no blocking
     loop {
-        // Draw at most every 16ms (60fps cap) to avoid busy-loop redraws
-        let now = tokio::time::Instant::now();
-        if now.duration_since(last_draw) >= Duration::from_millis(16) {
-            terminal.draw(|frame| draw_ui(frame, &state))?;
-            last_draw = now;
-        }
+        // Draw before waiting for next event — guarantees every state change is visible
+        terminal.draw(|frame| draw_ui(frame, &state))?;
 
         tokio::select! {
-            // Terminal key events (async, non-blocking)
-            maybe_event = event_stream.next() => {
-                if let Some(Ok(Event::Key(key))) = maybe_event {
+            // Terminal key events (bridged through tokio channel for reliable wakeup)
+            maybe_event = key_rx.recv() => {
+                if let Some(Event::Key(key)) = maybe_event {
                     handle_key_event(&mut state, key)?;
                 }
             }
@@ -804,7 +1138,22 @@ pub async fn run() -> Result<()> {
                             ws_rx = Some(rx);
                             ws_alive_rx = Some(alive_rx);
                             connected_since = Some(tokio::time::Instant::now());
-                            state.system_msg("Reconnected to chat");
+                            state.toast("Reconnected to chat");
+                            // Re-announce screen share after reconnect
+                            if state.sharing_screen {
+                                let msg = WsMessage::ScreenShareStart {
+                                    user_id: state.user.profile.user_id.clone(),
+                                    user_name: state.user.profile.name.clone(),
+                                };
+                                let ws = state.ws_client.clone();
+                                tokio::spawn(async move {
+                                    if let Some(ws) = ws {
+                                        let _ = ws.send(msg).await;
+                                    }
+                                });
+                                // Reset snapshot to force full frame on next tick
+                                state.last_screen_snapshot.clear();
+                            }
                         }
                         Err(_) => {
                             reconnect_attempts += 1;
@@ -815,7 +1164,7 @@ pub async fn run() -> Result<()> {
                                     tokio::time::Instant::now() + Duration::from_secs(delay),
                                 );
                             } else {
-                                state.system_msg("Chat unavailable — /rc to retry");
+                                state.toast_err("Chat unavailable — /rc to retry");
                             }
                         }
                     }
@@ -847,6 +1196,18 @@ pub async fn run() -> Result<()> {
                 state.chat_messages.retain(|m| m.message_type != MessageType::Tip);
             }
 
+            // Screen sharing capture — send delta frames every second (skip when offline)
+            _ = capture_tick.tick(), if state.sharing_screen && state.ws_client.is_some() => {
+                if let Some(frame) = capture_agent_pane(&mut state) {
+                    if let Some(ref ws) = state.ws_client {
+                        let ws = ws.clone();
+                        tokio::spawn(async move {
+                            let _ = ws.send(frame).await;
+                        });
+                    }
+                }
+            }
+
             // Periodic tick for connection health checks
             _ = tick.tick() => {
                 // Check if WebSocket connection dropped
@@ -855,12 +1216,12 @@ pub async fn run() -> Result<()> {
                         state.is_online = false;
                         state.ws_client = None;
                         connected_since = None;
-                        state.system_msg("Disconnected from chat");
+                        state.toast_err("Disconnected from chat");
                         reconnect_attempts += 1;
                         if reconnect_attempts < MAX_AUTO_RECONNECTS {
                             reconnect_at = Some(tokio::time::Instant::now() + Duration::from_secs(5));
                         } else {
-                            state.system_msg("Chat unavailable — /rc to retry");
+                            state.toast_err("Chat unavailable — /rc to retry");
                         }
                         ws_alive_rx = None;
                         ws_rx = None;
@@ -882,6 +1243,13 @@ pub async fn run() -> Result<()> {
                     state.last_presence_rotate = std::time::Instant::now();
                 }
 
+                // Clear expired toast
+                if let Some((_, _, expire)) = state.active_toast {
+                    if expire <= std::time::Instant::now() {
+                        state.active_toast = None;
+                    }
+                }
+
                 // Manual reconnect via /rc
                 if state.want_reconnect {
                     state.want_reconnect = false;
@@ -890,6 +1258,9 @@ pub async fn run() -> Result<()> {
                 }
             }
         }
+
+        // Flush queued toast notifications (combines multiple into one display-message)
+        state.flush_toasts();
 
         // Handle /new — create room in another project directory
         if state.want_new_project {
@@ -900,13 +1271,13 @@ pub async fn run() -> Result<()> {
             if !switched {
                 // User cancelled or error — restore current TUI
                 terminal = tui::setup()?;
-                event_stream = EventStream::new();
+                key_rx = spawn_key_bridge();
                 continue;
             }
 
             // Switched to new tmux session — restore current TUI (runs in background)
             terminal = tui::setup()?;
-            event_stream = EventStream::new();
+            key_rx = spawn_key_bridge();
             continue;
         }
 
@@ -918,31 +1289,44 @@ pub async fn run() -> Result<()> {
             let switched = handle_join_project();
             if !switched {
                 terminal = tui::setup()?;
-                event_stream = EventStream::new();
+                key_rx = spawn_key_bridge();
                 continue;
             }
 
             terminal = tui::setup()?;
-            event_stream = EventStream::new();
+            key_rx = spawn_key_bridge();
             continue;
         }
 
-        // Handle /leave — leave current room, kill tmux session, offer room selection
+        // Handle /leave — leave current room, show room picker to switch
         if state.want_leave {
             state.want_leave = false;
             tui::teardown(&mut terminal)?;
 
             let left = handle_leave_room(&state.storage);
             if left {
-                // Kill the tmux session (both panes) to avoid stale processes
-                kill_current_tmux_session(state.in_tmux);
-                // Re-enter the session menu (choose room / create / join)
-                let _ = crate::session::cmd_session();
-                return Ok(());
+                // Kill only the agent pane (right side), keep dashboard alive
+                kill_agent_pane(state.in_tmux);
+
+                // Show the session menu (choose room / create / join)
+                // This runs in our own (dashboard) pane — tmux session stays alive
+                match crate::session::cmd_session() {
+                    Ok(()) => {
+                        // cmd_session launched a new tmux session and switched to it.
+                        // The old session now only has this pane — kill it after switch.
+                        kill_current_tmux_session(state.in_tmux);
+                        return Ok(());
+                    }
+                    Err(_) => {
+                        // User cancelled or error — nothing to go back to, exit cleanly
+                        kill_current_tmux_session(state.in_tmux);
+                        return Ok(());
+                    }
+                }
             }
 
             terminal = tui::setup()?;
-            event_stream = EventStream::new();
+            key_rx = spawn_key_bridge();
             continue;
         }
 
@@ -979,12 +1363,21 @@ pub async fn run() -> Result<()> {
             }
 
             terminal = tui::setup()?;
-            event_stream = EventStream::new();
+            key_rx = spawn_key_bridge();
             continue;
         }
 
         if state.should_quit {
             break;
+        }
+    }
+
+    // Auto-stop sharing on exit
+    if state.sharing_screen {
+        if let Some(ref ws) = state.ws_client {
+            let ws = ws.clone();
+            let uid = state.user.profile.user_id.clone();
+            let _ = ws.send(WsMessage::ScreenShareStop { user_id: uid }).await;
         }
     }
 
@@ -994,6 +1387,48 @@ pub async fn run() -> Result<()> {
     kill_current_tmux_session(state.in_tmux);
 
     Ok(())
+}
+
+/// Kill only the agent pane (right side) so the dashboard stays alive for room selection.
+fn kill_agent_pane(in_tmux: bool) {
+    if !in_tmux {
+        return;
+    }
+    if let Ok(output) = std::process::Command::new("tmux")
+        .args(["display-message", "-p", "#{session_name}"])
+        .output()
+    {
+        let session = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if session.is_empty() {
+            return;
+        }
+        // Find panes sorted by horizontal position (left = dashboard, right = agent)
+        let pane_output = std::process::Command::new("tmux")
+            .args([
+                "list-panes", "-t", &format!("{}:0", session),
+                "-F", "#{pane_left}:#{pane_index}",
+            ])
+            .env_remove("TMUX")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .unwrap_or_default();
+        let mut panes: Vec<(u32, String)> = pane_output
+            .lines()
+            .filter_map(|line| {
+                let (left, idx) = line.split_once(':')?;
+                Some((left.parse().ok()?, idx.to_string()))
+            })
+            .collect();
+        panes.sort_by_key(|(x, _)| *x);
+        // Kill the right pane (agent) if we have at least 2 panes
+        if panes.len() >= 2 {
+            let agent_pane = format!("{}:0.{}", session, panes[1].1);
+            let _ = std::process::Command::new("tmux")
+                .args(["kill-pane", "-t", &agent_pane])
+                .env_remove("TMUX")
+                .status();
+        }
+    }
 }
 
 /// Kill the current tmux session (both panes) to avoid stale processes.
@@ -1223,11 +1658,12 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
                 .into_iter()
                 .filter(|p| seen.insert(p.user_id.clone()))
                 .collect();
-            if !state
-                .presence
-                .iter()
-                .any(|p| p.user_id == state.user.profile.user_id)
-            {
+            if let Some(me) = state.presence.iter_mut().find(|p| p.user_id == state.user.profile.user_id) {
+                // Ensure our own agent_id is set (relay may not forward it)
+                if me.agent_id.is_none() {
+                    me.agent_id = state.local_agent_id.clone();
+                }
+            } else {
                 state.presence.push(PresenceInfo {
                     user_id: state.user.profile.user_id.clone(),
                     user_name: state.user.profile.name.clone(),
@@ -1238,7 +1674,7 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
         }
         WsMessage::UserJoined(info) => {
             if !state.presence.iter().any(|p| p.user_id == info.user_id) {
-                state.system_msg(&format!("{} joined", info.user_name));
+                state.toast(&format!("{} joined", info.user_name));
                 state.presence.push(info);
             }
         }
@@ -1254,7 +1690,11 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
                 .map(|p| p.user_name.clone())
                 .unwrap_or_else(|| "Someone".to_string());
             state.presence.retain(|p| p.user_id != user_id);
-            state.system_msg(&format!("{} left", name));
+            // Clean up any active screen share from this user
+            if state.screen_frames.remove(&user_id).is_some() {
+                state.toast(&format!("{}'s screen share ended", name));
+            }
+            state.toast(&format!("{} left", name));
         }
         WsMessage::ChatMessage(msg) => {
             // Deduplicate by message ID
@@ -1309,10 +1749,76 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
                 );
             }
         }
+        WsMessage::ScreenShareStart { user_id, user_name } => {
+            if let Some(sf) = state.screen_frames.get_mut(&user_id) {
+                sf.user_name = user_name;
+            } else {
+                state.screen_frames.insert(user_id, ScreenFrameState {
+                    lines: Vec::new(),
+                    cols: 0,
+                    rows: 0,
+                    user_name: user_name.clone(),
+                });
+                state.toast(&format!("{} is sharing — /watch to view", user_name));
+            }
+        }
+        WsMessage::ScreenShareStop { user_id } => {
+            let name = state.screen_frames
+                .get(&user_id)
+                .map(|sf| sf.user_name.clone())
+                .unwrap_or_else(|| "Someone".to_string());
+            state.screen_frames.remove(&user_id);
+            // Kill watch pane if active (don't leave it stuck waiting for q)
+            if let Some(ref pane_id) = state.watching_pane_id {
+                let _ = std::process::Command::new("tmux")
+                    .args(["kill-pane", "-t", pane_id])
+                    .env_remove("TMUX")
+                    .status();
+                state.watching_pane_id = None;
+            }
+            state.toast(&format!("{} stopped sharing", name));
+        }
+        WsMessage::ScreenFrame { user_id, lines, cols, rows } => {
+            if let Some(sf) = state.screen_frames.get_mut(&user_id) {
+                sf.cols = cols;
+                sf.rows = rows;
+                // Patch delta lines into the full buffer (cap to prevent OOM)
+                for (line_no, content) in lines {
+                    if line_no >= MAX_SCREEN_LINES { continue; }
+                    if line_no >= sf.lines.len() {
+                        sf.lines.resize(line_no + 1, String::new());
+                    }
+                    sf.lines[line_no] = content;
+                }
+            }
+            // If we don't have a ScreenShareStart yet, create the entry from frame data
+            else {
+                // Resolve name from presence list
+                let name = state.presence.iter()
+                    .find(|p| p.user_id == user_id)
+                    .map(|p| p.user_name.clone())
+                    .unwrap_or_else(|| "Someone".to_string());
+                let mut full_lines = Vec::new();
+                for (line_no, content) in lines {
+                    if line_no >= MAX_SCREEN_LINES { continue; }
+                    if line_no >= full_lines.len() {
+                        full_lines.resize(line_no + 1, String::new());
+                    }
+                    full_lines[line_no] = content;
+                }
+                state.screen_frames.insert(user_id, ScreenFrameState {
+                    lines: full_lines,
+                    cols,
+                    rows,
+                    user_name: name.clone(),
+                });
+                state.toast(&format!("{} is sharing — /watch to view", name));
+            }
+        }
         WsMessage::AuthFail { reason } => {
             state.is_online = false;
             state.ws_client = None;
-            state.system_msg(&format!("Auth rejected: {}", reason));
+            state.toast_err(&format!("Auth rejected: {}", reason));
         }
         _ => {}
     }
@@ -1332,31 +1838,55 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
                 if total == 0 {
                     return Ok(());
                 }
+                // Helper: find prev selectable (User/Image/GitCommit) message
+                let find_prev = |from: usize| -> Option<usize> {
+                    (0..from).rev().find(|&i| matches!(
+                        state.chat_messages[i].message_type,
+                        MessageType::User | MessageType::Image | MessageType::GitCommit
+                    ))
+                };
                 match state.chat_selected {
                     None => {
-                        state.chat_selected = Some(total.saturating_sub(1));
-                    }
-                    Some(0) => {
-                        // At the top — load more history
-                        let loaded = state.load_more_history();
-                        if loaded > 0 {
-                            // Point to the message the user was looking at (now shifted by `loaded`)
-                            state.chat_selected = Some(loaded);
+                        // Start from bottom, find last selectable
+                        if let Some(i) = (0..total).rev().find(|&i| matches!(
+                            state.chat_messages[i].message_type,
+                            MessageType::User | MessageType::Image | MessageType::GitCommit
+                        )) {
+                            state.chat_selected = Some(i);
                         }
                     }
                     Some(idx) => {
-                        state.chat_selected = Some(idx - 1);
+                        if let Some(prev) = find_prev(idx) {
+                            state.chat_selected = Some(prev);
+                        } else {
+                            // At the top — load more history
+                            let loaded = state.load_more_history();
+                            if loaded > 0 {
+                                // Keep pointing at the same message (shifted by loaded count)
+                                state.chat_selected = Some(idx + loaded);
+                            }
+                        }
                     }
                 }
             }
             KeyCode::Down | KeyCode::Esc => {
                 let total = state.chat_messages.len();
                 match state.chat_selected {
-                    Some(idx) if idx < total.saturating_sub(1) => {
-                        state.chat_selected = Some(idx + 1);
+                    Some(idx) => {
+                        // Find next selectable message
+                        if let Some(next) = ((idx + 1)..total).find(|&i| matches!(
+                            state.chat_messages[i].message_type,
+                            MessageType::User | MessageType::Image | MessageType::GitCommit
+                        )) {
+                            state.chat_selected = Some(next);
+                        } else {
+                            // Past last selectable → back to input
+                            state.chat_selected = None;
+                            state.focus = Panel::Input;
+                        }
                     }
                     _ => {
-                        // Past last message or Esc → back to input
+                        // Esc or already None → back to input
                         state.chat_selected = None;
                         state.focus = Panel::Input;
                     }
@@ -1433,7 +1963,34 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
                     state.autocomplete_idx = (state.autocomplete_idx + 1) % ac_len;
                 }
                 KeyCode::Enter => {
-                    state.send_chat_message()?;
+                    if mention_active {
+                        // Complete the mention into the input buffer
+                        let idx = state.autocomplete_idx % mention_matches.len();
+                        let item = &mentions[mention_matches[idx]];
+                        let chars: Vec<char> = state.input_buffer.chars().collect();
+                        let before: String = chars[..mention_word_start].iter().collect();
+                        let after: String = chars[state.input_cursor..].iter().collect();
+                        state.input_buffer = format!("{}{} {}", before, item.handle, after);
+                        state.input_cursor =
+                            before.chars().count() + item.handle.chars().count() + 1;
+                        state.autocomplete_idx = 0;
+                    } else if cmd_active {
+                        let idx = state.autocomplete_idx.min(cmd_matches.len() - 1);
+                        let (cmd, _) = components::autocomplete::COMMANDS[cmd_matches[idx]];
+                        // Commands that take args: just complete, don't send yet
+                        let needs_arg = matches!(cmd, "/name" | "/color" | "/join");
+                        if needs_arg {
+                            state.input_buffer = format!("{} ", cmd);
+                            state.input_cursor = state.input_buffer.chars().count();
+                            state.autocomplete_idx = 0;
+                        } else {
+                            state.input_buffer = cmd.to_string();
+                            state.input_cursor = state.input_buffer.chars().count();
+                            state.send_chat_message()?;
+                        }
+                    } else {
+                        state.send_chat_message()?;
+                    }
                 }
                 KeyCode::Esc => {
                     if state.pending_quote.is_some() {
@@ -1494,9 +2051,13 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
                 }
                 KeyCode::Up => {
                     let total = state.chat_messages.len();
-                    if total > 0 {
+                    // Find last selectable message (skip System/Tip)
+                    if let Some(i) = (0..total).rev().find(|&i| matches!(
+                        state.chat_messages[i].message_type,
+                        MessageType::User | MessageType::Image | MessageType::GitCommit
+                    )) {
                         state.focus = Panel::Chat;
-                        state.chat_selected = Some(total.saturating_sub(1));
+                        state.chat_selected = Some(i);
                     }
                 }
                 _ => {}

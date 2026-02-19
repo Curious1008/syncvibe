@@ -16,6 +16,8 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/name", "Change display name"),
     ("/color", "Change chat color"),
     ("/mute", "Toggle notification bell"),
+    ("/share", "Toggle screen sharing"),
+    ("/watch", "Watch a shared screen"),
     ("/leave", "Leave current room"),
     ("/clear", "Clear chat view"),
     ("/rc", "Reconnect to chat"),

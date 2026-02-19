@@ -68,6 +68,12 @@ pub enum Command {
     /// Authenticate CLI with your SyncVibe web account
     Auth,
 
+    /// Render screen share stream (internal, launched by /watch)
+    WatchRender {
+        /// User ID of the sharer
+        user_id: String,
+    },
+
     /// Generate shell completions
     Completions {
         /// Shell to generate completions for

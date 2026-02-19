@@ -50,6 +50,21 @@ pub enum WsMessage {
         users: Vec<String>,
     },
 
+    // Screen sharing
+    ScreenShareStart {
+        user_id: String,
+        user_name: String,
+    },
+    ScreenShareStop {
+        user_id: String,
+    },
+    ScreenFrame {
+        user_id: String,
+        lines: Vec<(usize, String)>,
+        cols: u16,
+        rows: u16,
+    },
+
     // Keepalive
     Ping,
     Pong,

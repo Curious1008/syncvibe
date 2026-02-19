@@ -37,6 +37,32 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
         ));
     }
 
+    // Screen sharing indicators
+    let mut live_width: usize = 0;
+    if state.sharing_screen {
+        spans.push(Span::styled(
+            "◉ SHARING ",
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Red)
+                .add_modifier(Modifier::BOLD),
+        ));
+        live_width = 10;
+    } else if !state.screen_frames.is_empty() {
+        // Viewer: show who is sharing
+        let names: Vec<&str> = state.screen_frames.values()
+            .map(|sf| sf.user_name.as_str())
+            .collect();
+        let label = format!("◉ {} LIVE ", names.join(", "));
+        live_width = label.width();
+        spans.push(Span::styled(
+            label,
+            Style::default()
+                .fg(Color::Red)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+
     // Build presence entries (right-aligned)
     let mut presence_spans: Vec<Span> = Vec::new();
     let mut presence_len: usize = 0;
@@ -70,7 +96,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
         .collect();
 
     // Calculate how much space is left for other users
-    let left_used = 12 + state.project_name.width() + 3 + if state.is_online { 2 } else { 10 };
+    let left_used = 12 + state.project_name.width() + 3 + if state.is_online { 2 } else { 10 } + live_width;
     let spacer_min = 2; // at least some separator
     let available_for_others = width
         .saturating_sub(left_used)
@@ -109,13 +135,47 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
         others_used += indicator.width();
     }
 
-    // Spacer
+    // Spacer — or toast notification if active
     let total_right = presence_len + others_used;
     let remaining = width.saturating_sub(left_used).saturating_sub(total_right);
-    spans.push(Span::styled(
-        "─".repeat(remaining),
-        Style::default().fg(Color::Rgb(60, 60, 60)),
-    ));
+    let spacer_style = Style::default().fg(Color::Rgb(60, 60, 60));
+
+    let active_toast = state.active_toast.as_ref().and_then(|(text, is_err, expire)| {
+        if *expire > std::time::Instant::now() {
+            Some((text.as_str(), *is_err))
+        } else {
+            None
+        }
+    });
+
+    if let Some((toast_text, is_err)) = active_toast {
+        let toast_len = toast_text.width() + 2; // " text "
+        if toast_len < remaining {
+            let pad = remaining.saturating_sub(toast_len);
+            let pad_left = pad / 2;
+            let pad_right = pad.saturating_sub(pad_left);
+            spans.push(Span::styled("─".repeat(pad_left), spacer_style));
+            let toast_style = if is_err {
+                Style::default().fg(Color::White).bg(Color::Red).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Rgb(78, 205, 196)).add_modifier(Modifier::BOLD)
+            };
+            spans.push(Span::styled(format!(" {} ", toast_text), toast_style));
+            spans.push(Span::styled("─".repeat(pad_right), spacer_style));
+        } else {
+            // Toast too long — truncate
+            let available = remaining.saturating_sub(2);
+            let truncated: String = toast_text.chars().take(available).collect();
+            let toast_style = if is_err {
+                Style::default().fg(Color::White).bg(Color::Red).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Rgb(78, 205, 196)).add_modifier(Modifier::BOLD)
+            };
+            spans.push(Span::styled(format!(" {} ", truncated), toast_style));
+        }
+    } else {
+        spans.push(Span::styled("─".repeat(remaining), spacer_style));
+    };
 
     // Render: agents → others → hidden indicator → current user
     for (name, color) in &agent_entries {

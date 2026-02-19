@@ -240,8 +240,8 @@ fn apply_tmux_config(session_name: &str, agent_name: &str, agent_color: &str) ->
             #{?pane_at_left,#[align=left fg=#888888] #{pane_title} ,#[align=right fg=#888888] #{pane_title} }",
         inactive = format!(
             "#{{?pane_at_left,\
-                #[align=left fg=#555555] #{{pane_title}} #[align=right fg={ac} bold]Ctrl+G → ,\
-                #[align=left fg=#00d9ff bold] ← Ctrl+G#[align=right fg=#555555] #{{pane_title}} }}",
+                #[align=left fg=#555555] #{{pane_title}} #[align=right fg=#00d9ff bold]← Ctrl+G ,\
+                #[align=left fg={ac} bold] Ctrl+G →#[align=right fg=#555555] #{{pane_title}} }}",
             ac = agent_color,
         ),
     );
@@ -311,6 +311,17 @@ fn apply_tmux_config(session_name: &str, agent_name: &str, agent_color: &str) ->
         })
         .collect();
     panes.sort_by_key(|(x, _)| *x);
+
+    // Kill any extra panes (e.g. leftover watch splits) — keep only left + right
+    if panes.len() > 2 {
+        for (_, idx) in panes.iter().skip(2).rev() {
+            let target = format!("{}:0.{}", session_name, idx);
+            let _ = std::process::Command::new("tmux")
+                .args(["kill-pane", "-t", &target])
+                .env_remove("TMUX")
+                .status();
+        }
+    }
 
     if panes.len() >= 2 {
         let left = format!("{}:0.{}", session_name, panes[0].1); // dashboard
