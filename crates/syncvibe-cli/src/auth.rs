@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use syncvibe_core::models::AccountConfig;
 
 use crate::config;
-use crate::onboarding::{TEAL, GREEN, DIM, R};
+use crate::onboarding::{DIM, GREEN, R, TEAL};
 
 const WEB_BASE: &str = "https://syncvibe.online";
 const CORS_ORIGIN: &str = "https://syncvibe.online";
@@ -26,11 +26,17 @@ fn generate_nonce() -> String {
     use std::hash::{BuildHasher, Hasher};
     let s = RandomState::new();
     let mut h = s.build_hasher();
-    h.write_u128(std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos());
-    format!("{:016x}{:016x}", h.finish(), RandomState::new().build_hasher().finish())
+    h.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+    );
+    format!(
+        "{:016x}{:016x}",
+        h.finish(),
+        RandomState::new().build_hasher().finish()
+    )
 }
 
 /// Run the CLI auth flow:
@@ -47,8 +53,7 @@ pub fn run_auth() -> Result<()> {
         }
     }
 
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .context("Failed to start local server")?;
+    let listener = TcpListener::bind("127.0.0.1:0").context("Failed to start local server")?;
     listener
         .set_nonblocking(true)
         .context("Failed to set non-blocking mode")?;
@@ -74,12 +79,8 @@ pub fn run_auth() -> Result<()> {
         }
         match listener.accept() {
             Ok((stream, _)) => {
-                stream
-                    .set_nonblocking(false)
-                    .ok();
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(10)))
-                    .ok();
+                stream.set_nonblocking(false).ok();
+                stream.set_read_timeout(Some(Duration::from_secs(10))).ok();
                 match handle_connection(stream, &nonce) {
                     ConnectionResult::Auth(p) => break p,
                     ConnectionResult::Preflight => continue,
@@ -230,14 +231,21 @@ fn parse_auth_payload(body: &str, expected_nonce: &str) -> Option<AuthPayload> {
     }
     Some(AuthPayload {
         token: token.to_string(),
-        api_url: v.get("supabase_url").and_then(|v| v.as_str()).map(String::from),
-        api_key: v.get("supabase_anon_key").and_then(|v| v.as_str()).map(String::from),
+        api_url: v
+            .get("supabase_url")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        api_key: v
+            .get("supabase_anon_key")
+            .and_then(|v| v.as_str())
+            .map(String::from),
     })
 }
 
 fn save_auth(payload: &AuthPayload) -> Result<()> {
-    let mut cfg = config::load_user_config()
-        .unwrap_or_else(|_| syncvibe_core::models::UserConfig::new("user".into(), "#4ECDC4".into()));
+    let mut cfg = config::load_user_config().unwrap_or_else(|_| {
+        syncvibe_core::models::UserConfig::new("user".into(), "#4ECDC4".into())
+    });
 
     cfg.account = Some(AccountConfig {
         cli_token: payload.token.clone(),
@@ -277,7 +285,11 @@ mod tests {
     fn test_parse_auth_payload() {
         let nonce = "test_nonce_123";
 
-        let p = parse_auth_payload(r#"{"token":"abc123def456","state":"test_nonce_123"}"#, nonce).unwrap();
+        let p = parse_auth_payload(
+            r#"{"token":"abc123def456","state":"test_nonce_123"}"#,
+            nonce,
+        )
+        .unwrap();
         assert_eq!(p.token, "abc123def456");
         assert!(p.api_url.is_none());
         assert!(p.api_key.is_none());

@@ -22,7 +22,9 @@ fn api_key(account: &AccountConfig) -> &str {
 
 /// Sync a single room to Supabase user_projects.
 pub fn sync_room(room_id: &str, project_name: &str, room_secret: &str) {
-    let Ok(cfg) = config::load_user_config() else { return };
+    let Ok(cfg) = config::load_user_config() else {
+        return;
+    };
     let Some(account) = &cfg.account else { return };
 
     let body = serde_json::json!({
@@ -41,10 +43,14 @@ pub fn sync_room(room_id: &str, project_name: &str, room_secret: &str) {
 /// Bulk sync all local rooms to Supabase.
 /// Called after auth completion and on launch.
 pub fn bulk_sync_all_rooms() {
-    let Ok(cfg) = config::load_user_config() else { return };
+    let Ok(cfg) = config::load_user_config() else {
+        return;
+    };
     let Some(account) = &cfg.account else { return };
 
-    let Ok(registry) = config::load_registry() else { return };
+    let Ok(registry) = config::load_registry() else {
+        return;
+    };
 
     let mut rooms = Vec::new();
     for entry in &registry.projects {

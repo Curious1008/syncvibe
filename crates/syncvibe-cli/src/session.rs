@@ -4,7 +4,7 @@ use anyhow::Result;
 
 use syncvibe_core::models::{RoomConfig, UserConfig};
 
-use crate::onboarding::{self, TEAL, GREEN, RED, DIM, B, R};
+use crate::onboarding::{self, B, DIM, GREEN, R, RED, TEAL};
 use crate::{config, init, tmux};
 
 /// Ensure user profile exists, prompting interactively if needed.
@@ -27,10 +27,7 @@ pub fn ensure_user_profile() -> Result<UserConfig> {
     let raw_name = if git_name.is_empty() {
         onboarding::prompt(&format!("  {TEAL}Your name:{R} "))?
     } else {
-        onboarding::prompt_with_default(
-            &format!("  {TEAL}Your name{R}"),
-            &git_name,
-        )?
+        onboarding::prompt_with_default(&format!("  {TEAL}Your name{R}"), &git_name)?
     };
     let name = onboarding::sanitize_name(&raw_name);
 
@@ -77,9 +74,9 @@ pub fn cmd_session() -> Result<()> {
         if !crate::invite::looks_like_short_code(trimmed) && !trimmed.starts_with("syncvibe://") {
             break 'clipboard;
         }
-        if !onboarding::confirm(
-            &format!("  {TEAL}◆{R} Found invite code in clipboard — join this room?"),
-        )? {
+        if !onboarding::confirm(&format!(
+            "  {TEAL}◆{R} Found invite code in clipboard — join this room?"
+        ))? {
             break 'clipboard;
         }
         let mut room = match crate::invite::resolve_short_invite(trimmed) {
@@ -90,15 +87,15 @@ pub fn cmd_session() -> Result<()> {
                 break 'clipboard;
             }
         };
-        let name = room.room_name.clone().unwrap_or_else(|| "syncvibe-room".to_string());
+        let name = room
+            .room_name
+            .clone()
+            .unwrap_or_else(|| "syncvibe-room".to_string());
         println!("  {GREEN}✓{R} Code accepted — {B}{name}{R}\n");
         let proj = init::projects_dir().join(&name);
         // Already joined — just launch
         if proj.join(".syncvibe").is_dir() {
-            println!(
-                "  {DIM}→ {} (already set up){R}\n",
-                proj.display()
-            );
+            println!("  {DIM}→ {} (already set up){R}\n", proj.display());
             return tmux::launch_project(&proj);
         }
         let agent_id = crate::agents::select_agent()?;
@@ -150,9 +147,7 @@ pub fn cmd_session() -> Result<()> {
                 crate::config::require_auth("Creating a room")?;
                 println!();
                 let name = loop {
-                    let raw = onboarding::prompt(
-                        &format!("  {TEAL}Room name:{R} "),
-                    )?;
+                    let raw = onboarding::prompt(&format!("  {TEAL}Room name:{R} "))?;
                     if raw.is_empty() {
                         anyhow::bail!("Cancelled.");
                     }
@@ -172,11 +167,9 @@ pub fn cmd_session() -> Result<()> {
                 tmux::launch_project(&path)
             } else {
                 // Join with invite code — retry on invalid codes
-                println!("");
+                println!();
                 let mut room = loop {
-                    let code = onboarding::prompt(
-                        &format!("  {TEAL}Invite code:{R} "),
-                    )?;
+                    let code = onboarding::prompt(&format!("  {TEAL}Invite code:{R} "))?;
                     if code.is_empty() {
                         anyhow::bail!("Cancelled.");
                     }
@@ -189,17 +182,21 @@ pub fn cmd_session() -> Result<()> {
                         }
                     }
                 };
-                let raw_name = room.room_name.clone().unwrap_or_else(|| "syncvibe-room".to_string());
+                let raw_name = room
+                    .room_name
+                    .clone()
+                    .unwrap_or_else(|| "syncvibe-room".to_string());
                 let name = onboarding::sanitize_name(&raw_name);
-                let name = if name.is_empty() { "syncvibe-room".to_string() } else { name };
+                let name = if name.is_empty() {
+                    "syncvibe-room".to_string()
+                } else {
+                    name
+                };
                 println!("  {GREEN}✓{R} Code accepted — {B}{name}{R}\n");
                 let proj = init::projects_dir().join(&name);
                 // Already joined — just launch
                 if proj.join(".syncvibe").is_dir() {
-                    println!(
-                        "  {DIM}→ {} (already set up){R}\n",
-                        proj.display()
-                    );
+                    println!("  {DIM}→ {} (already set up){R}\n", proj.display());
                     return tmux::launch_project(&proj);
                 }
                 let agent_id = crate::agents::select_agent()?;

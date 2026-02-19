@@ -9,7 +9,11 @@ use crate::components::util::truncate_str;
 
 pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
     let is_focused = state.focus == Panel::Input;
-    let border_color = if is_focused { Color::Cyan } else { Color::DarkGray };
+    let border_color = if is_focused {
+        Color::Cyan
+    } else {
+        Color::DarkGray
+    };
 
     let mut block = Block::default()
         .borders(Borders::LEFT | Borders::TOP | Borders::BOTTOM)
@@ -40,16 +44,26 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
             } else {
                 " Type a message..."
             };
-            (placeholder.to_string(), Style::default().fg(Color::DarkGray))
+            (
+                placeholder.to_string(),
+                Style::default().fg(Color::DarkGray),
+            )
         } else {
-            (format!(" {}", state.input_buffer), Style::default().fg(Color::Reset))
+            (
+                format!(" {}", state.input_buffer),
+                Style::default().fg(Color::Reset),
+            )
         }
+    } else if state.input_buffer.is_empty() {
+        (
+            " Type a message...".to_string(),
+            Style::default().fg(Color::Rgb(60, 60, 60)),
+        )
     } else {
-        if state.input_buffer.is_empty() {
-            (" Type a message...".to_string(), Style::default().fg(Color::Rgb(60, 60, 60)))
-        } else {
-            (format!(" {}", state.input_buffer), Style::default().fg(Color::DarkGray))
-        }
+        (
+            format!(" {}", state.input_buffer),
+            Style::default().fg(Color::DarkGray),
+        )
     };
 
     let paragraph = Paragraph::new(Line::from(Span::styled(display_text, style))).block(block);

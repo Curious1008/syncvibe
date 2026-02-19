@@ -18,10 +18,7 @@ fn parse_mentions(content: &str, default_style: Style) -> Vec<Span<'static>> {
     while let Some(at_pos) = remaining.find('@') {
         // Add text before the @
         if at_pos > 0 {
-            spans.push(Span::styled(
-                remaining[..at_pos].to_string(),
-                default_style,
-            ));
+            spans.push(Span::styled(remaining[..at_pos].to_string(), default_style));
         }
 
         // Extract the @mention (letters, digits, hyphens, underscores)
@@ -68,7 +65,11 @@ enum ChatLine {
 
 pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
     let is_focused = state.focus == Panel::Chat;
-    let border_color = if is_focused { Color::Cyan } else { Color::DarkGray };
+    let border_color = if is_focused {
+        Color::Cyan
+    } else {
+        Color::DarkGray
+    };
 
     // Smart title: only show hint when in selection mode
     let title = if state.chat_selected.is_some() {
@@ -137,7 +138,9 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
 
     // Find the item index corresponding to the selected message
     let selected_item = state.chat_selected.and_then(|sel| {
-        items.iter().position(|item| matches!(item, ChatLine::Message { idx } if *idx == sel))
+        items
+            .iter()
+            .position(|item| matches!(item, ChatLine::Message { idx } if *idx == sel))
     });
 
     // Determine visible window
@@ -249,7 +252,11 @@ fn estimate_lines(msg: &ChatMessage, width: usize) -> usize {
     let base = ((text_width as f64) / (width as f64)).ceil().max(1.0) as usize;
     let base = base + newline_count;
     // Quote adds one line
-    if msg.quote.is_some() { base + 1 } else { base }
+    if msg.quote.is_some() {
+        base + 1
+    } else {
+        base
+    }
 }
 
 fn format_message(msg: &ChatMessage, selected: bool, grouped: bool) -> Vec<Line<'static>> {
@@ -279,7 +286,10 @@ fn format_message(msg: &ChatMessage, selected: bool, grouped: bool) -> Vec<Line<
             format!("{}        ", prefix),
             Style::default().fg(Color::DarkGray),
         )];
-        spans.extend(parse_mentions(&msg.content, Style::default().fg(Color::Reset)));
+        spans.extend(parse_mentions(
+            &msg.content,
+            Style::default().fg(Color::Reset),
+        ));
         Line::from(spans)
     } else {
         let time = msg.timestamp.format("%H:%M").to_string();
@@ -296,7 +306,10 @@ fn format_message(msg: &ChatMessage, selected: bool, grouped: bool) -> Vec<Line<
                         Style::default().fg(color).add_modifier(Modifier::BOLD),
                     ),
                 ];
-                spans.extend(parse_mentions(&msg.content, Style::default().fg(Color::Reset)));
+                spans.extend(parse_mentions(
+                    &msg.content,
+                    Style::default().fg(Color::Reset),
+                ));
                 Line::from(spans)
             }
             MessageType::Image => {
@@ -329,9 +342,7 @@ fn format_message(msg: &ChatMessage, selected: bool, grouped: bool) -> Vec<Line<
             )),
             MessageType::ConflictWarning => Line::from(Span::styled(
                 format!("{} {} ! {}", prefix, time, msg.content),
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             )),
             MessageType::Tip => Line::from(Span::styled(
                 format!("{}   {}", prefix, msg.content),

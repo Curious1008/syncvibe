@@ -104,7 +104,11 @@ fn is_agent_task(m: &ChatMessage, agent_mentions: &[String]) -> bool {
 
 /// Collect @agent task messages and format a prominent header section.
 fn agent_task_header(msgs: &[&ChatMessage], agent_mentions: &[String]) -> String {
-    let tasks: Vec<&ChatMessage> = msgs.iter().copied().filter(|m| is_agent_task(m, agent_mentions)).collect();
+    let tasks: Vec<&ChatMessage> = msgs
+        .iter()
+        .copied()
+        .filter(|m| is_agent_task(m, agent_mentions))
+        .collect();
     if tasks.is_empty() {
         return String::new();
     }
@@ -207,7 +211,11 @@ fn collect_participants(msgs: &[&ChatMessage]) -> Vec<String> {
 }
 
 /// Format the output, choosing compact or json based on params.
-fn format_output(msgs: &[&ChatMessage], is_json: bool, agent_mentions: &[String]) -> std::result::Result<String, ErrorData> {
+fn format_output(
+    msgs: &[&ChatMessage],
+    is_json: bool,
+    agent_mentions: &[String],
+) -> std::result::Result<String, ErrorData> {
     if is_json {
         serde_json::to_string_pretty(&msgs).map_err(|e| err(e.to_string()))
     } else {
@@ -324,10 +332,8 @@ impl SyncVibeMcp {
         };
 
         // Handshake: announce agent connection in chat
-        let handshake = ChatMessage::new_system_message(
-            format!("{} connected", agent.name),
-            String::new(),
-        );
+        let handshake =
+            ChatMessage::new_system_message(format!("{} connected", agent.name), String::new());
         let _ = storage.append_chat_message(&handshake);
 
         Self {
@@ -344,7 +350,9 @@ impl SyncVibeMcp {
         }
     }
 
-    #[tool(description = "Send a short chat message to your team. Keep it 1-2 sentences. Examples: 'Done — refactored auth module', 'Question: should I use Redis or Memcached?'. Never paste code/logs. This tool always succeeds.")]
+    #[tool(
+        description = "Send a short chat message to your team. Keep it 1-2 sentences. Examples: 'Done — refactored auth module', 'Question: should I use Redis or Memcached?'. Never paste code/logs. This tool always succeeds."
+    )]
     async fn send_chat(
         &self,
         Parameters(params): Parameters<SendChatParams>,
@@ -391,7 +399,9 @@ impl SyncVibeMcp {
         ))]))
     }
 
-    #[tool(description = "Read chat messages. Call with NO parameters for best results — it auto-returns current session, then incrementally returns only new messages. Optional: 'all: true' for full history, 'since: <ISO 8601>' for time filter. If response mentions a file path, use your Read tool to access it. This tool always succeeds.")]
+    #[tool(
+        description = "Read chat messages. Call with NO parameters for best results — it auto-returns current session, then incrementally returns only new messages. Optional: 'all: true' for full history, 'since: <ISO 8601>' for time filter. If response mentions a file path, use your Read tool to access it. This tool always succeeds."
+    )]
     async fn read_chat(
         &self,
         Parameters(params): Parameters<ReadChatParams>,
@@ -427,8 +437,7 @@ impl SyncVibeMcp {
             let all = storage
                 .read_chat_messages()
                 .map_err(|e| err(e.to_string()))?;
-            let refs: Vec<&ChatMessage> =
-                all.iter().filter(|m| m.timestamp >= since).collect();
+            let refs: Vec<&ChatMessage> = all.iter().filter(|m| m.timestamp >= since).collect();
             let refs = filter_for_agent(&refs);
             let header = format!("── since {}: {} messages ──\n", since_str, refs.len());
             let text = build_response(&refs, &header, is_json, &storage, agent_mentions)?;
@@ -444,13 +453,10 @@ impl SyncVibeMcp {
             let all = storage
                 .read_chat_messages()
                 .map_err(|e| err(e.to_string()))?;
-            let session_id =
-                crate::get_or_create_session_id(&all, &self.user.profile.user_id);
+            let session_id = crate::get_or_create_session_id(&all, &self.user.profile.user_id);
 
-            let session_msgs: Vec<&ChatMessage> = all
-                .iter()
-                .filter(|m| m.session_id == session_id)
-                .collect();
+            let session_msgs: Vec<&ChatMessage> =
+                all.iter().filter(|m| m.session_id == session_id).collect();
             let session_msgs = filter_for_agent(&session_msgs);
 
             // Update state

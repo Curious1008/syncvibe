@@ -70,7 +70,11 @@ pub fn draw(frame: &mut ratatui::Frame, anchor: Rect, input: &str, selected: usi
                 Span::styled(
                     format!(" {:<12}", cmd),
                     style
-                        .fg(if is_selected { Color::Cyan } else { Color::White })
+                        .fg(if is_selected {
+                            Color::Cyan
+                        } else {
+                            Color::White
+                        })
                         .add_modifier(if is_selected {
                             Modifier::BOLD
                         } else {
@@ -153,7 +157,11 @@ pub fn build_mentions(presence: &[PresenceInfo], self_id: &str) -> Vec<MentionIt
 
 /// Find the @-word being typed at the cursor position.
 /// Returns (matching indices, char offset where the @-word starts).
-pub fn filter_mentions(input: &str, cursor: usize, mentions: &[MentionItem]) -> (Vec<usize>, usize) {
+pub fn filter_mentions(
+    input: &str,
+    cursor: usize,
+    mentions: &[MentionItem],
+) -> (Vec<usize>, usize) {
     let chars: Vec<char> = input.chars().collect();
 
     // Walk back from cursor to find start of current word
@@ -214,12 +222,16 @@ pub fn draw_mentions(
                 Span::styled(" ● ", bg.fg(item.color)),
                 Span::styled(
                     format!("{:<14}", item.handle),
-                    bg.fg(if is_selected { Color::White } else { Color::Rgb(200, 200, 210) })
-                        .add_modifier(if is_selected {
-                            Modifier::BOLD
-                        } else {
-                            Modifier::empty()
-                        }),
+                    bg.fg(if is_selected {
+                        Color::White
+                    } else {
+                        Color::Rgb(200, 200, 210)
+                    })
+                    .add_modifier(if is_selected {
+                        Modifier::BOLD
+                    } else {
+                        Modifier::empty()
+                    }),
                 ),
                 Span::styled(format!("{} ", item.hint), bg.fg(Color::DarkGray)),
             ])

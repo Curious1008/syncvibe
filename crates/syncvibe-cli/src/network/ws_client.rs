@@ -73,7 +73,7 @@ pub async fn connect_ws(
         agent_id,
     };
     let auth_json = serde_json::to_string(&auth)?;
-    write.send(Message::Text(auth_json.into())).await?;
+    write.send(Message::Text(auth_json)).await?;
 
     // Spawn ping task
     let ping_tx = out_tx.clone();
@@ -92,7 +92,7 @@ pub async fn connect_ws(
     let writer_alive_tx = alive_tx.clone();
     tokio::spawn(async move {
         while let Some(msg) = out_rx.recv().await {
-            if write.send(Message::Text(msg.into())).await.is_err() {
+            if write.send(Message::Text(msg)).await.is_err() {
                 break;
             }
         }

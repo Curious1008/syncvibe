@@ -87,12 +87,17 @@ impl Storage {
         let mut locked = false;
         for _ in 0..20 {
             match file.try_lock_exclusive() {
-                Ok(()) => { locked = true; break; }
+                Ok(()) => {
+                    locked = true;
+                    break;
+                }
                 Err(_) => std::thread::sleep(std::time::Duration::from_millis(5)),
             }
         }
         if !locked {
-            return Err(SyncVibeError::Other("Could not acquire chat log file lock".into()));
+            return Err(SyncVibeError::Other(
+                "Could not acquire chat log file lock".into(),
+            ));
         }
         writeln!(file, "{}", line)?;
         file.flush()?;
@@ -199,7 +204,10 @@ impl Storage {
     pub fn image_abs_path(&self, relative: &str) -> PathBuf {
         let candidate = self.project_root().join(relative);
         // Normalize and verify the path doesn't escape project root
-        let root = self.project_root().canonicalize().unwrap_or_else(|_| self.project_root().to_path_buf());
+        let root = self
+            .project_root()
+            .canonicalize()
+            .unwrap_or_else(|_| self.project_root().to_path_buf());
         let resolved = candidate.canonicalize().unwrap_or(candidate);
         if resolved.starts_with(&root) {
             resolved

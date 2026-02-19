@@ -5,7 +5,7 @@ use anyhow::Result;
 use syncvibe_core::models::RoomConfig;
 use syncvibe_core::storage::Storage;
 
-use crate::onboarding::{self, SetupItem, TEAL, DIM_TEAL, GREEN, RED, DIM, MED, BRIGHT, R};
+use crate::onboarding::{self, SetupItem, BRIGHT, DIM, DIM_TEAL, GREEN, MED, R, RED, TEAL};
 
 /// Base directory for SyncVibe projects: ~/SyncVibe/
 pub fn projects_dir() -> PathBuf {
@@ -51,9 +51,9 @@ pub fn prepare_project_dir(name: &str) -> Result<PathBuf> {
             }
             Err(e) => {
                 println!("  {RED}✗{R} Cannot create folder: {e}\n");
-                let alt = onboarding::prompt(
-                    &format!("  {TEAL}Enter a different path (or 'q' to cancel):{R} "),
-                )?;
+                let alt = onboarding::prompt(&format!(
+                    "  {TEAL}Enter a different path (or 'q' to cancel):{R} "
+                ))?;
                 let alt = alt.trim();
                 if alt.is_empty() || alt == "q" || alt == "Q" {
                     anyhow::bail!("Cancelled.");
@@ -155,7 +155,8 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
         SetupItem {
             file: ".mcp.json".to_string(),
             description: "Register MCP server for Claude Code".to_string(),
-            reason: "Lets Claude Code call read_chat/send_chat to collaborate with your team.".to_string(),
+            reason: "Lets Claude Code call read_chat/send_chat to collaborate with your team."
+                .to_string(),
             required: false,
             checked: true,
             already_done: mcp_done,
@@ -163,7 +164,8 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
         SetupItem {
             file: ".codex/config.toml".to_string(),
             description: "Register MCP server for Codex CLI".to_string(),
-            reason: "Lets Codex call read_chat/send_chat to collaborate with your team.".to_string(),
+            reason: "Lets Codex call read_chat/send_chat to collaborate with your team."
+                .to_string(),
             required: false,
             checked: true,
             already_done: codex_mcp_done,
@@ -358,7 +360,8 @@ fn setup_codex_mcp(cwd: &std::path::Path) -> Result<()> {
     }
 
     let config_path = codex_dir.join("config.toml");
-    let syncvibe_block = "\n[mcp_servers.syncvibe]\ncommand = \"syncvibe\"\nargs = [\"mcp-server\"]\n";
+    let syncvibe_block =
+        "\n[mcp_servers.syncvibe]\ncommand = \"syncvibe\"\nargs = [\"mcp-server\"]\n";
 
     if config_path.exists() {
         let content = std::fs::read_to_string(&config_path)?;
@@ -381,7 +384,10 @@ fn setup_codex_mcp(cwd: &std::path::Path) -> Result<()> {
     let gitignore_path = cwd.join(".gitignore");
     if gitignore_path.exists() {
         let content = std::fs::read_to_string(&gitignore_path)?;
-        if !content.lines().any(|l| l.trim() == ".codex/" || l.trim() == ".codex") {
+        if !content
+            .lines()
+            .any(|l| l.trim() == ".codex/" || l.trim() == ".codex")
+        {
             let mut file = std::fs::OpenOptions::new()
                 .append(true)
                 .open(&gitignore_path)?;
@@ -433,4 +439,3 @@ fn append_syncvibe_hint(path: &std::path::Path) -> Result<()> {
     }
     Ok(())
 }
-

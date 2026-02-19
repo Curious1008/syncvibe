@@ -109,10 +109,20 @@ mod tests {
     #[test]
     fn unique_ids() {
         let a = ChatMessage::new_user_message(
-            "u".into(), "A".into(), "#000".into(), "a".into(), "s".into(), None,
+            "u".into(),
+            "A".into(),
+            "#000".into(),
+            "a".into(),
+            "s".into(),
+            None,
         );
         let b = ChatMessage::new_user_message(
-            "u".into(), "A".into(), "#000".into(), "b".into(), "s".into(), None,
+            "u".into(),
+            "A".into(),
+            "#000".into(),
+            "b".into(),
+            "s".into(),
+            None,
         );
         assert_ne!(a.id, b.id);
     }
@@ -147,9 +157,12 @@ mod tests {
     fn image_content_format() {
         // Image messages store "relative_path\nfilename"
         let mut msg = ChatMessage::new_user_message(
-            "u1".into(), "A".into(), "#000".into(),
+            "u1".into(),
+            "A".into(),
+            "#000".into(),
             ".syncvibe/images/abc.png\nphoto.png".into(),
-            "s".into(), None,
+            "s".into(),
+            None,
         );
         msg.message_type = MessageType::Image;
         let parts: Vec<&str> = msg.content.split('\n').collect();

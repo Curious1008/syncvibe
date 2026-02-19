@@ -167,7 +167,9 @@ async fn invite_code_to_ws_join_chain() {
     // Alice creates the room (first WS connection sets the secret)
     let (_write_a, mut read_a) =
         connect_and_auth(&room_id, &room_secret, "alice-id", "Alice", "#ff0000").await;
-    let msg = recv_text(&mut read_a, 5).await.expect("No auth_ok for Alice");
+    let msg = recv_text(&mut read_a, 5)
+        .await
+        .expect("No auth_ok for Alice");
     assert_eq!(msg["type"], "auth_ok");
 
     // Dashboard creates invite code
@@ -196,8 +198,14 @@ async fn invite_code_to_ws_join_chain() {
     let resolved_secret = room_info["room_secret"].as_str().unwrap();
 
     // Bob joins via WebSocket using resolved credentials
-    let (_write_b, mut read_b) =
-        connect_and_auth(resolved_room_id, resolved_secret, "bob-id", "Bob", "#00ff00").await;
+    let (_write_b, mut read_b) = connect_and_auth(
+        resolved_room_id,
+        resolved_secret,
+        "bob-id",
+        "Bob",
+        "#00ff00",
+    )
+    .await;
     let msg_b = recv_text(&mut read_b, 5).await.expect("No auth_ok for Bob");
     assert_eq!(msg_b["type"], "auth_ok");
 
@@ -209,7 +217,9 @@ async fn invite_code_to_ws_join_chain() {
     );
 
     // Alice should see Bob joined
-    let joined = recv_text(&mut read_a, 5).await.expect("Alice didn't see Bob join");
+    let joined = recv_text(&mut read_a, 5)
+        .await
+        .expect("Alice didn't see Bob join");
     assert_eq!(joined["type"], "user_joined");
     assert_eq!(joined["data"]["user_id"], "bob-id");
 
@@ -240,7 +250,10 @@ async fn h9_auth_reentry_blocked() {
             "user_color": "#ffffff",
         }
     });
-    write.send(Message::Text(auth.to_string().into())).await.unwrap();
+    write
+        .send(Message::Text(auth.to_string().into()))
+        .await
+        .unwrap();
 
     let msg = recv_text(&mut read, 5).await.expect("No auth_ok");
     assert_eq!(msg["type"], "auth_ok");
@@ -256,7 +269,10 @@ async fn h9_auth_reentry_blocked() {
             "user_color": "#000000",
         }
     });
-    write.send(Message::Text(auth2.to_string().into())).await.unwrap();
+    write
+        .send(Message::Text(auth2.to_string().into()))
+        .await
+        .unwrap();
 
     // Should receive Close frame with code 4003
     let result = time::timeout(Duration::from_secs(5), async {
@@ -312,9 +328,14 @@ async fn screen_share_messages_relay() {
             "user_name": "Alice",
         }
     });
-    write_a.send(Message::Text(start_msg.to_string().into())).await.unwrap();
+    write_a
+        .send(Message::Text(start_msg.to_string().into()))
+        .await
+        .unwrap();
 
-    let msg = recv_text(&mut read_b, 5).await.expect("Bob didn't receive screen_share_start");
+    let msg = recv_text(&mut read_b, 5)
+        .await
+        .expect("Bob didn't receive screen_share_start");
     assert_eq!(msg["type"], "screen_share_start");
     assert_eq!(msg["data"]["user_id"], "alice-id");
 
@@ -328,9 +349,14 @@ async fn screen_share_messages_relay() {
             "rows": 40,
         }
     });
-    write_a.send(Message::Text(frame_msg.to_string().into())).await.unwrap();
+    write_a
+        .send(Message::Text(frame_msg.to_string().into()))
+        .await
+        .unwrap();
 
-    let msg = recv_text(&mut read_b, 5).await.expect("Bob didn't receive screen_frame");
+    let msg = recv_text(&mut read_b, 5)
+        .await
+        .expect("Bob didn't receive screen_frame");
     assert_eq!(msg["type"], "screen_frame");
     assert_eq!(msg["data"]["cols"], 120);
     assert_eq!(msg["data"]["rows"], 40);
@@ -344,9 +370,14 @@ async fn screen_share_messages_relay() {
             "user_id": "alice-id",
         }
     });
-    write_a.send(Message::Text(stop_msg.to_string().into())).await.unwrap();
+    write_a
+        .send(Message::Text(stop_msg.to_string().into()))
+        .await
+        .unwrap();
 
-    let msg = recv_text(&mut read_b, 5).await.expect("Bob didn't receive screen_share_stop");
+    let msg = recv_text(&mut read_b, 5)
+        .await
+        .expect("Bob didn't receive screen_share_stop");
     assert_eq!(msg["type"], "screen_share_stop");
     assert_eq!(msg["data"]["user_id"], "alice-id");
 
@@ -392,7 +423,11 @@ async fn invalid_room_id_format_rejected() {
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), 400, "Invalid room_id format should return 400");
+    assert_eq!(
+        resp.status(),
+        400,
+        "Invalid room_id format should return 400"
+    );
     println!("FORMAT PASS: Invalid room_id correctly rejected");
 }
 
@@ -410,7 +445,11 @@ async fn invalid_room_secret_format_rejected() {
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), 400, "Invalid room_secret format should return 400");
+    assert_eq!(
+        resp.status(),
+        400,
+        "Invalid room_secret format should return 400"
+    );
     println!("FORMAT PASS: Invalid room_secret correctly rejected");
 }
 
@@ -439,10 +478,16 @@ async fn oversized_user_id_rejected() {
             "user_color": "#ffffff",
         }
     });
-    write.send(Message::Text(auth.to_string().into())).await.unwrap();
+    write
+        .send(Message::Text(auth.to_string().into()))
+        .await
+        .unwrap();
 
     let msg = recv_text(&mut read, 5).await.expect("No response");
-    assert_eq!(msg["type"], "auth_fail", "user_id > 64 chars should fail auth");
+    assert_eq!(
+        msg["type"], "auth_fail",
+        "user_id > 64 chars should fail auth"
+    );
     println!("USER_ID LENGTH PASS: Oversized user_id correctly rejected");
 }
 
@@ -527,7 +572,7 @@ fn protocol_existing_types_still_parse() {
         r#"{"type":"user_left","data":{"user_id":"u1"}}"#,
     ];
     for json in cases {
-        let _: syncvibe_core::protocol::WsMessage =
-            serde_json::from_str(json).unwrap_or_else(|e| panic!("Failed to parse {}: {}", json, e));
+        let _: syncvibe_core::protocol::WsMessage = serde_json::from_str(json)
+            .unwrap_or_else(|e| panic!("Failed to parse {}: {}", json, e));
     }
 }

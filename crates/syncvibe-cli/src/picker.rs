@@ -28,10 +28,7 @@ pub fn pick_project(current_path: Option<&str>) -> anyhow::Result<Option<Project
     projects.sort_by(|a, b| b.last_opened.cmp(&a.last_opened));
 
     // Check which rooms have active tmux sessions
-    let session_status: Vec<bool> = projects
-        .iter()
-        .map(|p| has_tmux_session(&p.path))
-        .collect();
+    let session_status: Vec<bool> = projects.iter().map(|p| has_tmux_session(&p.path)).collect();
 
     let mut terminal = tui::setup()?;
     let mut selected: usize = 0;
@@ -134,9 +131,7 @@ fn draw_picker(
     for (i, project) in projects.iter().enumerate() {
         let is_selected = i == selected;
         let has_session = session_status[i];
-        let is_current = current_path
-            .map(|cp| cp == project.path)
-            .unwrap_or(false);
+        let is_current = current_path.map(|cp| cp == project.path).unwrap_or(false);
 
         // Main line: arrow + dot + name + markers
         let mut spans = Vec::new();
@@ -172,7 +167,10 @@ fn draw_picker(
 
         // Current marker
         if is_current {
-            spans.push(Span::styled(" (here)", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(
+                " (here)",
+                Style::default().fg(Color::DarkGray),
+            ));
         }
 
         // Running label

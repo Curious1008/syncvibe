@@ -94,17 +94,17 @@ pub fn share_message(code: &str, user_name: &str, room_name: Option<&str>) -> St
         Some(name) => format!("{} invited you to \"{}\"", user_name, name),
         None => format!("{} invited you to collaborate on SyncVibe", user_name),
     };
-    format!(
-        "{}\nJoin: {}\nsyncvibe connect {}",
-        header, code, code
-    )
+    format!("{}\nJoin: {}\nsyncvibe connect {}", header, code, code)
 }
 
 /// Check if a string looks like a short invite code (8 chars from safe alphabet, optional dash).
 pub fn looks_like_short_code(s: &str) -> bool {
     const ALPHABET: &str = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
     let clean: String = s.chars().filter(|c| *c != '-').collect();
-    clean.len() == 8 && clean.chars().all(|c| ALPHABET.contains(c.to_ascii_uppercase()))
+    clean.len() == 8
+        && clean
+            .chars()
+            .all(|c| ALPHABET.contains(c.to_ascii_uppercase()))
 }
 
 /// Read clipboard contents. Returns None if clipboard is empty or unreadable.
@@ -134,5 +134,9 @@ pub fn read_clipboard() -> Option<String> {
         return None;
     }
     let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if text.is_empty() { None } else { Some(text) }
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
 }

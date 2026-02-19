@@ -1,4 +1,4 @@
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_RELAY_URL: &str = "wss://relay.syncvibe.online";
@@ -13,6 +13,12 @@ pub struct RoomConfig {
     pub room_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
+}
+
+impl Default for RoomConfig {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RoomConfig {
@@ -40,8 +46,8 @@ impl RoomConfig {
         let uuid = uuid::Uuid::parse_str(&self.room_id)
             .map_err(|e| format!("Invalid room_id UUID: {}", e))?;
         let uuid_bytes = uuid.as_bytes(); // 16 bytes
-        let secret_bytes = hex_decode(&self.room_secret)
-            .map_err(|e| format!("Invalid room_secret: {}", e))?;
+        let secret_bytes =
+            hex_decode(&self.room_secret).map_err(|e| format!("Invalid room_secret: {}", e))?;
 
         let mut payload = Vec::with_capacity(48 + 64);
         payload.extend_from_slice(uuid_bytes);
@@ -57,7 +63,11 @@ impl RoomConfig {
             payload.extend_from_slice(&name.as_bytes()[..len]);
         }
 
-        Ok(format!("{}{}", INVITE_PREFIX, URL_SAFE_NO_PAD.encode(&payload)))
+        Ok(format!(
+            "{}{}",
+            INVITE_PREFIX,
+            URL_SAFE_NO_PAD.encode(&payload)
+        ))
     }
 
     /// Decode an invite code back into a RoomConfig (uses default relay URL)
@@ -128,7 +138,7 @@ fn hex_decode(hex: &str) -> Result<Vec<u8>, String> {
     if !hex.is_ascii() {
         return Err("hex string contains non-ASCII characters".to_string());
     }
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         return Err("odd-length hex string".to_string());
     }
     (0..hex.len())

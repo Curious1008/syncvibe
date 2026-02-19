@@ -149,7 +149,9 @@ pub fn confirm_destructive(msg: &str) -> io::Result<bool> {
                 if let Event::Key(key) = event::read()? {
                     if key.kind == KeyEventKind::Press {
                         match key.code {
-                            KeyCode::Char('2') | KeyCode::Char('n') | KeyCode::Char('N')
+                            KeyCode::Char('2')
+                            | KeyCode::Char('n')
+                            | KeyCode::Char('N')
                             | KeyCode::Esc => {
                                 return Ok(false);
                             }
@@ -171,9 +173,12 @@ pub fn confirm_destructive(msg: &str) -> io::Result<bool> {
                     continue;
                 }
                 match key.code {
-                    KeyCode::Char('1') | KeyCode::Char('y') | KeyCode::Char('Y') => return Ok(true),
-                    KeyCode::Char('2') | KeyCode::Char('n') | KeyCode::Char('N')
-                    | KeyCode::Esc => return Ok(false),
+                    KeyCode::Char('1') | KeyCode::Char('y') | KeyCode::Char('Y') => {
+                        return Ok(true)
+                    }
+                    KeyCode::Char('2') | KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                        return Ok(false)
+                    }
                     _ => {}
                 }
             }
@@ -210,9 +215,7 @@ pub fn sanitize_name(name: &str) -> String {
 
 /// Validate a hex color string. Returns true for #RRGGBB format.
 pub fn is_valid_color(color: &str) -> bool {
-    color.len() == 7
-        && color.starts_with('#')
-        && color[1..].chars().all(|c| c.is_ascii_hexdigit())
+    color.len() == 7 && color.starts_with('#') && color[1..].chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// Names reserved for the AI agent — users cannot pick these.
@@ -284,9 +287,7 @@ fn run_menu(items: &[MenuItem]) -> io::Result<Option<usize>> {
             }
             match key.code {
                 KeyCode::Up => {
-                    if cursor > 0 {
-                        cursor -= 1;
-                    }
+                    cursor = cursor.saturating_sub(1);
                 }
                 KeyCode::Down => {
                     if cursor + 1 < items.len() {
@@ -395,9 +396,7 @@ fn run_checklist(items: &mut [SetupItem], actionable: &[usize]) -> io::Result<bo
             }
             match key.code {
                 KeyCode::Up => {
-                    if cursor > 0 {
-                        cursor -= 1;
-                    }
+                    cursor = cursor.saturating_sub(1);
                 }
                 KeyCode::Down => {
                     if cursor < confirm_idx {
@@ -579,31 +578,31 @@ mod tests {
 
     #[test]
     fn valid_color_rejects_bad_format() {
-        assert!(!is_valid_color("FF6B6B"));    // no #
-        assert!(!is_valid_color("#FF6B6"));     // too short
-        assert!(!is_valid_color("#FF6B6B1"));   // too long
-        assert!(!is_valid_color("#GGGGGG"));    // not hex
-        assert!(!is_valid_color(""));           // empty
-        assert!(!is_valid_color("#"));           // just hash
-        assert!(!is_valid_color("red"));         // named color
+        assert!(!is_valid_color("FF6B6B")); // no #
+        assert!(!is_valid_color("#FF6B6")); // too short
+        assert!(!is_valid_color("#FF6B6B1")); // too long
+        assert!(!is_valid_color("#GGGGGG")); // not hex
+        assert!(!is_valid_color("")); // empty
+        assert!(!is_valid_color("#")); // just hash
+        assert!(!is_valid_color("red")); // named color
     }
 
     // ── is_agent_color (M8) ──
 
     #[test]
     fn agent_color_blocks_cyan() {
-        assert!(is_agent_color("#00FFFF"));    // exact cyan
-        assert!(is_agent_color("#00E0FF"));    // close to cyan
-        assert!(is_agent_color("#30F0F0"));    // R=48, G=240, B=240 → blocked
+        assert!(is_agent_color("#00FFFF")); // exact cyan
+        assert!(is_agent_color("#00E0FF")); // close to cyan
+        assert!(is_agent_color("#30F0F0")); // R=48, G=240, B=240 → blocked
     }
 
     #[test]
     fn agent_color_allows_other_colors() {
-        assert!(!is_agent_color("#FF0000"));   // red
-        assert!(!is_agent_color("#00FF00"));   // green (high G, low B... actually B is 0)
-        assert!(!is_agent_color("#0000FF"));   // blue
-        assert!(!is_agent_color("#FFFFFF"));   // white
-        assert!(!is_agent_color("#4ECDC4"));   // teal (R=78 > 60)
+        assert!(!is_agent_color("#FF0000")); // red
+        assert!(!is_agent_color("#00FF00")); // green (high G, low B... actually B is 0)
+        assert!(!is_agent_color("#0000FF")); // blue
+        assert!(!is_agent_color("#FFFFFF")); // white
+        assert!(!is_agent_color("#4ECDC4")); // teal (R=78 > 60)
     }
 
     #[test]

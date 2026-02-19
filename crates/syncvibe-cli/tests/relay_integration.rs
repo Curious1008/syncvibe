@@ -43,7 +43,9 @@ async fn connect_and_auth(
     >,
 ) {
     let url = format!("{}/ws/{}", RELAY_URL, room_id);
-    let (ws, _) = connect_async(&url).await.expect("Failed to connect to relay");
+    let (ws, _) = connect_async(&url)
+        .await
+        .expect("Failed to connect to relay");
     let (mut write, read) = ws.split();
 
     let auth = serde_json::json!({
@@ -97,7 +99,9 @@ async fn test_auth_and_presence() {
         connect_and_auth(&room_id, &secret, "user-a", "Alice", "#ff0000").await;
 
     // Should receive auth_ok
-    let msg = recv_text(&mut read_a, 5).await.expect("No auth_ok for Alice");
+    let msg = recv_text(&mut read_a, 5)
+        .await
+        .expect("No auth_ok for Alice");
     assert_eq!(msg["type"], "auth_ok");
 
     // Client B connects
@@ -229,9 +233,7 @@ async fn test_ping_pong() {
         .unwrap();
 
     // Should receive pong
-    let msg = recv_text(&mut read_a, 5)
-        .await
-        .expect("No pong received");
+    let msg = recv_text(&mut read_a, 5).await.expect("No pong received");
     assert_eq!(msg["type"], "pong");
 }
 

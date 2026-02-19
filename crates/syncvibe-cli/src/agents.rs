@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::onboarding::{self, TEAL, DIM, R};
+use crate::onboarding::{self, DIM, R, TEAL};
 
 pub struct AgentDef {
     pub id: &'static str,

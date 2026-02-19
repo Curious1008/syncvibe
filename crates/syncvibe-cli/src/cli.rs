@@ -2,7 +2,10 @@ use clap::{Parser, Subcommand};
 use clap_complete::Shell;
 
 #[derive(Parser)]
-#[command(name = "syncvibe", about = "Terminal-native collaboration for vibe coding")]
+#[command(
+    name = "syncvibe",
+    about = "Terminal-native collaboration for vibe coding"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,

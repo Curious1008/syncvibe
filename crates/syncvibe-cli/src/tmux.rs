@@ -19,7 +19,11 @@ pub fn session_name_for(project_name: &str, project_path: &str) -> String {
         .chars()
         .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
         .collect();
-    let safe_name = if safe_name.is_empty() { "project".to_string() } else { safe_name };
+    let safe_name = if safe_name.is_empty() {
+        "project".to_string()
+    } else {
+        safe_name
+    };
     format!("sv-{}-{:08x}", safe_name, hash as u32)
 }
 
@@ -63,14 +67,21 @@ pub fn launch_project(project_path: &std::path::Path) -> Result<()> {
         return rt.block_on(crate::app::run());
     }
 
-    launch_or_attach_with_agent(&project_path.to_string_lossy(), agent.command, agent.name, agent.color)
+    launch_or_attach_with_agent(
+        &project_path.to_string_lossy(),
+        agent.command,
+        agent.name,
+        agent.color,
+    )
 }
 
 /// Launch a new tmux session for a project or attach/switch to an existing one.
 /// Uses default agent (Claude) — called from picker/switch flows.
 pub fn launch_or_attach(project_path: &str) -> Result<()> {
     // Read room config to determine agent
-    let room_json = std::path::Path::new(project_path).join(".syncvibe").join("room.json");
+    let room_json = std::path::Path::new(project_path)
+        .join(".syncvibe")
+        .join("room.json");
     let agent = if let Ok(content) = std::fs::read_to_string(&room_json) {
         if let Ok(room) = serde_json::from_str::<syncvibe_core::models::RoomConfig>(&content) {
             agents::for_room(room.agent.as_deref())
@@ -95,7 +106,12 @@ fn validated_color(color: &str) -> &str {
     }
 }
 
-fn launch_or_attach_with_agent(project_path: &str, agent_cmd: &str, agent_name: &str, agent_color: &str) -> Result<()> {
+fn launch_or_attach_with_agent(
+    project_path: &str,
+    agent_cmd: &str,
+    agent_name: &str,
+    agent_color: &str,
+) -> Result<()> {
     let agent_color = validated_color(agent_color);
     let project_dir = std::path::Path::new(project_path);
     let project_name = project_dir
@@ -134,34 +150,52 @@ fn launch_or_attach_with_agent(project_path: &str, agent_cmd: &str, agent_name: 
                 std::process::Command::new("tmux")
                     .args(["display-message", "-p", "#{session_name}"])
                     .output()
-                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string() == session_name)
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim() == session_name)
                     .unwrap_or(false)
             };
 
             if in_this_session {
                 // Can't kill our own session — add split dynamically
-                ensure_split(&session_name, project_path, &bin_str, agent_name, agent_color)?;
+                ensure_split(
+                    &session_name,
+                    project_path,
+                    &bin_str,
+                    agent_name,
+                    agent_color,
+                )?;
             } else {
                 // Kill stale session and recreate with clean layout
                 let _ = std::process::Command::new("tmux")
                     .args(["kill-session", "-t", &session_name])
                     .env_remove("TMUX")
                     .status();
-                create_session(&session_name, project_path, &bin_str, agent_cmd, agent_name, agent_color)?;
+                create_session(
+                    &session_name,
+                    project_path,
+                    &bin_str,
+                    agent_cmd,
+                    agent_name,
+                    agent_color,
+                )?;
             }
         }
-    } else {
-        if let Err(e) = create_session(&session_name, project_path, &bin_str, agent_cmd, agent_name, agent_color) {
-            // TOCTOU: session may have been created by another process between
-            // has-session check and our create_session call. If session now exists, proceed.
-            let exists_now = std::process::Command::new("tmux")
-                .args(["has-session", "-t", &session_name])
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false);
-            if !exists_now {
-                return Err(e);
-            }
+    } else if let Err(e) = create_session(
+        &session_name,
+        project_path,
+        &bin_str,
+        agent_cmd,
+        agent_name,
+        agent_color,
+    ) {
+        // TOCTOU: session may have been created by another process between
+        // has-session check and our create_session call. If session now exists, proceed.
+        let exists_now = std::process::Command::new("tmux")
+            .args(["has-session", "-t", &session_name])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !exists_now {
+            return Err(e);
         }
     }
 
@@ -183,13 +217,22 @@ fn shell_escape(s: &str) -> String {
     if s.is_empty() {
         return "''".to_string();
     }
-    if s.chars().all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '+' | ',' | '@')) {
+    if s.chars()
+        .all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '+' | ',' | '@'))
+    {
         return s.to_string();
     }
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
-fn create_session(session_name: &str, project_path: &str, bin_str: &str, agent_cmd: &str, agent_name: &str, agent_color: &str) -> Result<()> {
+fn create_session(
+    session_name: &str,
+    project_path: &str,
+    bin_str: &str,
+    agent_cmd: &str,
+    agent_name: &str,
+    agent_color: &str,
+) -> Result<()> {
     let status = std::process::Command::new("tmux")
         .args([
             "new-session",
@@ -225,7 +268,10 @@ fn create_session(session_name: &str, project_path: &str, bin_str: &str, agent_c
 
     match split_status {
         Ok(s) if !s.success() => {
-            eprintln!("Warning: tmux split-window failed (exit code: {:?})", s.code());
+            eprintln!(
+                "Warning: tmux split-window failed (exit code: {:?})",
+                s.code()
+            );
         }
         Err(e) => {
             eprintln!("Warning: tmux split-window failed: {}", e);
@@ -241,7 +287,13 @@ fn create_session(session_name: &str, project_path: &str, bin_str: &str, agent_c
     apply_tmux_config(session_name, agent_name, agent_color)
 }
 
-fn ensure_split(session_name: &str, project_path: &str, bin_str: &str, agent_name: &str, agent_color: &str) -> Result<()> {
+fn ensure_split(
+    session_name: &str,
+    project_path: &str,
+    bin_str: &str,
+    agent_name: &str,
+    agent_color: &str,
+) -> Result<()> {
     let pane_count = std::process::Command::new("tmux")
         .args(["list-panes", "-t", session_name])
         .env_remove("TMUX")
@@ -272,7 +324,10 @@ fn ensure_split(session_name: &str, project_path: &str, bin_str: &str, agent_nam
 
     match split_status {
         Ok(s) if !s.success() => {
-            eprintln!("Warning: tmux split-window failed (exit code: {:?})", s.code());
+            eprintln!(
+                "Warning: tmux split-window failed (exit code: {:?})",
+                s.code()
+            );
         }
         Err(e) => {
             eprintln!("Warning: tmux split-window failed: {}", e);
@@ -285,10 +340,7 @@ fn ensure_split(session_name: &str, project_path: &str, bin_str: &str, agent_nam
 
 fn apply_tmux_config(session_name: &str, agent_name: &str, agent_color: &str) -> Result<()> {
     // Keybindings
-    for cmd in &[
-        "bind -n C-g select-pane -t :.+",
-        "bind z resize-pane -Z",
-    ] {
+    for cmd in &["bind -n C-g select-pane -t :.+", "bind z resize-pane -Z"] {
         let parts: Vec<&str> = cmd.split_whitespace().collect();
         let _ = std::process::Command::new("tmux")
             .args(parts)
@@ -298,16 +350,17 @@ fn apply_tmux_config(session_name: &str, agent_name: &str, agent_color: &str) ->
 
     // Pane border format: Ctrl+G hint color matches the TARGET pane
     // → toward Chat = cyan (#00d9ff), toward Agent = agent's brand color
+    let inactive = format!(
+        "#{{?pane_at_left,\
+            #[align=left fg=#555555] #{{pane_title}} #[align=right fg=#00d9ff bold]← Ctrl+G ,\
+            #[align=left fg={ac} bold] Ctrl+G →#[align=right fg=#555555] #{{pane_title}} }}",
+        ac = agent_color,
+    );
     let border_fmt = format!(
         "#{{{active},{inactive}}}",
         active = "?pane_active,\
             #{?pane_at_left,#[align=left fg=#888888] #{pane_title} ,#[align=right fg=#888888] #{pane_title} }",
-        inactive = format!(
-            "#{{?pane_at_left,\
-                #[align=left fg=#555555] #{{pane_title}} #[align=right fg=#00d9ff bold]← Ctrl+G ,\
-                #[align=left fg={ac} bold] Ctrl+G →#[align=right fg=#555555] #{{pane_title}} }}",
-            ac = agent_color,
-        ),
+        inactive = inactive,
     );
 
     // Styling
@@ -325,7 +378,13 @@ fn apply_tmux_config(session_name: &str, agent_name: &str, agent_color: &str) ->
     }
     // Set border format separately (dynamic string, not &str)
     let _ = std::process::Command::new("tmux")
-        .args(["set-option", "-t", session_name, "pane-border-format", &border_fmt])
+        .args([
+            "set-option",
+            "-t",
+            session_name,
+            "pane-border-format",
+            &border_fmt,
+        ])
         .env_remove("TMUX")
         .status();
 
@@ -334,17 +393,37 @@ fn apply_tmux_config(session_name: &str, agent_name: &str, agent_color: &str) ->
         "pbcopy"
     } else {
         // Try wl-copy (Wayland) first, fall back to xclip (X11)
-        if std::process::Command::new("wl-copy").arg("--version").output().is_ok() {
+        if std::process::Command::new("wl-copy")
+            .arg("--version")
+            .output()
+            .is_ok()
+        {
             "wl-copy"
         } else {
             "xclip -selection clipboard"
         }
     };
     for cmd in &[
-        vec!["bind-key", "-T", "copy-mode", "MouseDragEnd1Pane",
-          "send-keys", "-X", "copy-pipe-and-cancel", copy_cmd],
-        vec!["bind-key", "-T", "copy-mode-vi", "MouseDragEnd1Pane",
-          "send-keys", "-X", "copy-pipe-and-cancel", copy_cmd],
+        vec![
+            "bind-key",
+            "-T",
+            "copy-mode",
+            "MouseDragEnd1Pane",
+            "send-keys",
+            "-X",
+            "copy-pipe-and-cancel",
+            copy_cmd,
+        ],
+        vec![
+            "bind-key",
+            "-T",
+            "copy-mode-vi",
+            "MouseDragEnd1Pane",
+            "send-keys",
+            "-X",
+            "copy-pipe-and-cancel",
+            copy_cmd,
+        ],
     ] {
         let _ = std::process::Command::new("tmux")
             .args(cmd)
@@ -419,7 +498,9 @@ mod tests {
     fn session_name_alphanumeric_only() {
         let name = session_name_for("my-project", "/home/user/my-project");
         assert!(name.starts_with("sv-my-project-"));
-        assert!(name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_'));
+        assert!(name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_'));
     }
 
     #[test]

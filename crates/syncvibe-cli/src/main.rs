@@ -26,7 +26,7 @@ use cli::{Cli, Command};
 use syncvibe_core::models::{ChatMessage, UserConfig};
 use syncvibe_core::storage::Storage;
 
-use onboarding::{TEAL, YELLOW, GREEN, RED, DIM, B, R, print_section, confirm_destructive};
+use onboarding::{confirm_destructive, print_section, B, DIM, GREEN, R, RED, TEAL, YELLOW};
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -49,7 +49,12 @@ fn main() -> Result<()> {
             rt.block_on(cmd_watch_render(user_id))?;
         }
         Some(Command::Completions { shell }) => {
-            generate(shell, &mut Cli::command(), "syncvibe", &mut std::io::stdout());
+            generate(
+                shell,
+                &mut Cli::command(),
+                "syncvibe",
+                &mut std::io::stdout(),
+            );
         }
         None => session::cmd_session()?,
     }
@@ -219,10 +224,7 @@ fn cmd_connect(code: String) -> Result<()> {
 
     // Already joined — just launch
     if proj.join(".syncvibe").is_dir() {
-        println!(
-            "  {DIM}→ {} (already set up){R}\n",
-            proj.display()
-        );
+        println!("  {DIM}→ {} (already set up){R}\n", proj.display());
         return tmux::launch_project(&proj);
     }
 
@@ -241,7 +243,11 @@ fn cmd_status() -> Result<()> {
     let messages = storage.read_chat_messages().unwrap_or_default();
     let project_name = crate::git::ops::repo_name().unwrap_or_else(|_| "project".to_string());
 
-    let short_id = if room.room_id.len() >= 8 { &room.room_id[..8] } else { &room.room_id };
+    let short_id = if room.room_id.len() >= 8 {
+        &room.room_id[..8]
+    } else {
+        &room.room_id
+    };
     println!(
         "  {B}{project_name}{R} {DIM}· room:{short_id} · {} messages{R}",
         messages.len()
@@ -323,8 +329,9 @@ fn cmd_leave() -> Result<()> {
 /// Launched by /watch inside a new tmux window. Press q or close the window to exit.
 async fn cmd_watch_render(target_user_id: String) -> Result<()> {
     use crossterm::{
-        execute, cursor, terminal,
+        cursor,
         event::{self, Event, KeyCode, KeyEvent},
+        execute, terminal,
     };
     use std::io::Write;
     use syncvibe_core::protocol::WsMessage;
@@ -358,9 +365,13 @@ async fn cmd_watch_render(target_user_id: String) -> Result<()> {
                     // OSC sequence — skip until ST (\x1b\\) or BEL (\x07)
                     let mut j = i + 2;
                     while j < bytes.len() {
-                        if bytes[j] == 0x07 { j += 1; break; }
+                        if bytes[j] == 0x07 {
+                            j += 1;
+                            break;
+                        }
                         if bytes[j] == 0x1b && j + 1 < bytes.len() && bytes[j + 1] == b'\\' {
-                            j += 2; break;
+                            j += 2;
+                            break;
                         }
                         j += 1;
                     }
@@ -381,14 +392,24 @@ async fn cmd_watch_render(target_user_id: String) -> Result<()> {
     // Enter raw mode with panic-safe restore guard
     terminal::enable_raw_mode()?;
     let mut stdout = std::io::stdout();
-    execute!(stdout, terminal::EnterAlternateScreen, cursor::Hide, terminal::DisableLineWrap)?;
+    execute!(
+        stdout,
+        terminal::EnterAlternateScreen,
+        cursor::Hide,
+        terminal::DisableLineWrap
+    )?;
 
     // Guard ensures terminal is restored even on panic
     struct TermGuard;
     impl Drop for TermGuard {
         fn drop(&mut self) {
             let _ = terminal::disable_raw_mode();
-            let _ = execute!(std::io::stdout(), cursor::Show, terminal::LeaveAlternateScreen, terminal::EnableLineWrap);
+            let _ = execute!(
+                std::io::stdout(),
+                cursor::Show,
+                terminal::LeaveAlternateScreen,
+                terminal::EnableLineWrap
+            );
         }
     }
     let _guard = TermGuard;
@@ -407,19 +428,18 @@ async fn cmd_watch_render(target_user_id: String) -> Result<()> {
         let mut vis = 0usize;
         let mut chars = s.chars().peekable();
         while let Some(ch) = chars.next() {
-            if vis >= max_w { break; }
+            if vis >= max_w {
+                break;
+            }
             if ch == '\x1b' {
                 out.push(ch);
                 if chars.peek() == Some(&'[') {
                     // CSI sequence — copy entirely (zero visible width)
                     out.push(chars.next().unwrap()); // '['
-                    loop {
-                        match chars.next() {
-                            Some(c) => {
-                                out.push(c);
-                                if c.is_ascii_alphabetic() { break; }
-                            }
-                            None => break,
+                    for c in chars.by_ref() {
+                        out.push(c);
+                        if c.is_ascii_alphabetic() {
+                            break;
                         }
                     }
                 }
@@ -434,12 +454,20 @@ async fn cmd_watch_render(target_user_id: String) -> Result<()> {
     };
 
     // Full redraw using cached terminal width
-    let redraw = |stdout: &mut std::io::Stdout, buf: &[String], name: &str, cols: u16, trunc: &dyn Fn(&str, usize) -> String| {
+    let redraw = |stdout: &mut std::io::Stdout,
+                  buf: &[String],
+                  name: &str,
+                  cols: u16,
+                  trunc: &dyn Fn(&str, usize) -> String| {
         let w = cols as usize;
         let _ = execute!(stdout, cursor::MoveTo(0, 0));
         // Status bar (inverted colors) — truncated to pane width
         let status = format!(" Watching {}'s agent pane — /watch to stop ", name);
-        let status_trunc = if status.len() > w { &status[..w] } else { &status };
+        let status_trunc = if status.len() > w {
+            &status[..w]
+        } else {
+            &status
+        };
         let _ = write!(stdout, "\x1b[7m{}\x1b[0m\x1b[K\r\n", status_trunc);
         for line in buf {
             let _ = write!(stdout, "{}\x1b[K\r\n", trunc(line, w));
@@ -451,9 +479,17 @@ async fn cmd_watch_render(target_user_id: String) -> Result<()> {
 
     {
         let status = " Waiting for screen data... ";
-        let s = if status.len() > cached_cols as usize { &status[..cached_cols as usize] } else { status };
+        let s = if status.len() > cached_cols as usize {
+            &status[..cached_cols as usize]
+        } else {
+            status
+        };
         let _ = execute!(stdout, cursor::MoveTo(0, 0));
-        let _ = write!(stdout, "\x1b[7m{}\x1b[0m\x1b[K\r\n  Waiting for screen data...", s);
+        let _ = write!(
+            stdout,
+            "\x1b[7m{}\x1b[0m\x1b[K\r\n  Waiting for screen data...",
+            s
+        );
         let _ = stdout.flush();
     }
 
@@ -515,10 +551,7 @@ async fn cmd_watch_render(target_user_id: String) -> Result<()> {
                 // Check for key/resize events (non-blocking)
                 if event::poll(std::time::Duration::from_millis(0))? {
                     match event::read()? {
-                        Event::Key(KeyEvent { code, .. }) => match code {
-                            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => break,
-                            _ => {}
-                        },
+                        Event::Key(KeyEvent { code: KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc, .. }) => break,
                         Event::Resize(cols, _rows) => {
                             cached_cols = cols;
                             if !screen_buf.is_empty() {
@@ -545,11 +578,12 @@ async fn cmd_watch_render(target_user_id: String) -> Result<()> {
             // Wait for q/Esc to close
             loop {
                 if event::poll(std::time::Duration::from_millis(100))? {
-                    if let Event::Key(KeyEvent { code, .. }) = event::read()? {
-                        match code {
-                            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => break,
-                            _ => {}
-                        }
+                    if let Event::Key(KeyEvent {
+                        code: KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc,
+                        ..
+                    }) = event::read()?
+                    {
+                        break;
                     }
                 }
             }

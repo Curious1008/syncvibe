@@ -20,8 +20,12 @@ fn config_path() -> Result<PathBuf> {
 
 pub fn load_user_config() -> Result<UserConfig> {
     let path = config_path()?;
-    let content = fs::read_to_string(&path)
-        .with_context(|| format!("No user config found at {}. Run `syncvibe join` first.", path.display()))?;
+    let content = fs::read_to_string(&path).with_context(|| {
+        format!(
+            "No user config found at {}. Run `syncvibe join` first.",
+            path.display()
+        )
+    })?;
     let config: UserConfig = toml::from_str(&content)?;
     Ok(config)
 }
@@ -73,19 +77,15 @@ pub fn is_token_expired() -> bool {
 /// Check auth and interactively offer to sign up if not authenticated.
 /// Also prompts to re-auth if token has soft-expired.
 pub fn require_auth(action: &str) -> Result<()> {
-    use crate::onboarding::{TEAL, DIM, R};
+    use crate::onboarding::{DIM, R, TEAL};
 
     if is_authenticated() && !is_token_expired() {
         return Ok(());
     }
 
     if is_token_expired() {
-        println!(
-            "\n  {TEAL}◆{R} Your session has expired. Please re-authenticate.\n",
-        );
-        if crate::onboarding::confirm(
-            &format!("  {TEAL}◆{R} Re-authenticate now?"),
-        )? {
+        println!("\n  {TEAL}◆{R} Your session has expired. Please re-authenticate.\n",);
+        if crate::onboarding::confirm(&format!("  {TEAL}◆{R} Re-authenticate now?"))? {
             println!();
             crate::auth::run_auth()?;
             if is_authenticated() {
@@ -97,14 +97,10 @@ pub fn require_auth(action: &str) -> Result<()> {
         }
     }
 
-    println!(
-        "\n  {TEAL}◆{R} {action} requires a free SyncVibe account.\n",
-    );
+    println!("\n  {TEAL}◆{R} {action} requires a free SyncVibe account.\n",);
     println!("  {DIM}Joining rooms with an invite code is always free.{R}\n");
 
-    if crate::onboarding::confirm(
-        &format!("  {TEAL}◆{R} Sign up now?"),
-    )? {
+    if crate::onboarding::confirm(&format!("  {TEAL}◆{R} Sign up now?"))? {
         println!();
         crate::auth::run_auth()?;
         if is_authenticated() {
