@@ -5,6 +5,8 @@ pub struct UserConfig {
     pub profile: UserProfile,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<AccountConfig>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub shown_community: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,6 +46,7 @@ impl UserConfig {
                 user_id: uuid::Uuid::new_v4().to_string(),
             },
             account: None,
+            shown_community: false,
         }
     }
 }

@@ -4,7 +4,7 @@ use anyhow::Result;
 
 use syncvibe_core::models::{RoomConfig, UserConfig};
 
-use crate::onboarding::{self, TEAL, GREEN, DIM, B, R};
+use crate::onboarding::{self, TEAL, GREEN, RED, DIM, B, R};
 use crate::{config, init, tmux};
 
 /// Ensure user profile exists, prompting interactively if needed.
@@ -136,12 +136,20 @@ pub fn cmd_session() -> Result<()> {
                 // Create new room — requires auth
                 crate::config::require_auth("Creating a room")?;
                 println!();
-                let name = onboarding::prompt(
-                    &format!("  {TEAL}Room name:{R} "),
-                )?;
-                if name.is_empty() {
-                    anyhow::bail!("Cancelled.");
-                }
+                let name = loop {
+                    let raw = onboarding::prompt(
+                        &format!("  {TEAL}Room name:{R} "),
+                    )?;
+                    if raw.is_empty() {
+                        anyhow::bail!("Cancelled.");
+                    }
+                    let clean = onboarding::sanitize_name(&raw);
+                    if clean.is_empty() {
+                        println!("  {RED}✗{R} Invalid name — please use normal characters.");
+                        continue;
+                    }
+                    break clean;
+                };
                 let agent_id = crate::agents::select_agent()?;
                 let path = init::prepare_project_dir(&name)?;
                 let mut room = RoomConfig::new();
@@ -155,7 +163,9 @@ pub fn cmd_session() -> Result<()> {
                     &format!("  {TEAL}Invite code:{R} "),
                 )?;
                 let mut room = crate::invite::resolve_short_invite(&code)?;
-                let name = room.room_name.clone().unwrap_or_else(|| "syncvibe-room".to_string());
+                let raw_name = room.room_name.clone().unwrap_or_else(|| "syncvibe-room".to_string());
+                let name = onboarding::sanitize_name(&raw_name);
+                let name = if name.is_empty() { "syncvibe-room".to_string() } else { name };
                 println!("  {GREEN}✓{R} Code accepted — {B}{name}{R}\n");
                 let proj = init::projects_dir().join(&name);
                 // Already joined — just launch

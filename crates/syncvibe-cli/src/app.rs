@@ -1265,6 +1265,7 @@ pub async fn run() -> Result<()> {
         // Handle /new — create room in another project directory
         if state.want_new_project {
             state.want_new_project = false;
+            drop(key_rx); // Stop key bridge so it doesn't steal stdin
             tui::teardown(&mut terminal)?;
 
             let switched = handle_new_project();
@@ -1284,6 +1285,7 @@ pub async fn run() -> Result<()> {
         // Handle /join — join a room with invite code
         if state.want_join_project {
             state.want_join_project = false;
+            drop(key_rx); // Stop key bridge so it doesn't steal stdin
             tui::teardown(&mut terminal)?;
 
             let switched = handle_join_project();
@@ -1301,6 +1303,7 @@ pub async fn run() -> Result<()> {
         // Handle /leave — leave current room, show room picker to switch
         if state.want_leave {
             state.want_leave = false;
+            drop(key_rx); // Stop key bridge so it doesn't steal stdin
             tui::teardown(&mut terminal)?;
 
             let left = handle_leave_room(&state.storage);
@@ -1333,6 +1336,7 @@ pub async fn run() -> Result<()> {
         // Handle project picker request (requires leaving TUI temporarily)
         if state.show_picker {
             state.show_picker = false;
+            drop(key_rx); // Stop key bridge so it doesn't steal stdin
             tui::teardown(&mut terminal)?;
 
             let current_path = state
@@ -1449,6 +1453,33 @@ fn kill_current_tmux_session(in_tmux: bool) {
     }
 }
 
+/// Show community links once — on the user's 2nd+ room creation/join.
+fn maybe_show_community() {
+    use crate::config;
+    use crate::onboarding::{DIM, R};
+
+    let registry = match config::load_registry() {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+    if registry.projects.is_empty() {
+        return; // First room — don't show yet
+    }
+    let mut user = match config::load_user_config() {
+        Ok(u) => u,
+        Err(_) => return,
+    };
+    if user.shown_community {
+        return; // Already shown
+    }
+    println!("  {DIM}Enjoying SyncVibe? Join us:{R}");
+    println!("  {DIM}⭐ github.com/Curious1008/syncvibe{R}");
+    println!("  {DIM}💬 discord.com/invite/Nb3wkCBZ55{R}");
+    println!();
+    user.shown_community = true;
+    let _ = config::save_user_config(&user);
+}
+
 /// Handle /new command: prompt for path, init, launch new tmux session.
 /// Returns true if we switched to a new tmux session.
 fn handle_new_project() -> bool {
@@ -1464,13 +1495,25 @@ fn handle_new_project() -> bool {
     println!();
     onboarding::print_section("New Room");
     println!();
-    let name = match onboarding::prompt(
-        &format!("  {TEAL}Room name:{R} "),
-    ) {
-        Ok(n) if !n.is_empty() => n,
-        _ => {
-            println!("  {DIM}Cancelled.{R}");
-            return false;
+    maybe_show_community();
+    let name = loop {
+        match onboarding::prompt(&format!("  {TEAL}Room name:{R} ")) {
+            Ok(n) => {
+                let clean = onboarding::sanitize_name(&n);
+                if n.is_empty() {
+                    println!("  {DIM}Cancelled.{R}");
+                    return false;
+                }
+                if clean.is_empty() {
+                    println!("  {RED}✗{R} Invalid name — please use normal characters.");
+                    continue;
+                }
+                break clean;
+            }
+            _ => {
+                println!("  {DIM}Cancelled.{R}");
+                return false;
+            }
         }
     };
 
@@ -1516,6 +1559,7 @@ fn handle_join_project() -> bool {
     println!();
     onboarding::print_section("Join Room");
     println!();
+    maybe_show_community();
     let code = match onboarding::prompt(
         &format!("  {TEAL}Invite code:{R} "),
     ) {
