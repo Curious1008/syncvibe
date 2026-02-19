@@ -308,6 +308,19 @@ impl AppState {
             return false;
         }
 
+        // If the input looks like a file path that exists on disk, don't treat as command
+        if is_slash {
+            let clean = content
+                .trim_matches('\'')
+                .trim_matches('"')
+                .replace("\\ ", " ")
+                .replace("\\(", "(")
+                .replace("\\)", ")");
+            if std::path::Path::new(&clean).exists() {
+                return false;
+            }
+        }
+
         // Normalize: "syncvibe switch" → "/switch"
         let normalized = if is_syncvibe_cmd {
             format!("/{}", content.strip_prefix("syncvibe ").unwrap())
