@@ -120,6 +120,14 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
                 .unwrap_or(false)
     };
 
+    let codex_mcp_done = {
+        let path = cwd.join(".codex/config.toml");
+        path.exists()
+            && std::fs::read_to_string(&path)
+                .map(|c| c.contains("syncvibe"))
+                .unwrap_or(false)
+    };
+
     let has_git = cwd.join(".git").exists();
 
     let claude_md_done = file_contains_syncvibe(&cwd.join("CLAUDE.md"));
@@ -146,11 +154,19 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
         },
         SetupItem {
             file: ".mcp.json".to_string(),
-            description: "Register MCP server for AI agents".to_string(),
-            reason: "Lets AI agents call read_chat/send_chat to collaborate with your team.".to_string(),
+            description: "Register MCP server for Claude Code".to_string(),
+            reason: "Lets Claude Code call read_chat/send_chat to collaborate with your team.".to_string(),
             required: false,
             checked: true,
             already_done: mcp_done,
+        },
+        SetupItem {
+            file: ".codex/config.toml".to_string(),
+            description: "Register MCP server for Codex CLI".to_string(),
+            reason: "Lets Codex call read_chat/send_chat to collaborate with your team.".to_string(),
+            required: false,
+            checked: true,
+            already_done: codex_mcp_done,
         },
         SetupItem {
             file: "CLAUDE.md".to_string(),
@@ -219,6 +235,7 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
         match item.file.as_str() {
             ".gitignore" => setup_gitignore(cwd)?,
             ".mcp.json" => setup_mcp_json(cwd)?,
+            ".codex/config.toml" => setup_codex_mcp(cwd)?,
             "CLAUDE.md" => append_syncvibe_hint(&cwd.join("CLAUDE.md"))?,
             "AGENTS.md" => append_syncvibe_hint(&cwd.join("AGENTS.md"))?,
             _ => {} // .syncvibe/ is handled above via find_or_init_storage
@@ -330,6 +347,51 @@ fn setup_mcp_json(cwd: &std::path::Path) -> Result<()> {
         });
         std::fs::write(&mcp_path, serde_json::to_string_pretty(&mcp_config)?)?;
     }
+    Ok(())
+}
+
+/// Set up .codex/config.toml with SyncVibe MCP server for Codex CLI.
+fn setup_codex_mcp(cwd: &std::path::Path) -> Result<()> {
+    let codex_dir = cwd.join(".codex");
+    if !codex_dir.exists() {
+        std::fs::create_dir_all(&codex_dir)?;
+    }
+
+    let config_path = codex_dir.join("config.toml");
+    let syncvibe_block = "\n[mcp_servers.syncvibe]\ncommand = \"syncvibe\"\nargs = [\"mcp-server\"]\n";
+
+    if config_path.exists() {
+        let content = std::fs::read_to_string(&config_path)?;
+        if content.contains("[mcp_servers.syncvibe]") {
+            return Ok(()); // Already configured
+        }
+        // Append to existing config
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&config_path)?;
+        if !content.ends_with('\n') {
+            std::io::Write::write_all(&mut file, b"\n")?;
+        }
+        std::io::Write::write_all(&mut file, syncvibe_block.as_bytes())?;
+    } else {
+        std::fs::write(&config_path, syncvibe_block.trim_start())?;
+    }
+
+    // Also add .codex/ to .gitignore
+    let gitignore_path = cwd.join(".gitignore");
+    if gitignore_path.exists() {
+        let content = std::fs::read_to_string(&gitignore_path)?;
+        if !content.lines().any(|l| l.trim() == ".codex/" || l.trim() == ".codex") {
+            let mut file = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&gitignore_path)?;
+            if !content.ends_with('\n') {
+                std::io::Write::write_all(&mut file, b"\n")?;
+            }
+            std::io::Write::write_all(&mut file, b".codex/\n")?;
+        }
+    }
+
     Ok(())
 }
 
