@@ -94,6 +94,9 @@ pub struct AppState {
 
     // Local agent (from room.json)
     pub local_agent_id: Option<String>,
+
+    // Byte offset for incremental file reads
+    disk_byte_offset: u64,
 }
 
 impl AppState {
@@ -110,6 +113,7 @@ impl AppState {
         }
         let session_id = crate::get_or_create_session_id(&all_msgs, &user.profile.user_id);
         let disk_msg_count = all_msgs.len();
+        let disk_byte_offset = storage.chat_log_size();
         let split_at = all_msgs.len().saturating_sub(INITIAL_DISPLAY);
         let older_messages = all_msgs[..split_at].to_vec();
         let chat_messages = all_msgs[split_at..].to_vec();
@@ -157,14 +161,16 @@ impl AppState {
             last_presence_rotate: std::time::Instant::now(),
             in_tmux: std::env::var("TMUX").is_ok(),
             local_agent_id: local_agent_id,
+            disk_byte_offset,
         })
     }
 
     pub fn reload_data(&mut self) {
-        if let Ok(all_msgs) = self.storage.read_chat_messages() {
-            if all_msgs.len() > self.disk_msg_count {
-                let new_msgs = all_msgs[self.disk_msg_count..].to_vec();
-                self.disk_msg_count = all_msgs.len();
+        // Use offset-based incremental read to avoid re-reading entire file
+        if let Ok((new_msgs, new_offset)) = self.storage.read_chat_from_offset(self.disk_byte_offset) {
+            if !new_msgs.is_empty() {
+                self.disk_byte_offset = new_offset;
+                self.disk_msg_count += new_msgs.len();
                 // Deduplicate: skip messages already in memory (e.g. received via WebSocket)
                 for msg in new_msgs {
                     if !self.chat_messages.iter().any(|m| m.id == msg.id) {
@@ -571,10 +577,15 @@ fn copy_to_clipboard(text: &str) -> bool {
         Err(_) => return false,
     };
     #[cfg(target_os = "linux")]
-    let mut child = match std::process::Command::new("xclip")
-        .args(["-selection", "clipboard"])
+    let mut child = match std::process::Command::new("wl-copy")
         .stdin(std::process::Stdio::piped())
         .spawn()
+        .or_else(|_| {
+            std::process::Command::new("xclip")
+                .args(["-selection", "clipboard"])
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+        })
     {
         Ok(c) => c,
         Err(_) => return false,

@@ -265,15 +265,25 @@ fn apply_tmux_config(session_name: &str, agent_name: &str, agent_color: &str) ->
         .env_remove("TMUX")
         .status();
 
-    // Mouse drag-select → copy to system clipboard (macOS pbcopy)
+    // Mouse drag-select → copy to system clipboard
+    let copy_cmd = if cfg!(target_os = "macos") {
+        "pbcopy"
+    } else {
+        // Try wl-copy (Wayland) first, fall back to xclip (X11)
+        if std::process::Command::new("wl-copy").arg("--version").output().is_ok() {
+            "wl-copy"
+        } else {
+            "xclip -selection clipboard"
+        }
+    };
     for cmd in &[
-        &["bind-key", "-T", "copy-mode", "MouseDragEnd1Pane",
-          "send-keys", "-X", "copy-pipe-and-cancel", "pbcopy"][..],
-        &["bind-key", "-T", "copy-mode-vi", "MouseDragEnd1Pane",
-          "send-keys", "-X", "copy-pipe-and-cancel", "pbcopy"],
+        vec!["bind-key", "-T", "copy-mode", "MouseDragEnd1Pane",
+          "send-keys", "-X", "copy-pipe-and-cancel", copy_cmd],
+        vec!["bind-key", "-T", "copy-mode-vi", "MouseDragEnd1Pane",
+          "send-keys", "-X", "copy-pipe-and-cancel", copy_cmd],
     ] {
         let _ = std::process::Command::new("tmux")
-            .args(*cmd)
+            .args(cmd)
             .env_remove("TMUX")
             .status();
     }

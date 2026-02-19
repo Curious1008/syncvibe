@@ -76,18 +76,19 @@ impl Storage {
         if created {
             set_private_permissions(&path);
         }
-        // Advisory file lock with bounded retry to prevent blocking async runtime
+        // Advisory file lock with bounded retry
         let mut locked = false;
-        for _ in 0..100 {
+        for _ in 0..20 {
             match file.try_lock_exclusive() {
                 Ok(()) => { locked = true; break; }
-                Err(_) => std::thread::sleep(std::time::Duration::from_millis(10)),
+                Err(_) => std::thread::sleep(std::time::Duration::from_millis(5)),
             }
         }
         if !locked {
-            file.lock_exclusive()?; // final attempt, may block briefly
+            return Err(SyncVibeError::Other("Could not acquire chat log file lock".into()));
         }
         writeln!(file, "{}", line)?;
+        file.flush()?;
         file.unlock()?;
         Ok(())
     }

@@ -112,10 +112,20 @@ pub fn read_clipboard() -> Option<String> {
     #[cfg(target_os = "macos")]
     let output = std::process::Command::new("pbpaste").output().ok()?;
     #[cfg(target_os = "linux")]
-    let output = std::process::Command::new("xclip")
-        .args(["-selection", "clipboard", "-o"])
-        .output()
-        .ok()?;
+    let output = {
+        // Try wl-paste (Wayland) first, then xclip (X11)
+        std::process::Command::new("wl-paste")
+            .arg("--no-newline")
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .or_else(|| {
+                std::process::Command::new("xclip")
+                    .args(["-selection", "clipboard", "-o"])
+                    .output()
+                    .ok()
+            })?
+    };
     #[cfg(target_os = "windows")]
     {
         return None; // TODO: powershell Get-Clipboard

@@ -9,12 +9,28 @@ use crate::config;
 use crate::onboarding::{TEAL, GREEN, DIM, R};
 
 const WEB_BASE: &str = "https://syncvibe.online";
+const CORS_ORIGIN: &str = "https://syncvibe.online";
+const MAX_BODY_SIZE: usize = 8192;
+
+/// Generate a random hex nonce for CSRF protection
+fn generate_nonce() -> String {
+    use std::collections::hash_map::RandomState;
+    use std::hash::{BuildHasher, Hasher};
+    let s = RandomState::new();
+    let mut h = s.build_hasher();
+    h.write_u128(std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos());
+    format!("{:016x}{:016x}", h.finish(), RandomState::new().build_hasher().finish())
+}
 
 /// Run the CLI auth flow:
 /// 1. Start a local HTTP server on a random port
-/// 2. Open browser to /authorize?cli_port={port}
-/// 3. Handle CORS preflight + POST /callback with { "token": "..." }
-/// 4. Save token to ~/.syncvibe/config.toml
+/// 2. Open browser to /authorize?cli_port={port}&state={nonce}
+/// 3. Handle CORS preflight + POST /callback with { "token": "...", "state": "..." }
+/// 4. Validate state/nonce matches to prevent CSRF
+/// 5. Save token to ~/.syncvibe/config.toml
 pub fn run_auth() -> Result<()> {
     // Check if already authenticated
     if let Ok(cfg) = config::load_user_config() {
@@ -30,7 +46,8 @@ pub fn run_auth() -> Result<()> {
         .context("Failed to set blocking mode")?;
     let port = listener.local_addr()?.port();
 
-    let url = format!("{}/authorize?cli_port={}", WEB_BASE, port);
+    let nonce = generate_nonce();
+    let url = format!("{}/authorize?cli_port={}&state={}", WEB_BASE, port, nonce);
 
     println!("  {TEAL}◆{R} Opening browser for authentication...\n");
     println!("  {DIM}If the browser doesn't open, visit:{R}");
@@ -40,11 +57,6 @@ pub fn run_auth() -> Result<()> {
 
     println!("  {DIM}Waiting for authorization...{R}");
 
-    // Set a 5-minute timeout for the whole auth flow
-    listener
-        .set_nonblocking(false)
-        .ok();
-
     // Accept connections in a loop: handle OPTIONS preflight, then POST with token
     let payload = loop {
         let (stream, _) = listener.accept().context("Failed to accept connection")?;
@@ -52,7 +64,7 @@ pub fn run_auth() -> Result<()> {
             .set_read_timeout(Some(Duration::from_secs(10)))
             .ok();
 
-        match handle_connection(stream) {
+        match handle_connection(stream, &nonce) {
             ConnectionResult::Auth(p) => break p,
             ConnectionResult::Preflight => continue, // CORS preflight handled, wait for POST
             ConnectionResult::Ignored => continue,
@@ -84,7 +96,7 @@ enum ConnectionResult {
     Ignored,
 }
 
-fn handle_connection(mut stream: std::net::TcpStream) -> ConnectionResult {
+fn handle_connection(mut stream: std::net::TcpStream, expected_nonce: &str) -> ConnectionResult {
     let mut reader = match stream.try_clone() {
         Ok(s) => BufReader::new(s),
         Err(_) => return ConnectionResult::Ignored,
@@ -115,33 +127,45 @@ fn handle_connection(mut stream: std::net::TcpStream) -> ConnectionResult {
         }
     }
 
+    let cors_headers = format!(
+        "Access-Control-Allow-Origin: {}\r\n\
+         Access-Control-Allow-Methods: POST, OPTIONS\r\n\
+         Access-Control-Allow-Headers: Content-Type",
+        CORS_ORIGIN
+    );
+
     if is_options {
         // CORS preflight response
-        let resp = "HTTP/1.1 204 No Content\r\n\
-            Access-Control-Allow-Origin: *\r\n\
-            Access-Control-Allow-Methods: POST, OPTIONS\r\n\
-            Access-Control-Allow-Headers: Content-Type\r\n\
-            Content-Length: 0\r\n\
-            Connection: close\r\n\
-            \r\n";
+        let resp = format!(
+            "HTTP/1.1 204 No Content\r\n\
+             {cors_headers}\r\n\
+             Content-Length: 0\r\n\
+             Connection: close\r\n\
+             \r\n"
+        );
         let _ = stream.write_all(resp.as_bytes());
         let _ = stream.flush();
         return ConnectionResult::Preflight;
     }
 
     if is_post && content_length > 0 {
+        // Reject oversized bodies
+        if content_length > MAX_BODY_SIZE {
+            return ConnectionResult::Ignored;
+        }
+
         let mut body = vec![0u8; content_length];
         if reader.read_exact(&mut body).is_err() {
             return ConnectionResult::Ignored;
         }
         let body_str = String::from_utf8_lossy(&body);
 
-        if let Some(payload) = parse_auth_payload(&body_str) {
+        if let Some(payload) = parse_auth_payload(&body_str, expected_nonce) {
             // Success response
             let body = r#"{"status":"ok"}"#;
             let resp = format!(
                 "HTTP/1.1 200 OK\r\n\
-                 Access-Control-Allow-Origin: *\r\n\
+                 {cors_headers}\r\n\
                  Content-Type: application/json\r\n\
                  Content-Length: {}\r\n\
                  Connection: close\r\n\
@@ -166,8 +190,15 @@ fn handle_connection(mut stream: std::net::TcpStream) -> ConnectionResult {
     ConnectionResult::Ignored
 }
 
-fn parse_auth_payload(body: &str) -> Option<AuthPayload> {
+fn parse_auth_payload(body: &str, expected_nonce: &str) -> Option<AuthPayload> {
     let v: serde_json::Value = serde_json::from_str(body).ok()?;
+
+    // Validate CSRF nonce
+    let state = v.get("state").and_then(|v| v.as_str()).unwrap_or("");
+    if state != expected_nonce {
+        return None;
+    }
+
     let token = v.get("token")?.as_str()?;
     if token.is_empty() || !token.chars().all(|c| c.is_ascii_hexdigit()) {
         return None;
@@ -219,20 +250,28 @@ mod tests {
 
     #[test]
     fn test_parse_auth_payload() {
-        let p = parse_auth_payload(r#"{"token":"abc123def456"}"#).unwrap();
+        let nonce = "test_nonce_123";
+
+        let p = parse_auth_payload(r#"{"token":"abc123def456","state":"test_nonce_123"}"#, nonce).unwrap();
         assert_eq!(p.token, "abc123def456");
         assert!(p.api_url.is_none());
         assert!(p.api_key.is_none());
 
         let p = parse_auth_payload(
-            r#"{"token":"abc123","supabase_url":"https://x.supabase.co","supabase_anon_key":"key123"}"#,
+            r#"{"token":"abc123","state":"test_nonce_123","supabase_url":"https://x.supabase.co","supabase_anon_key":"key123"}"#,
+            nonce,
         ).unwrap();
         assert_eq!(p.token, "abc123");
         assert_eq!(p.api_url.as_deref(), Some("https://x.supabase.co"));
         assert_eq!(p.api_key.as_deref(), Some("key123"));
 
-        assert!(parse_auth_payload(r#"{"token":""}"#).is_none());
-        assert!(parse_auth_payload(r#"{"bad":"data"}"#).is_none());
-        assert!(parse_auth_payload("not json").is_none());
+        // Missing state (CSRF protection)
+        assert!(parse_auth_payload(r#"{"token":"abc123def456"}"#, nonce).is_none());
+        // Wrong state
+        assert!(parse_auth_payload(r#"{"token":"abc123def456","state":"wrong"}"#, nonce).is_none());
+
+        assert!(parse_auth_payload(r#"{"token":"","state":"test_nonce_123"}"#, nonce).is_none());
+        assert!(parse_auth_payload(r#"{"bad":"data"}"#, nonce).is_none());
+        assert!(parse_auth_payload("not json", nonce).is_none());
     }
 }
