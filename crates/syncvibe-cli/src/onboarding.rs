@@ -276,10 +276,10 @@ pub fn select_menu(items: &[MenuItem]) -> io::Result<Option<usize>> {
 
 fn run_menu(items: &[MenuItem]) -> io::Result<Option<usize>> {
     let mut cursor = 0;
-    let mut prev_lines = 0;
+    let start_row = crossterm::cursor::position().map(|(_, r)| r).unwrap_or(0);
 
     loop {
-        prev_lines = render_menu(items, cursor, prev_lines)?;
+        render_menu(items, cursor, start_row)?;
 
         if let Event::Key(key) = event::read()? {
             if key.kind != KeyEventKind::Press {
@@ -295,11 +295,11 @@ fn run_menu(items: &[MenuItem]) -> io::Result<Option<usize>> {
                     }
                 }
                 KeyCode::Enter => {
-                    clear_lines(prev_lines)?;
+                    clear_from_row(start_row)?;
                     return Ok(Some(cursor));
                 }
                 KeyCode::Esc | KeyCode::Char('q') => {
-                    clear_lines(prev_lines)?;
+                    clear_from_row(start_row)?;
                     return Ok(None);
                 }
                 _ => {}
@@ -308,11 +308,10 @@ fn run_menu(items: &[MenuItem]) -> io::Result<Option<usize>> {
     }
 }
 
-fn render_menu(items: &[MenuItem], cursor: usize, prev_lines: usize) -> io::Result<usize> {
+fn render_menu(items: &[MenuItem], cursor: usize, start_row: u16) -> io::Result<()> {
     let mut out = io::stdout();
-    clear_up(&mut out, prev_lines)?;
+    write!(out, "\x1b[{};1H\x1b[J", start_row + 1)?;
 
-    let mut lines = 0;
     for (i, item) in items.iter().enumerate() {
         let selected = i == cursor;
         if selected {
@@ -330,17 +329,15 @@ fn render_menu(items: &[MenuItem], cursor: usize, prev_lines: usize) -> io::Resu
         } else {
             write!(out, "    {MED}{}{R} {DIM}{}{R}\r\n", item.label, item.hint)?;
         }
-        lines += 1;
     }
 
     write!(
         out,
         "\r\n  {DIM}↑↓ navigate {DIM_TEAL}·{DIM} enter select {DIM_TEAL}·{DIM} esc cancel{R}\r\n"
     )?;
-    lines += 2;
 
     out.flush()?;
-    Ok(lines)
+    Ok(())
 }
 
 // ── Interactive checklist ─────────────────────────────────────────
@@ -385,10 +382,14 @@ pub fn confirm_setup(items: &mut [SetupItem]) -> io::Result<bool> {
 fn run_checklist(items: &mut [SetupItem], actionable: &[usize]) -> io::Result<bool> {
     let mut cursor = 0;
     let confirm_idx = actionable.len();
-    let mut prev_lines = 0;
+
+    // Capture absolute cursor row so we can reliably return here on each redraw.
+    // This avoids the fragile relative-movement approach that breaks when the
+    // pane is too short for \x1b[A to reach the starting row.
+    let start_row = crossterm::cursor::position().map(|(_, r)| r).unwrap_or(0);
 
     loop {
-        prev_lines = render_checklist(items, actionable, cursor, confirm_idx, prev_lines)?;
+        render_checklist(items, actionable, cursor, confirm_idx, start_row)?;
 
         if let Event::Key(key) = event::read()? {
             if key.kind != KeyEventKind::Press {
@@ -413,7 +414,7 @@ fn run_checklist(items: &mut [SetupItem], actionable: &[usize]) -> io::Result<bo
                 }
                 KeyCode::Enter => {
                     if cursor == confirm_idx {
-                        clear_lines(prev_lines)?;
+                        clear_from_row(start_row)?;
                         return Ok(true);
                     }
                     if cursor < confirm_idx {
@@ -424,7 +425,7 @@ fn run_checklist(items: &mut [SetupItem], actionable: &[usize]) -> io::Result<bo
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('q') => {
-                    clear_lines(prev_lines)?;
+                    clear_from_row(start_row)?;
                     return Ok(false);
                 }
                 _ => {}
@@ -438,13 +439,12 @@ fn render_checklist(
     actionable: &[usize],
     cursor: usize,
     confirm_idx: usize,
-    prev_lines: usize,
-) -> io::Result<usize> {
+    start_row: u16,
+) -> io::Result<()> {
     let mut out = io::stdout();
     let (term_width, _) = terminal::size().unwrap_or((80, 24));
-    clear_up(&mut out, prev_lines)?;
-
-    let mut lines = 0;
+    // Jump to absolute start position and clear everything below
+    write!(out, "\x1b[{};1H\x1b[J", start_row + 1)?; // ANSI rows are 1-based
 
     for (i, &idx) in actionable.iter().enumerate() {
         let item = &items[idx];
@@ -496,20 +496,16 @@ fn render_checklist(
             "  {} [{}] {} {} {}{}\r\n",
             arrow, check, file, desc, tag, lock
         )?;
-        lines += 1;
-
         // Show reason on hover (truncated to fit terminal width)
         if selected {
             let (tw, _) = terminal::size().unwrap_or((80, 24));
             let max_reason = (tw as usize).saturating_sub(12); // 8 indent + "└ " + margin
             let reason: String = item.reason.chars().take(max_reason).collect();
             write!(out, "        {DIM}└ {reason}{R}\r\n")?;
-            lines += 1;
         }
     }
 
     write!(out, "\r\n")?;
-    lines += 1;
 
     // Confirm button
     if cursor == confirm_idx {
@@ -517,16 +513,14 @@ fn render_checklist(
     } else {
         write!(out, "    {DIM}▸ Confirm{R}\r\n")?;
     }
-    lines += 1;
 
     write!(
         out,
         "\r\n  {DIM}↑↓ navigate {DIM_TEAL}·{DIM} space toggle {DIM_TEAL}·{DIM} enter confirm {DIM_TEAL}·{DIM} esc cancel{R}\r\n"
     )?;
-    lines += 2;
 
     out.flush()?;
-    Ok(lines)
+    Ok(())
 }
 
 // ── Shared terminal helpers ───────────────────────────────────────
@@ -544,21 +538,10 @@ fn reserve_lines(count: usize) -> io::Result<()> {
     out.flush()
 }
 
-/// Move cursor up N lines, then erase everything below. Used before re-rendering.
-fn clear_up(out: &mut io::Stdout, count: usize) -> io::Result<()> {
-    for _ in 0..count {
-        write!(out, "\x1b[A")?;
-    }
-    if count > 0 {
-        write!(out, "\r\x1b[J")?; // move to column 0, erase to end of screen
-    }
-    Ok(())
-}
-
-/// Clear N lines above cursor and flush.
-fn clear_lines(count: usize) -> io::Result<()> {
+/// Jump to an absolute row and erase everything below. Used by menu/checklist.
+fn clear_from_row(row: u16) -> io::Result<()> {
     let mut out = io::stdout();
-    clear_up(&mut out, count)?;
+    write!(out, "\x1b[{};1H\x1b[J", row + 1)?; // ANSI rows are 1-based
     out.flush()
 }
 

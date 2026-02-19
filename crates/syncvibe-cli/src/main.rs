@@ -419,7 +419,7 @@ async fn cmd_watch_render(target_user_id: String) -> Result<()> {
     let mut stream_ended = false;
 
     // Cache terminal size; updated on Resize events to avoid calling terminal::size() per frame
-    let (mut cached_cols, _cached_rows) = terminal::size().unwrap_or((80, 24));
+    let (mut cached_cols, mut cached_rows) = terminal::size().unwrap_or((80, 24));
 
     // Truncate a string with ANSI escapes to `max_w` visible columns.
     // Iterates over chars to correctly handle multi-byte UTF-8.
@@ -453,26 +453,25 @@ async fn cmd_watch_render(target_user_id: String) -> Result<()> {
         out
     };
 
-    // Full redraw using cached terminal width
+    // Full redraw using cached terminal size
     let redraw = |stdout: &mut std::io::Stdout,
                   buf: &[String],
                   name: &str,
                   cols: u16,
+                  rows: u16,
                   trunc: &dyn Fn(&str, usize) -> String| {
         let w = cols as usize;
+        let max_lines = (rows as usize).saturating_sub(1); // 1 row for status bar
         let _ = execute!(stdout, cursor::MoveTo(0, 0));
-        // Status bar (inverted colors) — truncated to pane width
+        // Status bar (inverted colors) — truncated to visible columns
         let status = format!(" Watching {}'s agent pane — /watch to stop ", name);
-        let status_trunc = if status.len() > w {
-            &status[..w]
-        } else {
-            &status
-        };
+        let status_trunc = trunc(&status, w);
         let _ = write!(stdout, "\x1b[7m{}\x1b[0m\x1b[K\r\n", status_trunc);
-        for line in buf {
+        // Only render lines that fit in the pane
+        for line in buf.iter().take(max_lines) {
             let _ = write!(stdout, "{}\x1b[K\r\n", trunc(line, w));
         }
-        // Clear remaining lines
+        // Clear remaining lines below
         let _ = write!(stdout, "\x1b[J");
         let _ = stdout.flush();
     };
@@ -513,7 +512,7 @@ async fn cmd_watch_render(target_user_id: String) -> Result<()> {
                         if sharer_name.is_empty() {
                             sharer_name = "peer".to_string();
                         }
-                        redraw(&mut stdout, &screen_buf, &sharer_name, cached_cols, &truncate_visible);
+                        redraw(&mut stdout, &screen_buf, &sharer_name, cached_cols, cached_rows, &truncate_visible);
                     }
                     Some(WsMessage::ScreenShareStart { user_id, user_name }) if user_id == target_user_id => {
                         sharer_name = user_name;
@@ -552,10 +551,11 @@ async fn cmd_watch_render(target_user_id: String) -> Result<()> {
                 if event::poll(std::time::Duration::from_millis(0))? {
                     match event::read()? {
                         Event::Key(KeyEvent { code: KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc, .. }) => break,
-                        Event::Resize(cols, _rows) => {
+                        Event::Resize(cols, rows) => {
                             cached_cols = cols;
+                            cached_rows = rows;
                             if !screen_buf.is_empty() {
-                                redraw(&mut stdout, &screen_buf, &sharer_name, cached_cols, &truncate_visible);
+                                redraw(&mut stdout, &screen_buf, &sharer_name, cached_cols, cached_rows, &truncate_visible);
                             }
                         }
                         _ => {}
