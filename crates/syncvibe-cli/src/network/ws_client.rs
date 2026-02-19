@@ -11,7 +11,10 @@ use tokio_tungstenite::tungstenite::Message;
 
 use syncvibe_core::protocol::WsMessage;
 
-/// WebSocket client that connects to the SyncVibe relay
+/// WebSocket client that connects to the SyncVibe relay.
+// NOTE(M20): This client does not auto-reconnect by design.
+// Reconnection logic is handled at the app layer (app.rs) which monitors
+// the alive_rx watch channel and re-establishes the connection as needed.
 #[derive(Clone)]
 pub struct WsClient {
     tx: mpsc::Sender<String>,
@@ -52,10 +55,10 @@ pub async fn connect_ws(
         .map_err(|_| anyhow::anyhow!("Connection timed out"))??;
     let (mut write, mut read) = ws_stream.split();
 
-    // Channel for outgoing messages
-    let (out_tx, mut out_rx) = mpsc::channel::<String>(64);
+    // Channel for outgoing messages (256 to accommodate screen sharing frame bursts)
+    let (out_tx, mut out_rx) = mpsc::channel::<String>(256);
     // Channel for incoming parsed messages
-    let (in_tx, in_rx) = mpsc::channel::<WsMessage>(64);
+    let (in_tx, in_rx) = mpsc::channel::<WsMessage>(256);
     // Watch channel for connection alive status
     let (alive_tx, alive_rx) = watch::channel(true);
     let alive_tx = Arc::new(alive_tx);

@@ -12,8 +12,16 @@ const WEB_BASE: &str = "https://syncvibe.online";
 const CORS_ORIGIN: &str = "https://syncvibe.online";
 const MAX_BODY_SIZE: usize = 8192;
 
-/// Generate a random hex nonce for CSRF protection
+/// Generate a random hex nonce for CSRF protection using /dev/urandom.
 fn generate_nonce() -> String {
+    let mut buf = [0u8; 32];
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        use std::io::Read;
+        if f.read_exact(&mut buf).is_ok() {
+            return buf.iter().map(|b| format!("{:02x}", b)).collect();
+        }
+    }
+    // Fallback: should not happen on macOS/Linux, but avoid panicking
     use std::collections::hash_map::RandomState;
     use std::hash::{BuildHasher, Hasher};
     let s = RandomState::new();
@@ -42,8 +50,8 @@ pub fn run_auth() -> Result<()> {
     let listener = TcpListener::bind("127.0.0.1:0")
         .context("Failed to start local server")?;
     listener
-        .set_nonblocking(false)
-        .context("Failed to set blocking mode")?;
+        .set_nonblocking(true)
+        .context("Failed to set non-blocking mode")?;
     let port = listener.local_addr()?.port();
 
     let nonce = generate_nonce();
@@ -57,17 +65,34 @@ pub fn run_auth() -> Result<()> {
 
     println!("  {DIM}Waiting for authorization...{R}");
 
-    // Accept connections in a loop: handle OPTIONS preflight, then POST with token
+    // Accept connections in a polling loop with a 5-minute timeout
+    let accept_start = std::time::Instant::now();
+    let accept_timeout = Duration::from_secs(300); // 5 minutes
     let payload = loop {
-        let (stream, _) = listener.accept().context("Failed to accept connection")?;
-        stream
-            .set_read_timeout(Some(Duration::from_secs(10)))
-            .ok();
-
-        match handle_connection(stream, &nonce) {
-            ConnectionResult::Auth(p) => break p,
-            ConnectionResult::Preflight => continue, // CORS preflight handled, wait for POST
-            ConnectionResult::Ignored => continue,
+        if accept_start.elapsed() > accept_timeout {
+            anyhow::bail!("Authentication timed out after 5 minutes. Please try again.");
+        }
+        match listener.accept() {
+            Ok((stream, _)) => {
+                stream
+                    .set_nonblocking(false)
+                    .ok();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(10)))
+                    .ok();
+                match handle_connection(stream, &nonce) {
+                    ConnectionResult::Auth(p) => break p,
+                    ConnectionResult::Preflight => continue,
+                    ConnectionResult::Ignored => continue,
+                }
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(100));
+                continue;
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!("Failed to accept connection: {}", e));
+            }
         }
     };
 

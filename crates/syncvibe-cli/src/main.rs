@@ -397,6 +397,9 @@ async fn cmd_watch_render(target_user_id: String) -> Result<()> {
     let mut sharer_name = String::new();
     let mut stream_ended = false;
 
+    // Cache terminal size; updated on Resize events to avoid calling terminal::size() per frame
+    let (mut cached_cols, _cached_rows) = terminal::size().unwrap_or((80, 24));
+
     // Truncate a string with ANSI escapes to `max_w` visible columns.
     // Iterates over chars to correctly handle multi-byte UTF-8.
     let truncate_visible = |s: &str, max_w: usize| -> String {
@@ -430,9 +433,8 @@ async fn cmd_watch_render(target_user_id: String) -> Result<()> {
         out
     };
 
-    // Full redraw — queries pane width each time to handle resizes
-    let redraw = |stdout: &mut std::io::Stdout, buf: &[String], name: &str, trunc: &dyn Fn(&str, usize) -> String| {
-        let (cols, _rows) = terminal::size().unwrap_or((80, 24));
+    // Full redraw using cached terminal width
+    let redraw = |stdout: &mut std::io::Stdout, buf: &[String], name: &str, cols: u16, trunc: &dyn Fn(&str, usize) -> String| {
         let w = cols as usize;
         let _ = execute!(stdout, cursor::MoveTo(0, 0));
         // Status bar (inverted colors) — truncated to pane width
@@ -448,9 +450,8 @@ async fn cmd_watch_render(target_user_id: String) -> Result<()> {
     };
 
     {
-        let (cols, _) = terminal::size().unwrap_or((80, 24));
         let status = " Waiting for screen data... ";
-        let s = if status.len() > cols as usize { &status[..cols as usize] } else { status };
+        let s = if status.len() > cached_cols as usize { &status[..cached_cols as usize] } else { status };
         let _ = execute!(stdout, cursor::MoveTo(0, 0));
         let _ = write!(stdout, "\x1b[7m{}\x1b[0m\x1b[K\r\n  Waiting for screen data...", s);
         let _ = stdout.flush();
@@ -476,7 +477,7 @@ async fn cmd_watch_render(target_user_id: String) -> Result<()> {
                         if sharer_name.is_empty() {
                             sharer_name = "peer".to_string();
                         }
-                        redraw(&mut stdout, &screen_buf, &sharer_name, &truncate_visible);
+                        redraw(&mut stdout, &screen_buf, &sharer_name, cached_cols, &truncate_visible);
                     }
                     Some(WsMessage::ScreenShareStart { user_id, user_name }) if user_id == target_user_id => {
                         sharer_name = user_name;
@@ -511,13 +512,20 @@ async fn cmd_watch_render(target_user_id: String) -> Result<()> {
                 }
             }
             _ = poll_interval.tick() => {
-                // Check for key press (non-blocking)
+                // Check for key/resize events (non-blocking)
                 if event::poll(std::time::Duration::from_millis(0))? {
-                    if let Event::Key(KeyEvent { code, .. }) = event::read()? {
-                        match code {
+                    match event::read()? {
+                        Event::Key(KeyEvent { code, .. }) => match code {
                             KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => break,
                             _ => {}
+                        },
+                        Event::Resize(cols, _rows) => {
+                            cached_cols = cols;
+                            if !screen_buf.is_empty() {
+                                redraw(&mut stdout, &screen_buf, &sharer_name, cached_cols, &truncate_visible);
+                            }
                         }
+                        _ => {}
                     }
                 }
                 // Check connection health

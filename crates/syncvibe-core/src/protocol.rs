@@ -2,7 +2,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::models::ChatMessage;
 
-/// WebSocket message types exchanged between client and relay
+/// WebSocket message types exchanged between client and relay.
+// TODO(M16): String fields (user_name, reason, branch, file, etc.) are unbounded.
+// A malicious peer could send very large payloads. Consider adding serde length
+// limits or a custom deserializer with max-length constraints for each field.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 #[serde(rename_all = "snake_case")]

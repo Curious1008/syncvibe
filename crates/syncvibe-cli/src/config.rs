@@ -1,4 +1,7 @@
 use std::fs;
+use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
@@ -29,11 +32,11 @@ pub fn save_user_config(config: &UserConfig) -> Result<()> {
     let path = config_path()?;
     let content = toml::to_string_pretty(config)?;
     atomic_write(&path, &content)?;
-    set_private_permissions(&path);
     Ok(())
 }
 
 /// Set file to owner-only read/write (0600) on Unix
+#[allow(dead_code)]
 fn set_private_permissions(path: &std::path::Path) {
     #[cfg(unix)]
     {
@@ -160,10 +163,22 @@ pub fn save_registry(registry: &ProjectRegistry) -> Result<()> {
     Ok(())
 }
 
-/// Write to a temp file then rename — prevents partial writes on crash
+/// Write to a temp file then rename — prevents partial writes on crash.
+/// On Unix, creates the temp file with mode 0o600 so it is never world-readable.
 fn atomic_write(path: &std::path::Path, content: &str) -> Result<()> {
-    let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
-    fs::write(&tmp, content)?;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = path.with_extension(format!("{}.{}.tmp", std::process::id(), nanos));
+    {
+        let mut opts = fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        opts.mode(0o600);
+        let mut file = opts.open(&tmp)?;
+        file.write_all(content.as_bytes())?;
+    }
     fs::rename(&tmp, path)?;
     Ok(())
 }

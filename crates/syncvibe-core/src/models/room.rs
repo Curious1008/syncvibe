@@ -81,9 +81,14 @@ impl RoomConfig {
             .map_err(|e| format!("Invalid UUID in invite code: {}", e))?;
         let secret = hex_encode(&payload[16..48]);
 
-        // Extract room name from bytes after the 48-byte header
+        // Extract room name from bytes after the 48-byte header.
+        // Sanitize to prevent path traversal: strip null bytes, path separators,
+        // and ".." components since room_name is used to create directories.
         let room_name = if payload.len() > 48 {
-            String::from_utf8(payload[48..].to_vec()).ok().filter(|s| !s.is_empty())
+            String::from_utf8(payload[48..].to_vec())
+                .ok()
+                .map(|s| sanitize_room_name(&s))
+                .filter(|s| !s.is_empty())
         } else {
             None
         };
@@ -96,6 +101,23 @@ impl RoomConfig {
             agent: None,
         })
     }
+}
+
+/// Sanitize a room name decoded from an invite code to prevent path traversal.
+/// Removes null bytes, path separators (`/`, `\`), and rejects names that are
+/// or contain `..` components. Returns an empty string if the name is unsafe.
+fn sanitize_room_name(name: &str) -> String {
+    // Remove null bytes and path separators
+    let cleaned: String = name
+        .chars()
+        .filter(|c| *c != '\0' && *c != '/' && *c != '\\')
+        .collect();
+    // Reject if the cleaned name is "." or ".." or contains ".." as a component
+    let trimmed = cleaned.trim();
+    if trimmed == "." || trimmed == ".." || trimmed.contains("..") {
+        return String::new();
+    }
+    trimmed.to_string()
 }
 
 fn hex_encode(bytes: &[u8]) -> String {

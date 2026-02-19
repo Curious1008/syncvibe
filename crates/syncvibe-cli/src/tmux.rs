@@ -13,7 +13,14 @@ pub fn session_name_for(project_name: &str, project_path: &str) -> String {
     let mut hasher = DefaultHasher::new();
     project_path.hash(&mut hasher);
     let hash = hasher.finish();
-    format!("sv-{}-{:08x}", project_name, hash as u32)
+    // Filter project_name to only alphanumeric, hyphens, underscores.
+    // Characters like ':', '.', spaces break tmux target parsing.
+    let safe_name: String = project_name
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    let safe_name = if safe_name.is_empty() { "project".to_string() } else { safe_name };
+    format!("sv-{}-{:08x}", safe_name, hash as u32)
 }
 
 /// Register project and launch TUI (tmux or standalone)
@@ -76,7 +83,20 @@ pub fn launch_or_attach(project_path: &str) -> Result<()> {
     launch_or_attach_with_agent(project_path, agent.command, agent.name, agent.color)
 }
 
+/// Validate that a color string matches #RRGGBB hex format; default to #4ECDC4 if not.
+fn validated_color(color: &str) -> &str {
+    if color.len() == 7
+        && color.starts_with('#')
+        && color[1..].chars().all(|c| c.is_ascii_hexdigit())
+    {
+        color
+    } else {
+        "#4ECDC4"
+    }
+}
+
 fn launch_or_attach_with_agent(project_path: &str, agent_cmd: &str, agent_name: &str, agent_color: &str) -> Result<()> {
+    let agent_color = validated_color(agent_color);
     let project_dir = std::path::Path::new(project_path);
     let project_name = project_dir
         .file_name()
@@ -131,7 +151,18 @@ fn launch_or_attach_with_agent(project_path: &str, agent_cmd: &str, agent_name: 
             }
         }
     } else {
-        create_session(&session_name, project_path, &bin_str, agent_cmd, agent_name, agent_color)?;
+        if let Err(e) = create_session(&session_name, project_path, &bin_str, agent_cmd, agent_name, agent_color) {
+            // TOCTOU: session may have been created by another process between
+            // has-session check and our create_session call. If session now exists, proceed.
+            let exists_now = std::process::Command::new("tmux")
+                .args(["has-session", "-t", &session_name])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            if !exists_now {
+                return Err(e);
+            }
+        }
     }
 
     if inside_tmux {
@@ -145,6 +176,17 @@ fn launch_or_attach_with_agent(project_path: &str, agent_cmd: &str, agent_name: 
     }
 
     Ok(())
+}
+
+/// Shell-escape a string by wrapping in single quotes and escaping embedded single quotes.
+fn shell_escape(s: &str) -> String {
+    if s.is_empty() {
+        return "''".to_string();
+    }
+    if s.chars().all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '+' | ',' | '@')) {
+        return s.to_string();
+    }
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 fn create_session(session_name: &str, project_path: &str, bin_str: &str, agent_cmd: &str, agent_name: &str, agent_color: &str) -> Result<()> {
@@ -165,7 +207,8 @@ fn create_session(session_name: &str, project_path: &str, bin_str: &str, agent_c
         anyhow::bail!("Failed to create tmux session");
     }
 
-    let _ = std::process::Command::new("tmux")
+    let escaped_bin = shell_escape(bin_str);
+    let split_status = std::process::Command::new("tmux")
         .args([
             "split-window",
             "-t",
@@ -175,10 +218,20 @@ fn create_session(session_name: &str, project_path: &str, bin_str: &str, agent_c
             "30%",
             "-c",
             project_path,
-            &format!("'{}' dashboard", bin_str),
+            &format!("{} dashboard", escaped_bin),
         ])
         .env_remove("TMUX")
         .status();
+
+    match split_status {
+        Ok(s) if !s.success() => {
+            eprintln!("Warning: tmux split-window failed (exit code: {:?})", s.code());
+        }
+        Err(e) => {
+            eprintln!("Warning: tmux split-window failed: {}", e);
+        }
+        _ => {}
+    }
 
     let _ = std::process::Command::new("tmux")
         .args(["select-pane", "-t", &format!("{}.1", session_name)])
@@ -201,7 +254,8 @@ fn ensure_split(session_name: &str, project_path: &str, bin_str: &str, agent_nam
         return apply_tmux_config(session_name, agent_name, agent_color);
     }
 
-    let _ = std::process::Command::new("tmux")
+    let escaped_bin = shell_escape(bin_str);
+    let split_status = std::process::Command::new("tmux")
         .args([
             "split-window",
             "-t",
@@ -211,10 +265,20 @@ fn ensure_split(session_name: &str, project_path: &str, bin_str: &str, agent_nam
             "30%",
             "-c",
             project_path,
-            &format!("'{}' dashboard", bin_str),
+            &format!("{} dashboard", escaped_bin),
         ])
         .env_remove("TMUX")
         .status();
+
+    match split_status {
+        Ok(s) if !s.success() => {
+            eprintln!("Warning: tmux split-window failed (exit code: {:?})", s.code());
+        }
+        Err(e) => {
+            eprintln!("Warning: tmux split-window failed: {}", e);
+        }
+        _ => {}
+    }
 
     apply_tmux_config(session_name, agent_name, agent_color)
 }
@@ -345,4 +409,39 @@ fn apply_tmux_config(session_name: &str, agent_name: &str, agent_color: &str) ->
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_name_alphanumeric_only() {
+        let name = session_name_for("my-project", "/home/user/my-project");
+        assert!(name.starts_with("sv-my-project-"));
+        assert!(name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_'));
+    }
+
+    #[test]
+    fn session_name_strips_unsafe_chars() {
+        let name = session_name_for("my:project.v2 (test)", "/home/user/test");
+        assert!(!name.contains(':'));
+        assert!(!name.contains('.'));
+        assert!(!name.contains(' '));
+        assert!(!name.contains('('));
+        assert!(name.starts_with("sv-myprojectv2test-"));
+    }
+
+    #[test]
+    fn session_name_empty_fallback() {
+        let name = session_name_for(":::...", "/home/user/test");
+        assert!(name.starts_with("sv-project-"));
+    }
+
+    #[test]
+    fn session_name_different_paths_different_hashes() {
+        let a = session_name_for("proj", "/home/user/a/proj");
+        let b = session_name_for("proj", "/home/user/b/proj");
+        assert_ne!(a, b, "Same name, different paths → different session names");
+    }
 }

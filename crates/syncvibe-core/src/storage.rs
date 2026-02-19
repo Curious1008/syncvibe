@@ -1,5 +1,7 @@
 use std::fs;
 use std::io::{BufRead, Write};
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
@@ -29,13 +31,18 @@ impl Storage {
         }
     }
 
-    /// Create a new .syncvibe/ directory at the given project root
+    /// Create a new .syncvibe/ directory at the given project root.
+    /// Uses a single `create_dir` call to atomically check-and-create,
+    /// avoiding the TOCTOU race of `exists()` + `create_dir_all()`.
     pub fn init(project_root: &Path) -> Result<Self> {
         let root = project_root.join(SYNCVIBE_DIR);
-        if root.exists() {
-            return Err(SyncVibeError::RoomAlreadyExists);
+        match fs::create_dir(&root) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                return Err(SyncVibeError::RoomAlreadyExists);
+            }
+            Err(e) => return Err(e.into()),
         }
-        fs::create_dir_all(&root)?;
         set_private_dir_permissions(&root);
         Ok(Self { root })
     }
@@ -59,7 +66,6 @@ impl Storage {
     pub fn write_room_config(&self, config: &RoomConfig) -> Result<()> {
         let path = self.root.join("room.json");
         atomic_write(&path, &serde_json::to_string_pretty(config)?)?;
-        set_private_permissions(&path);
         Ok(())
     }
 
@@ -68,15 +74,16 @@ impl Storage {
     pub fn append_chat_message(&self, msg: &ChatMessage) -> Result<()> {
         let path = self.root.join("chat-log.jsonl");
         let line = serde_json::to_string(msg)?;
-        let created = !path.exists();
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)?;
-        if created {
-            set_private_permissions(&path);
-        }
-        // Advisory file lock with bounded retry
+        let mut opts = fs::OpenOptions::new();
+        opts.create(true).append(true);
+        #[cfg(unix)]
+        opts.mode(0o600);
+        let mut file = opts.open(&path)?;
+        // Advisory file lock with bounded retry.
+        // TODO: Readers (read_chat_messages, read_chat_from_offset) should also
+        // acquire a shared (non-exclusive) lock to ensure consistent reads.
+        // This requires refactoring readers to open the file via OpenOptions
+        // and call try_lock_shared() before reading.
         let mut locked = false;
         for _ in 0..20 {
             match file.try_lock_exclusive() {
@@ -203,15 +210,28 @@ impl Storage {
     }
 }
 
-/// Write to a temp file then rename, preventing partial writes
+/// Write to a temp file then rename, preventing partial writes.
+/// On Unix, creates the temp file with mode 0o600 so it is never world-readable.
 fn atomic_write(path: &Path, content: &str) -> Result<()> {
-    let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
-    fs::write(&tmp, content)?;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = path.with_extension(format!("{}.{}.tmp", std::process::id(), nanos));
+    {
+        let mut opts = fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        opts.mode(0o600);
+        let mut file = opts.open(&tmp)?;
+        file.write_all(content.as_bytes())?;
+    }
     fs::rename(&tmp, path)?;
     Ok(())
 }
 
 /// Set file to owner-only read/write (0600) on Unix
+#[allow(dead_code)]
 fn set_private_permissions(path: &Path) {
     #[cfg(unix)]
     {
@@ -521,5 +541,65 @@ mod tests {
         let a = storage.save_image(&src).unwrap();
         let b = storage.save_image(&src).unwrap();
         assert_ne!(a, b); // UUID-based names
+    }
+
+    // ── Audit: File Permissions (C6) ──
+
+    #[cfg(unix)]
+    #[test]
+    fn chat_log_has_0600_permissions() {
+        let (_tmp, storage) = make_storage();
+        let msg = make_msg("permission test");
+        storage.append_chat_message(&msg).unwrap();
+        let path = storage.root.join("chat-log.jsonl");
+        let meta = fs::metadata(&path).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let mode = meta.permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "Chat log should be owner-only (0o600)");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_has_0600_permissions() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("secret.txt");
+        atomic_write(&path, "sensitive data").unwrap();
+        let meta = fs::metadata(&path).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let mode = meta.permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "Atomic write should produce 0o600 files");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn init_dir_has_0700_permissions() {
+        let tmp = TempDir::new().unwrap();
+        let storage = Storage::init(tmp.path()).unwrap();
+        let meta = fs::metadata(storage.root()).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let mode = meta.permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, ".syncvibe dir should be 0o700");
+    }
+
+    // ── Audit: Chat Digest (M18) ──
+
+    #[test]
+    fn write_chat_digest_roundtrip() {
+        let (_tmp, storage) = make_storage();
+        let content = "# Test digest\nSome chat content";
+        let path = storage.write_chat_digest(content).unwrap();
+        assert!(path.exists());
+        let read = fs::read_to_string(&path).unwrap();
+        assert_eq!(read, content);
+    }
+
+    // ── Audit: TOCTOU-safe init (H12) ──
+
+    #[test]
+    fn init_rejects_double_init() {
+        let tmp = TempDir::new().unwrap();
+        let _ = Storage::init(tmp.path()).unwrap();
+        let err = Storage::init(tmp.path());
+        assert!(err.is_err(), "Double init should fail (TOCTOU-safe)");
     }
 }

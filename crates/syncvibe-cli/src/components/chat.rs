@@ -123,7 +123,10 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
         items.push(ChatLine::Message { idx: i });
     }
 
-    // Estimate line counts for each item
+    // Estimate line counts for each item.
+    // TODO(M23): estimate_lines is recalculated every frame. Consider caching
+    // line counts in AppState (keyed by message id + width), invalidating when
+    // the message list or terminal width changes.
     let line_counts: Vec<usize> = items
         .iter()
         .map(|item| match item {

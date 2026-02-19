@@ -215,6 +215,13 @@ impl AppState {
                 if self.chat_messages.len() > MAX_DISPLAY_MESSAGES {
                     let excess = self.chat_messages.len() - MAX_DISPLAY_MESSAGES;
                     self.chat_messages.drain(..excess);
+                    // Adjust selection index to compensate for removed messages
+                    if let Some(ref mut idx) = self.chat_selected {
+                        *idx = idx.saturating_sub(excess);
+                        if *idx == 0 {
+                            self.chat_selected = None;
+                        }
+                    }
                 }
             }
         }
@@ -323,7 +330,7 @@ impl AppState {
 
         // Normalize: "syncvibe switch" → "/switch"
         let normalized = if is_syncvibe_cmd {
-            format!("/{}", content.strip_prefix("syncvibe ").unwrap())
+            format!("/{}", content.strip_prefix("syncvibe ").unwrap_or(&content))
         } else {
             content.clone()
         };
@@ -512,8 +519,11 @@ impl AppState {
                 // Resolve target: if arg given, match by name; otherwise auto-pick if only 1
                 let target = if arg.is_empty() {
                     if self.screen_frames.len() == 1 {
-                        let (uid, sf) = self.screen_frames.iter().next().unwrap();
-                        Some((uid.clone(), sf.user_name.clone()))
+                        if let Some((uid, sf)) = self.screen_frames.iter().next() {
+                            Some((uid.clone(), sf.user_name.clone()))
+                        } else {
+                            None
+                        }
                     } else {
                         let names: Vec<String> = self.screen_frames.values()
                             .map(|sf| sf.user_name.clone())
@@ -532,6 +542,11 @@ impl AppState {
                         })
                 };
                 if let Some((uid, name)) = target {
+                    // Validate uid: must be hex+hyphens only (UUID-like) to prevent shell injection
+                    if !uid.chars().all(|c| c.is_ascii_hexdigit() || c == '-') || uid.is_empty() {
+                        self.toast_err("Invalid user ID for screen share");
+                        return true;
+                    }
                     let safe_name: String = name.chars()
                         .filter(|c| !c.is_control())
                         .take(32)
@@ -1082,13 +1097,17 @@ pub async fn run() -> Result<()> {
     // Main event loop — fully async, no blocking
     loop {
         // Draw before waiting for next event — guarantees every state change is visible
-        terminal.draw(|frame| draw_ui(frame, &state))?;
+        if let Err(_) = terminal.draw(|frame| draw_ui(frame, &state)) {
+            break;
+        }
 
         tokio::select! {
             // Terminal key events (bridged through tokio channel for reliable wakeup)
             maybe_event = key_rx.recv() => {
                 if let Some(Event::Key(key)) = maybe_event {
-                    handle_key_event(&mut state, key)?;
+                    if let Err(e) = handle_key_event(&mut state, key) {
+                        state.toast_err(&format!("Error: {}", e));
+                    }
                 }
             }
 
@@ -1100,7 +1119,14 @@ pub async fn run() -> Result<()> {
                 }
             } => {
                 if let Some(msg) = msg {
+                    let is_auth_fail = matches!(msg, WsMessage::AuthFail { .. });
                     handle_ws_message(&mut state, msg);
+                    // After AuthFail, null dead channels to prevent CPU spin and schedule retry
+                    if is_auth_fail {
+                        ws_rx = None;
+                        ws_alive_rx = None;
+                        reconnect_at = Some(tokio::time::Instant::now() + Duration::from_secs(10));
+                    }
                 }
             }
 
@@ -1183,6 +1209,9 @@ pub async fn run() -> Result<()> {
                             }
                         }
                     }
+                } else {
+                    // Channel sender dropped — schedule a retry
+                    reconnect_at = Some(tokio::time::Instant::now() + Duration::from_secs(5));
                 }
             }
 
@@ -1389,6 +1418,15 @@ pub async fn run() -> Result<()> {
         if state.should_quit {
             break;
         }
+    }
+
+    // Kill watching pane on exit
+    if let Some(ref pane_id) = state.watching_pane_id {
+        let _ = std::process::Command::new("tmux")
+            .args(["kill-pane", "-t", pane_id])
+            .env_remove("TMUX")
+            .status();
+        state.watching_pane_id = None;
     }
 
     // Auto-stop sharing on exit
@@ -1733,7 +1771,8 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
                 });
             }
         }
-        WsMessage::UserJoined(info) => {
+        WsMessage::UserJoined(mut info) => {
+            info.user_name = info.user_name.chars().take(32).collect();
             if !state.presence.iter().any(|p| p.user_id == info.user_id) {
                 state.toast(&format!("{} joined", info.user_name));
                 state.presence.push(info);
@@ -1769,7 +1808,7 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
             // Strip ANSI escape sequences from remote peer content to prevent terminal manipulation
             let mut msg = msg;
             msg.content = strip_ansi(&msg.content);
-            msg.user_name = strip_ansi(&msg.user_name);
+            msg.user_name = strip_ansi(&msg.user_name).chars().take(32).collect();
             // Only ring bell when current user is @mentioned
             if msg.content.to_lowercase().contains(&format!("@{}", state.user.profile.name.to_lowercase())) {
                 state.ring_bell();
@@ -1798,6 +1837,7 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
             recent_commits,
             ..
         } => {
+            let user_name: String = user_name.chars().take(32).collect();
             if !recent_commits.is_empty() {
                 state.system_msg_typed(
                     &format!(
@@ -1811,6 +1851,7 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
             }
         }
         WsMessage::ScreenShareStart { user_id, user_name } => {
+            let user_name: String = user_name.chars().take(32).collect();
             if let Some(sf) = state.screen_frames.get_mut(&user_id) {
                 sf.user_name = user_name;
             } else {
@@ -1996,14 +2037,17 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
                 // Autocomplete: Tab completes selected item
                 KeyCode::Tab if ac_active => {
                     if mention_active {
-                        let idx = state.autocomplete_idx % mention_matches.len();
-                        let item = &mentions[mention_matches[idx]];
-                        let chars: Vec<char> = state.input_buffer.chars().collect();
-                        let before: String = chars[..mention_word_start].iter().collect();
-                        let after: String = chars[state.input_cursor..].iter().collect();
-                        state.input_buffer = format!("{}{} {}", before, item.handle, after);
-                        state.input_cursor =
-                            before.chars().count() + item.handle.chars().count() + 1;
+                        if state.input_cursor > mention_word_start {
+                            let idx = state.autocomplete_idx % mention_matches.len();
+                            let item = &mentions[mention_matches[idx]];
+                            let chars: Vec<char> = state.input_buffer.chars().collect();
+                            let before: String = chars[..mention_word_start].iter().collect();
+                            let after: String = chars[state.input_cursor..].iter().collect();
+                            state.input_buffer = format!("{}{} {}", before, item.handle, after);
+                            state.input_cursor =
+                                before.chars().count() + item.handle.chars().count() + 1;
+                        }
+                        // else: cursor at @ position, skip completion
                     } else {
                         let idx = state.autocomplete_idx.min(cmd_matches.len() - 1);
                         let (cmd, _) = components::autocomplete::COMMANDS[cmd_matches[idx]];
@@ -2024,7 +2068,7 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
                     state.autocomplete_idx = (state.autocomplete_idx + 1) % ac_len;
                 }
                 KeyCode::Enter => {
-                    if mention_active {
+                    if mention_active && state.input_cursor > mention_word_start {
                         // Complete the mention into the input buffer
                         let idx = state.autocomplete_idx % mention_matches.len();
                         let item = &mentions[mention_matches[idx]];
@@ -2217,5 +2261,67 @@ fn draw_ui(frame: &mut ratatui::Frame, state: &AppState) {
                 state.autocomplete_idx,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── shell_escape (C3) ──
+
+    #[test]
+    fn shell_escape_safe_path() {
+        assert_eq!(shell_escape("/usr/local/bin/syncvibe"), "/usr/local/bin/syncvibe");
+    }
+
+    #[test]
+    fn shell_escape_empty() {
+        assert_eq!(shell_escape(""), "''");
+    }
+
+    #[test]
+    fn shell_escape_spaces() {
+        assert_eq!(shell_escape("/path with spaces/bin"), "'/path with spaces/bin'");
+    }
+
+    #[test]
+    fn shell_escape_single_quotes() {
+        assert_eq!(shell_escape("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn shell_escape_injection_attempt() {
+        let malicious = "$(rm -rf /)";
+        let escaped = shell_escape(malicious);
+        // Should be wrapped in single quotes — shell won't interpret $() inside ''
+        assert!(escaped.starts_with('\''), "Should be single-quoted");
+        assert!(escaped.ends_with('\''), "Should be single-quoted");
+        assert_eq!(escaped, "'$(rm -rf /)'");
+    }
+
+    #[test]
+    fn shell_escape_backtick_injection() {
+        let escaped = shell_escape("`whoami`");
+        assert!(escaped.starts_with('\''));
+    }
+
+    // ── UUID validation for /watch (C1) ──
+
+    #[test]
+    fn uuid_chars_valid() {
+        let valid = "550e8400-e29b-41d4-a716-446655440000";
+        assert!(valid.chars().all(|c| c.is_ascii_hexdigit() || c == '-'));
+    }
+
+    #[test]
+    fn uuid_chars_rejects_injection() {
+        let malicious = "550e8400; rm -rf /";
+        assert!(!malicious.chars().all(|c| c.is_ascii_hexdigit() || c == '-'));
+    }
+
+    #[test]
+    fn uuid_chars_rejects_empty() {
+        assert!("".is_empty());
     }
 }

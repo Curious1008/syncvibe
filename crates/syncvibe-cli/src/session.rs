@@ -68,38 +68,44 @@ pub fn cmd_session() -> Result<()> {
     }
 
     // Step 3: Check clipboard for invite code
-    if let Some(clip) = crate::invite::read_clipboard() {
+    'clipboard: {
+        let clip = match crate::invite::read_clipboard() {
+            Some(c) => c,
+            None => break 'clipboard,
+        };
         let trimmed = clip.trim();
-        if crate::invite::looks_like_short_code(trimmed) || trimmed.starts_with("syncvibe://") {
-            if onboarding::confirm(
-                &format!("  {TEAL}◆{R} Found invite code in clipboard — join this room?"),
-            )? {
-                let mut room = match crate::invite::resolve_short_invite(trimmed) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        println!("  {RED}✗{R} Invalid invite code in clipboard: {e}\n");
-                        // Fall through to normal menu
-                        return cmd_session();
-                    }
-                };
-                let name = room.room_name.clone().unwrap_or_else(|| "syncvibe-room".to_string());
-                println!("  {GREEN}✓{R} Code accepted — {B}{name}{R}\n");
-                let proj = init::projects_dir().join(&name);
-                // Already joined — just launch
-                if proj.join(".syncvibe").is_dir() {
-                    println!(
-                        "  {DIM}→ {} (already set up){R}\n",
-                        proj.display()
-                    );
-                    return tmux::launch_project(&proj);
-                }
-                let agent_id = crate::agents::select_agent()?;
-                room.agent = Some(agent_id);
-                let path = init::prepare_project_dir(&name)?;
-                init::perform_init(&path, Some(room))?;
-                return tmux::launch_project(&path);
-            }
+        if !crate::invite::looks_like_short_code(trimmed) && !trimmed.starts_with("syncvibe://") {
+            break 'clipboard;
         }
+        if !onboarding::confirm(
+            &format!("  {TEAL}◆{R} Found invite code in clipboard — join this room?"),
+        )? {
+            break 'clipboard;
+        }
+        let mut room = match crate::invite::resolve_short_invite(trimmed) {
+            Ok(r) => r,
+            Err(e) => {
+                println!("  {RED}✗{R} Invalid invite code in clipboard: {e}\n");
+                // Fall through to normal menu instead of recursing
+                break 'clipboard;
+            }
+        };
+        let name = room.room_name.clone().unwrap_or_else(|| "syncvibe-room".to_string());
+        println!("  {GREEN}✓{R} Code accepted — {B}{name}{R}\n");
+        let proj = init::projects_dir().join(&name);
+        // Already joined — just launch
+        if proj.join(".syncvibe").is_dir() {
+            println!(
+                "  {DIM}→ {} (already set up){R}\n",
+                proj.display()
+            );
+            return tmux::launch_project(&proj);
+        }
+        let agent_id = crate::agents::select_agent()?;
+        room.agent = Some(agent_id);
+        let path = init::prepare_project_dir(&name)?;
+        init::perform_init(&path, Some(room))?;
+        return tmux::launch_project(&path);
     }
 
     // Step 4: No room in cwd — build interactive menu

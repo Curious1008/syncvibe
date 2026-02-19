@@ -86,23 +86,26 @@ pub fn confirm(msg: &str) -> io::Result<bool> {
     io::stdout().flush()?;
 
     terminal::enable_raw_mode()?;
-    let result = loop {
-        if let Event::Key(key) = event::read()? {
-            if key.kind != KeyEventKind::Press {
-                continue;
-            }
-            match key.code {
-                KeyCode::Char('1') | KeyCode::Char('y') | KeyCode::Char('Y') => {
-                    break true;
+    let result = (|| -> io::Result<bool> {
+        loop {
+            if let Event::Key(key) = event::read()? {
+                if key.kind != KeyEventKind::Press {
+                    continue;
                 }
-                KeyCode::Char('2') | KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                    break false;
+                match key.code {
+                    KeyCode::Char('1') | KeyCode::Char('y') | KeyCode::Char('Y') => {
+                        return Ok(true);
+                    }
+                    KeyCode::Char('2') | KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                        return Ok(false);
+                    }
+                    _ => {}
                 }
-                _ => {}
             }
         }
-    };
+    })();
     terminal::disable_raw_mode()?;
+    let result = result?;
 
     // Print the choice and clean up
     if result {
@@ -124,66 +127,66 @@ pub fn confirm_destructive(msg: &str) -> io::Result<bool> {
     println!("  {DIM}2{R} No\n");
 
     terminal::enable_raw_mode()?;
+    let result = (|| -> io::Result<bool> {
+        // 5-second countdown using wall-clock time (immune to keypresses)
+        let start = std::time::Instant::now();
+        let cooldown = Duration::from_secs(5);
+        let mut last_shown = 0u64;
 
-    // 5-second countdown using wall-clock time (immune to keypresses)
-    let start = std::time::Instant::now();
-    let cooldown = Duration::from_secs(5);
-    let mut last_shown = 0u64;
+        loop {
+            let elapsed = start.elapsed();
+            if elapsed >= cooldown {
+                break;
+            }
+            let remaining = (cooldown - elapsed).as_secs() + 1;
+            if remaining != last_shown {
+                print!("\r  {DIM}Wait {remaining}s... (2 to cancel){R}  ");
+                io::stdout().flush()?;
+                last_shown = remaining;
+            }
 
-    loop {
-        let elapsed = start.elapsed();
-        if elapsed >= cooldown {
-            break;
-        }
-        let remaining = (cooldown - elapsed).as_secs() + 1;
-        if remaining != last_shown {
-            print!("\r  {DIM}Wait {remaining}s... (2 to cancel){R}  ");
-            io::stdout().flush()?;
-            last_shown = remaining;
-        }
-
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Char('2') | KeyCode::Char('n') | KeyCode::Char('N')
-                        | KeyCode::Esc => {
-                            terminal::disable_raw_mode()?;
-                            print!("\r  {DIM}No{R}                          ");
-                            println!("\n");
-                            return Ok(false);
+            if event::poll(Duration::from_millis(100))? {
+                if let Event::Key(key) = event::read()? {
+                    if key.kind == KeyEventKind::Press {
+                        match key.code {
+                            KeyCode::Char('2') | KeyCode::Char('n') | KeyCode::Char('N')
+                            | KeyCode::Esc => {
+                                return Ok(false);
+                            }
+                            _ => {}
                         }
-                        _ => {}
                     }
                 }
             }
         }
-    }
 
-    // Countdown complete — light up "Yes" option (3 lines up)
-    print!("\x1b[3A\r  {TEAL}1{R} Yes\x1b[3B");
-    print!("\r  {DIM}Press 1 or 2:{R}              ");
-    io::stdout().flush()?;
+        // Countdown complete — light up "Yes" option (3 lines up)
+        print!("\x1b[3A\r  {TEAL}1{R} Yes\x1b[3B");
+        print!("\r  {DIM}Press 1 or 2:{R}              ");
+        io::stdout().flush()?;
 
-    let result = loop {
-        if let Event::Key(key) = event::read()? {
-            if key.kind != KeyEventKind::Press {
-                continue;
-            }
-            match key.code {
-                KeyCode::Char('1') | KeyCode::Char('y') | KeyCode::Char('Y') => break true,
-                KeyCode::Char('2') | KeyCode::Char('n') | KeyCode::Char('N')
-                | KeyCode::Esc => break false,
-                _ => {}
+        loop {
+            if let Event::Key(key) = event::read()? {
+                if key.kind != KeyEventKind::Press {
+                    continue;
+                }
+                match key.code {
+                    KeyCode::Char('1') | KeyCode::Char('y') | KeyCode::Char('Y') => return Ok(true),
+                    KeyCode::Char('2') | KeyCode::Char('n') | KeyCode::Char('N')
+                    | KeyCode::Esc => return Ok(false),
+                    _ => {}
+                }
             }
         }
-    };
+    })();
     terminal::disable_raw_mode()?;
+    let result = result?;
 
     if result {
         println!("\r  {GREEN}Yes{R}                        ");
     } else {
-        println!("\r  {DIM}No{R}                          ");
+        print!("\r  {DIM}No{R}                          ");
+        println!("\n");
     }
     println!();
 
@@ -558,4 +561,71 @@ fn clear_lines(count: usize) -> io::Result<()> {
     let mut out = io::stdout();
     clear_up(&mut out, count)?;
     out.flush()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── is_valid_color (M8) ──
+
+    #[test]
+    fn valid_color_accepts_hex() {
+        assert!(is_valid_color("#FF6B6B"));
+        assert!(is_valid_color("#000000"));
+        assert!(is_valid_color("#ffffff"));
+        assert!(is_valid_color("#4ECDC4"));
+    }
+
+    #[test]
+    fn valid_color_rejects_bad_format() {
+        assert!(!is_valid_color("FF6B6B"));    // no #
+        assert!(!is_valid_color("#FF6B6"));     // too short
+        assert!(!is_valid_color("#FF6B6B1"));   // too long
+        assert!(!is_valid_color("#GGGGGG"));    // not hex
+        assert!(!is_valid_color(""));           // empty
+        assert!(!is_valid_color("#"));           // just hash
+        assert!(!is_valid_color("red"));         // named color
+    }
+
+    // ── is_agent_color (M8) ──
+
+    #[test]
+    fn agent_color_blocks_cyan() {
+        assert!(is_agent_color("#00FFFF"));    // exact cyan
+        assert!(is_agent_color("#00E0FF"));    // close to cyan
+        assert!(is_agent_color("#30F0F0"));    // R=48, G=240, B=240 → blocked
+    }
+
+    #[test]
+    fn agent_color_allows_other_colors() {
+        assert!(!is_agent_color("#FF0000"));   // red
+        assert!(!is_agent_color("#00FF00"));   // green (high G, low B... actually B is 0)
+        assert!(!is_agent_color("#0000FF"));   // blue
+        assert!(!is_agent_color("#FFFFFF"));   // white
+        assert!(!is_agent_color("#4ECDC4"));   // teal (R=78 > 60)
+    }
+
+    #[test]
+    fn agent_color_rejects_invalid_format() {
+        assert!(!is_agent_color("not-a-color"));
+        assert!(!is_agent_color(""));
+    }
+
+    // ── is_reserved_name ──
+
+    #[test]
+    fn reserved_names_blocked() {
+        assert!(is_reserved_name("agent"));
+        assert!(is_reserved_name("Claude"));
+        assert!(is_reserved_name("SYSTEM"));
+        assert!(is_reserved_name("Bot"));
+    }
+
+    #[test]
+    fn normal_names_allowed() {
+        assert!(!is_reserved_name("Alice"));
+        assert!(!is_reserved_name("harry"));
+        assert!(!is_reserved_name("developer123"));
+    }
 }
