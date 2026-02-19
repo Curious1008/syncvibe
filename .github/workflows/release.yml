@@ -119,7 +119,61 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          generate_release_notes: false
+          body: |
+            ## Install
+
+            ```bash
+            curl -fsSL https://syncvibe.online/install.sh | sh
+            ```
+
+            ## What's New
+
+            ### Screen Sharing
+            - `/share` — toggle sharing your agent pane with teammates
+            - `/watch <name>` — view a teammate's shared agent screen in real time
+            - Delta-encoded frames over WebSocket for efficient bandwidth
+
+            ### New Slash Commands
+            - `/new` (`/n`) — create a new room without leaving TUI
+            - `/join` (`/j`) — join with invite code from within TUI
+            - `/chats` — switch between rooms
+            - `/leave` — leave current room with cleanup
+
+            ### @Mention Improvements
+            - Tab + Enter completion for @mentions
+            - AI agents appear in autocomplete alongside teammates
+            - `@agent` sends tasks directly to your AI agent pane
+
+            ### Toast Notifications
+            - Status bar toast system for non-intrusive notifications
+            - Agent connection events shown as toasts instead of chat messages
+
+            ### UX Improvements
+            - Community prompt (GitHub + Discord) shown once on 2nd room creation
+            - Invite code retry loop — invalid codes no longer crash the process
+            - Room name validation with retry on invalid characters
+            - File paths (drag-and-drop) no longer treated as slash commands
+            - One-time "did you know?" tips rotating in the status bar
+
+            ### Security
+            - CSRF nonce for OAuth authorization flow
+            - Panic hook for graceful error recovery
+            - Room secrets use 0600 permissions
+
+            ### Bug Fixes
+            - Fix key bridge thread stealing stdin during prompt flows
+            - Fix initial load showing "connected" messages in chat
+            - Fix agent not appearing in @mention autocomplete
+
+            ## Platforms
+            | File | Platform |
+            |------|----------|
+            | `syncvibe-darwin-universal.tar.gz` | macOS (Apple Silicon + Intel) |
+            | `syncvibe-aarch64-apple-darwin.tar.gz` | macOS Apple Silicon |
+            | `syncvibe-x86_64-apple-darwin.tar.gz` | macOS Intel |
+            | `syncvibe-x86_64-unknown-linux-gnu.tar.gz` | Linux x86_64 |
+            | `syncvibe-aarch64-unknown-linux-gnu.tar.gz` | Linux ARM64 |
           files: |
             syncvibe-aarch64-apple-darwin.tar.gz
             syncvibe-x86_64-apple-darwin.tar.gz
