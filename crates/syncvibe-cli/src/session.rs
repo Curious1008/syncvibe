@@ -74,7 +74,14 @@ pub fn cmd_session() -> Result<()> {
             if onboarding::confirm(
                 &format!("  {TEAL}◆{R} Found invite code in clipboard — join this room?"),
             )? {
-                let mut room = crate::invite::resolve_short_invite(trimmed)?;
+                let mut room = match crate::invite::resolve_short_invite(trimmed) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        println!("  {RED}✗{R} Invalid invite code in clipboard: {e}\n");
+                        // Fall through to normal menu
+                        return cmd_session();
+                    }
+                };
                 let name = room.room_name.clone().unwrap_or_else(|| "syncvibe-room".to_string());
                 println!("  {GREEN}✓{R} Code accepted — {B}{name}{R}\n");
                 let proj = init::projects_dir().join(&name);
@@ -158,11 +165,24 @@ pub fn cmd_session() -> Result<()> {
                 init::perform_init(&path, Some(room))?;
                 tmux::launch_project(&path)
             } else {
-                // Join with invite code
-                let code = onboarding::prompt(
-                    &format!("  {TEAL}Invite code:{R} "),
-                )?;
-                let mut room = crate::invite::resolve_short_invite(&code)?;
+                // Join with invite code — retry on invalid codes
+                println!("");
+                let mut room = loop {
+                    let code = onboarding::prompt(
+                        &format!("  {TEAL}Invite code:{R} "),
+                    )?;
+                    if code.is_empty() {
+                        anyhow::bail!("Cancelled.");
+                    }
+                    match crate::invite::resolve_short_invite(&code) {
+                        Ok(r) => break r,
+                        Err(e) => {
+                            println!("  {RED}✗{R} Invalid invite code: {e}");
+                            println!("  {DIM}Press Enter with no input to go back.{R}\n");
+                            continue;
+                        }
+                    }
+                };
                 let raw_name = room.room_name.clone().unwrap_or_else(|| "syncvibe-room".to_string());
                 let name = onboarding::sanitize_name(&raw_name);
                 let name = if name.is_empty() { "syncvibe-room".to_string() } else { name };

@@ -1575,21 +1575,23 @@ fn handle_join_project() -> bool {
     onboarding::print_section("Join Room");
     println!();
     maybe_show_community();
-    let code = match onboarding::prompt(
-        &format!("  {TEAL}Invite code:{R} "),
-    ) {
-        Ok(c) if !c.is_empty() => c,
-        _ => {
-            println!("  {DIM}Cancelled.{R}");
-            return false;
-        }
-    };
-
-    let mut room = match crate::invite::resolve_short_invite(&code) {
-        Ok(r) => r,
-        Err(e) => {
-            println!("  {RED}✗{R} Invalid invite code: {e}");
-            return false;
+    let mut room = loop {
+        let code = match onboarding::prompt(
+            &format!("  {TEAL}Invite code:{R} "),
+        ) {
+            Ok(c) if !c.is_empty() => c,
+            _ => {
+                println!("  {DIM}Cancelled.{R}");
+                return false;
+            }
+        };
+        match crate::invite::resolve_short_invite(&code) {
+            Ok(r) => break r,
+            Err(e) => {
+                println!("  {RED}✗{R} Invalid invite code: {e}");
+                println!("  {DIM}Press Enter with no input to go back.{R}\n");
+                continue;
+            }
         }
     };
 
