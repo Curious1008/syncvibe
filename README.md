@@ -1,29 +1,19 @@
 # SyncVibe
 
-**Terminal-native coordination for vibe coding teams. Zero AI costs.**
+**Terminal-native collaboration for vibe coding teams. Zero AI costs.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux-lightgrey.svg)]()
 [![Website](https://img.shields.io/badge/Web-syncvibe.online-teal.svg)](https://syncvibe.online)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2.svg?logo=discord&logoColor=white)](https://discord.gg/Nb3wkCBZ55)
 
-SyncVibe is a real-time terminal chat and coordination layer for teams doing vibe coding with AI agents. It connects teammates and their AI agents (Claude Code, Codex, or any MCP-compatible agent) in a shared chat room — without making a single LLM API call.
+SyncVibe connects teammates and their AI agents (Claude Code, Codex, or any MCP-compatible agent) in a shared terminal chat room — real-time coordination without a single LLM API call.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      tmux session                           │
-│  ┌────────────────────┐     ┌────────────────────────────┐  │
-│  │  SyncVibe Chat     │     │  AI Agent (Claude/Codex)   │  │
-│  │  (30%)             │     │  (70%)                     │  │
-│  │                    │     │                            │  │
-│  │  @alice refactor   │     │  I've read the team chat   │  │
-│  │  the auth module   │────►│  — you agreed on splitting │  │
-│  │                    │     │  auth into middleware...    │  │
-│  │  @bob sounds good  │     │                            │  │
-│  └────────────────────┘     └────────────────────────────┘  │
-│                     Ctrl+G to switch                        │
-└─────────────────────────────────────────────────────────────┘
-```
+<p align="center">
+  <img src="assets/demo.png" alt="SyncVibe — Alice and Harry collaborating with Codex AI agent" width="900">
+</p>
+
+> *Left: shared chat between teammates + AI agents. Right: Codex reading the chat via MCP and executing a task autonomously.*
 
 ---
 
@@ -33,7 +23,7 @@ SyncVibe is a real-time terminal chat and coordination layer for teams doing vib
 curl -fsSL https://syncvibe.online/install.sh | sh
 ```
 
-Supports **macOS** (universal) and **Linux** (x86_64, aarch64). Requires `tmux`.
+Supports **macOS** (Apple Silicon + Intel) and **Linux** (x86_64, aarch64). Requires `tmux`.
 
 ---
 
@@ -45,61 +35,81 @@ Supports **macOS** (universal) and **Linux** (x86_64, aarch64). Requires `tmux`.
 syncvibe
 ```
 
-Follow the interactive onboarding — set your name, pick an AI agent, and create a room.
+Interactive onboarding — pick your name, choose an AI agent (Claude or Codex), and create a room.
 
-**2. Share the invite**
+**2. Invite your team**
 
-```bash
-syncvibe invite
-```
+Type `/invite` in the TUI — a short code like `HKPT-3NWV` is copied to your clipboard. Send it to teammates.
 
-Generates a short invite code (e.g. `HKPT-3NWV`) — send it to your team.
-
-**3. Collaborate**
+**3. Teammate joins**
 
 ```bash
-syncvibe
-# Paste the invite code when prompted
+syncvibe connect HKPT-3NWV
 ```
 
-Teammates join the room, chat syncs in real time, and the AI agent auto-configures via MCP.
+Chat syncs in real time. The AI agent auto-configures via MCP — no manual setup needed.
+
+---
+
+## How It Works
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  tmux session                                                    │
+│  ┌─────────────────────┐     ┌────────────────────────────────┐  │
+│  │  SyncVibe Chat (30%)│     │  AI Agent — Claude/Codex (70%) │  │
+│  │                     │     │                                │  │
+│  │  Alice: red theme?  │     │  Reading team chat via MCP...  │  │
+│  │  Harry: @codex make │────►│  ⚡ Task: make a calculator    │  │
+│  │    a calculator     │     │  Creating index.html...        │  │
+│  │  Codex: Done ✓      │◄────│  Done — reporting to chat      │  │
+│  └─────────────────────┘     └────────────────────────────────┘  │
+│                     Ctrl+G to switch                              │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**Data flow:**
+- **Human ↔ Human:** TUI → WebSocket relay → other TUI
+- **Human → Agent:** `@codex` message → agent reads via MCP `read_chat`
+- **Agent → Human:** agent calls MCP `send_chat` → appears in chat
+
+All state lives locally in `.syncvibe/`. The relay only handles real-time sync — no messages are stored server-side.
 
 ---
 
 ## Features
 
 ### Real-time Chat
-- Terminal TUI with live presence indicators
+- Live presence indicators — see who's online
 - @mention with tab completion and bell notifications
 - Image sharing (drag file paths into chat)
-- Message grouping by user, chat history with scroll-back
+- Message grouping, chat history with scroll-back
 
 ### AI Agent Integration
-- **Zero config** — pick Claude Code or Codex from a menu; SyncVibe wires up `.mcp.json`, `CLAUDE.md`, and hooks automatically
-- **MCP `read_chat` tool** — agents read the team discussion with smart incremental filtering, session scoping, and digest offloading for large conversations
-- **@agent** — send tasks to your AI agent directly from chat, no pane switching needed
+- **Pick Claude Code or Codex** from a menu — SyncVibe auto-configures `.mcp.json` (Claude) and `.codex/config.toml` (Codex)
+- **MCP tools** — `read_chat` with smart incremental filtering, session scoping, and digest offloading; `send_chat` for agent-to-human messages
+- **@agent** — send tasks to your AI directly from chat
 - Each teammate picks their own agent; all agents share the same chat context
 
 ### Screen Sharing
 - `/share` — toggle sharing your agent pane with teammates
-- `/watch <name>` — view a teammate's shared agent screen in real time
-- Delta-encoded frames over WebSocket for efficient bandwidth
+- `/watch <name>` — view a teammate's agent screen in real time
+- Delta-encoded frames for efficient bandwidth
 
 ### Invite Codes
 - Short codes (`HKPT-3NWV`) auto-copied to clipboard
 - Paste to join — one step, no URLs or config files
-- Clipboard auto-detection: if an invite code is on your clipboard, SyncVibe asks to join on launch
+- Clipboard auto-detection on launch
 
-### tmux Integration
-- Auto-creates split layout: SyncVibe Chat (30%) | AI Agent (70%)
+### tmux Layout
+- Auto-creates split: Chat (30%) | AI Agent (70%)
 - `Ctrl+G` to switch between panes
-- Styled pane borders and status bar
-- Project switching between tmux sessions via `/chats`
+- Styled borders and status bar
+- `/chats` to switch between room sessions
 
 ### Zero AI Costs
 - Pure coordination layer — no LLM API calls, no token costs
 - All AI costs stay with whatever agent each person already uses
-- Local-first: all state lives in `.syncvibe/`, WebSocket relay is for real-time sync only
 
 ---
 
@@ -109,133 +119,79 @@ Teammates join the room, chat syncs in real time, and the AI agent auto-configur
 
 | Command | Description |
 |---------|-------------|
-| `syncvibe` | Launch interactive mode — create/join rooms, open TUI |
-| `syncvibe invite` | Generate an invite code for the current room |
+| `syncvibe` | Launch — create/join rooms, open TUI |
+| `syncvibe invite` | Show invite code for current room |
 | `syncvibe connect <code>` | Join a room with an invite code |
-| `syncvibe profile` | Edit your display name and color |
-| `syncvibe auth` | Authenticate CLI with your SyncVibe web account |
-| `syncvibe status` | Show current room status |
-| `syncvibe switch` | Switch between SyncVibe rooms |
-| `syncvibe leave` | Leave the current room |
+| `syncvibe profile` | Edit display name and color |
+| `syncvibe auth` | Link CLI with your SyncVibe web account |
+| `syncvibe status` | Show current room info |
+| `syncvibe switch` | Switch between rooms |
+| `syncvibe leave` | Leave current room |
 
 ### TUI Slash Commands
 
 | Command | Alias | Description |
 |---------|-------|-------------|
 | `/help` | `/?` | Show all commands |
-| `/invite` | `/i` | Show room invite code |
+| `/invite` | `/i` | Copy invite code |
 | `/new` | `/n` | Create a new room |
 | `/join` | `/j` | Join with invite code |
 | `/chats` | | Switch between rooms |
 | `/share` | | Toggle agent screen sharing |
-| `/watch` | | View a teammate's shared screen |
+| `/watch <name>` | | Watch a teammate's screen |
 | `/name <n>` | | Change display name |
-| `/color <#hex>` | | Change your color |
+| `/color <#hex>` | | Change color |
 | `/mute` | `/m` | Toggle @mention bell |
 | `/clear` | | Clear chat view |
 | `/rc` | | Reconnect to relay |
-| `/leave` | | Leave current room |
-| `/quit` | `/q` | Exit SyncVibe |
+| `/leave` | | Leave room |
+| `/quit` | `/q` | Exit |
 
 ### Keyboard Shortcuts
 
 | Key | Action |
 |-----|--------|
-| `Ctrl+G` | Switch between Chat and Agent pane |
-| `Tab` | Autocomplete @mentions and slash commands |
-| `↑` / `↓` | Navigate autocomplete suggestions |
-| `Enter` | Send message or confirm autocomplete |
+| `Ctrl+G` | Switch Chat ↔ Agent pane |
+| `Tab` | Autocomplete @mentions and commands |
+| `↑` / `↓` | Navigate autocomplete |
+| `Enter` | Send message |
 | `PageUp` / `PageDown` | Scroll chat history |
 
 ---
 
-## How It Works
+## MCP Integration
 
-### MCP Integration
+[Model Context Protocol (MCP)](https://modelcontextprotocol.io/) lets AI agents interact with external tools. SyncVibe uses MCP to give agents access to the team chat.
 
-[Model Context Protocol (MCP)](https://modelcontextprotocol.io/) is an open standard that lets AI agents interact with external tools. SyncVibe uses MCP to give agents read access to the team chat.
+Room setup auto-generates:
 
-When you create or join a room, SyncVibe automatically:
-
-1. **`.mcp.json`** — registers the SyncVibe MCP server with your AI agent
-2. **`CLAUDE.md`** — instructs the agent to call `read_chat` before any task
-3. **`.claude/settings.json`** — configures hooks to notify the TUI when the agent modifies files
+| File | Purpose |
+|------|---------|
+| `.mcp.json` | MCP server config for Claude Code |
+| `.codex/config.toml` | MCP server config for Codex CLI |
+| `CLAUDE.md` | Instructs Claude to use chat tools |
+| `AGENTS.md` | Instructs Codex/other agents to use chat tools |
 
 | MCP Tool | Description |
 |----------|-------------|
-| `read_chat` | Smart incremental read with session scoping, time filtering, and digest offloading for large conversations |
-
-The agent sends messages by appending to `.syncvibe/chat-log.jsonl` directly — no MCP tool needed.
-
-### Data Flow
-
-```
-Human ↔ Human:   TUI → .syncvibe/ → WebSocket relay → Other TUI
-Human → Agent:   TUI → .syncvibe/ → Agent reads via MCP read_chat
-Agent → Human:   Agent appends to .syncvibe/ → Hook → TUI re-renders
-Agent ↔ Agent:   Agent A writes → Agent B reads (incremental)
-```
-
-### Local-First Architecture
-
-All state lives in `.syncvibe/` inside your project:
-
-```
-.syncvibe/
-├── room.json            # Room config (room_id, room_secret, relay_url)
-├── chat-log.jsonl       # Append-only chat log, one JSON per line
-├── chat-digest.md       # Auto-generated summary for large conversations
-└── images/              # Shared images (UUID-named)
-```
-
-`.syncvibe/` is gitignored. The WebSocket relay provides real-time sync; local files are the source of truth.
+| `read_chat` | Incremental read with session scoping, time filtering, @agent task extraction, and digest offloading |
+| `send_chat` | Send a message to the shared chat as the AI agent |
 
 ---
 
-## Project Structure
+## Local-First Architecture
+
+All room state lives in `.syncvibe/` inside your project:
 
 ```
-syncvibe/
-├── Cargo.toml                     # Workspace root
-├── crates/
-│   ├── syncvibe-cli/              # Main binary
-│   │   └── src/
-│   │       ├── main.rs            # Entry point + clap dispatch
-│   │       ├── app.rs             # TUI event loop + slash commands
-│   │       ├── session.rs         # Interactive onboarding
-│   │       ├── init.rs            # Room init (.syncvibe/, .mcp.json, CLAUDE.md)
-│   │       ├── tmux.rs            # tmux session management + layout
-│   │       ├── cli.rs             # Clap command definitions
-│   │       ├── config.rs          # ~/.syncvibe/ config + project registry
-│   │       ├── onboarding.rs      # Interactive prompts + validation
-│   │       ├── invite.rs          # Invite code generation + resolution
-│   │       ├── auth.rs            # CLI ↔ web authentication
-│   │       ├── agents.rs          # AI agent selection
-│   │       ├── picker.rs          # Room switcher (ratatui)
-│   │       ├── sync.rs            # File sync utilities
-│   │       ├── tui.rs             # Terminal setup/teardown
-│   │       ├── components/        # TUI rendering (ratatui)
-│   │       │   ├── status_bar.rs  # Presence bar + toast notifications
-│   │       │   ├── chat.rs        # Chat message display
-│   │       │   ├── input.rs       # Input bar with cursor + autocomplete
-│   │       │   └── util.rs        # Color parsing helpers
-│   │       ├── network/
-│   │       │   └── ws_client.rs   # WebSocket client (tokio-tungstenite)
-│   │       ├── mcp/
-│   │       │   └── server.rs      # MCP server: read_chat
-│   │       └── git/
-│   │           └── ops.rs         # Git repo name detection
-│   │
-│   └── syncvibe-core/             # Shared library
-│       └── src/
-│           ├── lib.rs
-│           ├── error.rs           # Error types
-│           ├── models/            # Data types (chat, room, user)
-│           ├── protocol.rs        # WebSocket message types
-│           └── storage.rs         # File I/O (atomic writes, locking)
-│
-└── install.sh                     # One-line installer script
+.syncvibe/
+├── room.json          # Room identity (room_id, secret, relay_url)
+├── chat-log.jsonl     # Append-only chat, one JSON per line
+├── chat-digest.md     # Auto-generated digest for large conversations
+└── images/            # Shared images (UUID-named)
 ```
+
+`.syncvibe/` is gitignored. The WebSocket relay provides real-time sync only — no messages stored server-side.
 
 ---
 
@@ -253,6 +209,39 @@ cargo build --release
 - Rust 1.75+
 - tmux 3.0+
 
+### Tests
+
+```bash
+cargo test                    # Unit + integration tests (88 tests)
+cargo test -- --ignored       # Include relay deployment tests
+```
+
+---
+
+## Project Structure
+
+```
+syncvibe/
+├── crates/
+│   ├── syncvibe-cli/           # TUI binary
+│   │   └── src/
+│   │       ├── app.rs          # Event loop + slash commands
+│   │       ├── session.rs      # Interactive onboarding
+│   │       ├── init.rs         # Room init (MCP, CLAUDE.md, .codex/)
+│   │       ├── tmux.rs         # tmux session management
+│   │       ├── mcp/server.rs   # MCP server: read_chat, send_chat
+│   │       ├── network/        # WebSocket client
+│   │       └── components/     # TUI rendering (ratatui)
+│   │
+│   └── syncvibe-core/          # Shared library
+│       └── src/
+│           ├── protocol.rs     # WebSocket message types
+│           ├── storage.rs      # Atomic file I/O
+│           └── models/         # Chat, room, user types
+│
+└── install.sh                  # One-line installer
+```
+
 ---
 
 ## Contributing
@@ -262,7 +251,7 @@ Contributions welcome!
 1. Fork the repo
 2. Create a feature branch (`git checkout -b feature/amazing`)
 3. Commit your changes
-4. Push and open a Pull Request
+4. Open a Pull Request
 
 ---
 
