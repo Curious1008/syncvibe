@@ -122,7 +122,9 @@ pub struct ScreenFrameState {
 impl AppState {
     pub fn new(storage: Storage, user: UserConfig) -> Result<Self> {
         let mut all_msgs = match storage.read_chat_messages() {
-            Ok(msgs) => msgs,
+            Ok(msgs) => msgs.into_iter()
+                .filter(|m| !(m.message_type == MessageType::System && m.content.ends_with(" connected")))
+                .collect(),
             Err(e) => {
                 eprintln!("Warning: Failed to load chat history: {}", e);
                 Vec::new()
