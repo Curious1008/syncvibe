@@ -119,7 +119,6 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: false
           generate_release_notes: true
           files: |
             syncvibe-aarch64-apple-darwin.tar.gz
@@ -148,9 +147,9 @@ jobs:
       - name: Update formula
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          SHA_DARWIN=$(shasum -a 256 syncvibe-darwin-universal.tar.gz | cut -d ' ' -f1)
-          SHA_LINUX_X86=$(shasum -a 256 syncvibe-x86_64-unknown-linux-gnu.tar.gz | cut -d ' ' -f1)
-          SHA_LINUX_ARM=$(shasum -a 256 syncvibe-aarch64-unknown-linux-gnu.tar.gz | cut -d ' ' -f1)
+          SHA_DARWIN=$(sha256sum syncvibe-darwin-universal.tar.gz | cut -d ' ' -f1)
+          SHA_LINUX_X86=$(sha256sum syncvibe-x86_64-unknown-linux-gnu.tar.gz | cut -d ' ' -f1)
+          SHA_LINUX_ARM=$(sha256sum syncvibe-aarch64-unknown-linux-gnu.tar.gz | cut -d ' ' -f1)
 
           cat > Formula/syncvibe.rb << FORMULA
           class Syncvibe < Formula
