@@ -4,6 +4,7 @@ use anyhow::Result;
 
 use crate::agents;
 use crate::config;
+use crate::onboarding::{self, GREEN, R, RED, TEAL, DIM, YELLOW};
 
 /// Generate a unique tmux session name from project name + full path hash.
 /// Prevents collisions between projects with the same folder basename.
@@ -25,6 +26,75 @@ pub fn session_name_for(project_name: &str, project_path: &str) -> String {
         safe_name
     };
     format!("sv-{}-{:08x}", safe_name, hash as u32)
+}
+
+/// Attempt to install tmux, prompting the user first.
+/// Returns Ok(true) if tmux was installed, Ok(false) if user declined.
+fn try_install_tmux() -> Result<bool> {
+    // Detect which package manager is available
+    let (pkg_mgr, install_cmd): (&str, Vec<&str>) = if cfg!(target_os = "macos") {
+        if command_exists("brew") {
+            ("Homebrew", vec!["brew", "install", "tmux"])
+        } else {
+            println!("\n  {YELLOW}!{R} tmux is required for the split terminal layout.");
+            println!("  {DIM}Install Homebrew first: https://brew.sh{R}");
+            println!("  {DIM}Then run: brew install tmux{R}\n");
+            println!("  {DIM}Continuing without split layout...{R}\n");
+            return Ok(false);
+        }
+    } else {
+        // Linux
+        if command_exists("apt-get") {
+            ("apt", vec!["sudo", "apt-get", "install", "-y", "tmux"])
+        } else if command_exists("dnf") {
+            ("dnf", vec!["sudo", "dnf", "install", "-y", "tmux"])
+        } else if command_exists("pacman") {
+            ("pacman", vec!["sudo", "pacman", "-S", "--noconfirm", "tmux"])
+        } else if command_exists("brew") {
+            ("Homebrew", vec!["brew", "install", "tmux"])
+        } else {
+            println!("\n  {YELLOW}!{R} tmux is required for the split terminal layout.");
+            println!("  {DIM}Please install tmux manually and try again.{R}\n");
+            println!("  {DIM}Continuing without split layout...{R}\n");
+            return Ok(false);
+        }
+    };
+
+    println!("\n  {TEAL}◆{R} tmux enables the split terminal layout (chat + AI agent side by side).");
+    if !onboarding::confirm(&format!("  {TEAL}◆{R} Install tmux via {pkg_mgr}?"))? {
+        println!("  {DIM}Continuing without split layout...{R}\n");
+        return Ok(false);
+    }
+
+    println!("  {DIM}Installing tmux...{R}");
+    let status = std::process::Command::new(install_cmd[0])
+        .args(&install_cmd[1..])
+        .status();
+
+    match status {
+        Ok(s) if s.success() => {
+            println!("  {GREEN}✓{R} tmux installed successfully!\n");
+            Ok(true)
+        }
+        Ok(s) => {
+            println!("  {RED}✗{R} tmux installation failed (exit code: {:?})", s.code());
+            println!("  {DIM}Continuing without split layout...{R}\n");
+            Ok(false)
+        }
+        Err(e) => {
+            println!("  {RED}✗{R} Failed to run installer: {e}");
+            println!("  {DIM}Continuing without split layout...{R}\n");
+            Ok(false)
+        }
+    }
+}
+
+fn command_exists(cmd: &str) -> bool {
+    std::process::Command::new("which")
+        .arg(cmd)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 /// Register project and launch TUI (tmux or standalone)
@@ -61,10 +131,14 @@ pub fn launch_project(project_path: &std::path::Path) -> Result<()> {
         .unwrap_or(false);
 
     if !tmux_available {
-        // No tmux — run TUI inline in the current terminal
-        env::set_current_dir(project_path)?;
-        let rt = tokio::runtime::Runtime::new()?;
-        return rt.block_on(crate::app::run());
+        if try_install_tmux()? {
+            // tmux installed successfully — continue with normal flow
+        } else {
+            // User declined — run TUI inline in the current terminal
+            env::set_current_dir(project_path)?;
+            let rt = tokio::runtime::Runtime::new()?;
+            return rt.block_on(crate::app::run());
+        }
     }
 
     launch_or_attach_with_agent(

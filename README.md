@@ -19,11 +19,20 @@ SyncVibe connects teammates and their AI agents (Claude Code, Codex, or any MCP-
 
 ## Install
 
+**macOS** (recommended):
+
+```bash
+brew tap curious1008/syncvibe
+brew install syncvibe
+```
+
+**Linux:**
+
 ```bash
 curl -fsSL https://syncvibe.online/install.sh | sh
 ```
 
-Supports **macOS** (Apple Silicon + Intel) and **Linux** (x86_64, aarch64). Requires `tmux`.
+Supports **macOS** (Apple Silicon + Intel) and **Linux** (x86_64, aarch64).
 
 ---
 
@@ -55,7 +64,7 @@ Chat syncs in real time. The AI agent auto-configures via MCP — no manual setu
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│  tmux session                                                    │
+│  Split Terminal                                                   │
 │  ┌─────────────────────┐     ┌────────────────────────────────┐  │
 │  │  SyncVibe Chat (30%)│     │  AI Agent — Claude/Codex (70%) │  │
 │  │                     │     │                                │  │
@@ -101,8 +110,8 @@ All state lives locally in `.syncvibe/`. The relay only handles real-time sync �
 - Paste to join — one step, no URLs or config files
 - Clipboard auto-detection on launch
 
-### tmux Layout
-- Auto-creates split: Chat (30%) | AI Agent (70%)
+### Split Terminal
+- Auto-creates side-by-side layout: Chat (30%) | AI Agent (70%)
 - `Ctrl+G` to switch between panes
 - Styled borders and status bar
 - `/chats` to switch between room sessions
@@ -207,7 +216,7 @@ cargo build --release
 ### Requirements
 
 - Rust 1.75+
-- tmux 3.0+
+- tmux 3.0+ (auto-installed on first run if missing)
 
 ### Tests
 
