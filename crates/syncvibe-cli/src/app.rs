@@ -109,6 +109,13 @@ pub struct AppState {
     // Toast notification queue + active display
     toast_queue: Vec<(String, bool)>, // (text, is_error) — accumulated during event
     pub active_toast: Option<(String, bool, std::time::Instant)>, // (text, is_error, expire_at)
+
+    // Cached line counts for chat rendering (keyed by msg id, valid for a given terminal width)
+    pub line_count_cache: std::collections::HashMap<String, usize>,
+    pub line_count_cache_width: usize,
+
+    // Message ID set for O(1) deduplication
+    msg_id_set: std::collections::HashSet<String>,
 }
 
 /// Full-screen buffer from a remote sharer
@@ -145,6 +152,8 @@ impl AppState {
         let split_at = all_msgs.len().saturating_sub(INITIAL_DISPLAY);
         let older_messages = all_msgs[..split_at].to_vec();
         let chat_messages = all_msgs[split_at..].to_vec();
+        let msg_id_set: std::collections::HashSet<String> =
+            chat_messages.iter().map(|m| m.id.clone()).collect();
         let project_name = crate::git::ops::repo_name().unwrap_or_else(|_| "project".to_string());
 
         // Read local agent from room config
@@ -194,6 +203,9 @@ impl AppState {
             watching_pane_id: None,
             toast_queue: Vec::new(),
             active_toast: None,
+            line_count_cache: std::collections::HashMap::new(),
+            line_count_cache_width: 0,
+            msg_id_set,
         })
     }
 
@@ -207,16 +219,18 @@ impl AppState {
                 self.disk_msg_count += new_msgs.len();
                 // Deduplicate: skip messages already in memory (e.g. received via WebSocket)
                 for msg in new_msgs {
-                    if !self.chat_messages.iter().any(|m| m.id == msg.id) {
-                        // Convert agent connection system messages to toasts
-                        if msg.message_type == MessageType::System
-                            && msg.content.ends_with(" connected")
-                        {
-                            self.toast(&msg.content);
-                            continue;
-                        }
-                        self.chat_messages.push(msg);
+                    if self.msg_id_set.contains(&msg.id) {
+                        continue;
                     }
+                    // Convert agent connection system messages to toasts
+                    if msg.message_type == MessageType::System
+                        && msg.content.ends_with(" connected")
+                    {
+                        self.toast(&msg.content);
+                        continue;
+                    }
+                    self.msg_id_set.insert(msg.id.clone());
+                    self.chat_messages.push(msg);
                 }
                 // Cap to prevent unbounded growth
                 if self.chat_messages.len() > MAX_DISPLAY_MESSAGES {
@@ -740,6 +754,7 @@ impl AppState {
 
         self.storage.append_chat_message(&msg)?;
         self.disk_msg_count += 1;
+        self.msg_id_set.insert(msg.id.clone());
         self.chat_messages.push(msg.clone());
         self.input_buffer.clear();
         self.input_cursor = 0;
@@ -1215,7 +1230,7 @@ pub async fn run() -> Result<()> {
     // Main event loop — fully async, no blocking
     loop {
         // Draw before waiting for next event — guarantees every state change is visible
-        if terminal.draw(|frame| draw_ui(frame, &state)).is_err() {
+        if terminal.draw(|frame| draw_ui(frame, &mut state)).is_err() {
             break;
         }
 
@@ -1940,6 +1955,7 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
             }
             let _ = state.storage.append_chat_message(&msg);
             state.disk_msg_count += 1;
+            state.msg_id_set.insert(msg.id.clone());
             state.chat_messages.push(msg);
             // Cap to prevent unbounded growth
             if state.chat_messages.len() > MAX_DISPLAY_MESSAGES {
@@ -2367,7 +2383,7 @@ fn strip_ansi(s: &str) -> String {
     out
 }
 
-fn draw_ui(frame: &mut ratatui::Frame, state: &AppState) {
+fn draw_ui(frame: &mut ratatui::Frame, state: &mut AppState) {
     let area = frame.area();
 
     // Layout: status_bar (1) | chat (fill) | input (3)

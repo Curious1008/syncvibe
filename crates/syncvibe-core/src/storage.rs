@@ -111,6 +111,8 @@ impl Storage {
             return Ok(Vec::new());
         }
         let file = fs::File::open(&path)?;
+        // Acquire shared lock for consistent reads
+        let _ = file.try_lock_shared();
         let reader = std::io::BufReader::new(file);
         let mut messages = Vec::new();
         for line in reader.lines() {
@@ -135,6 +137,8 @@ impl Storage {
             return Ok((Vec::new(), 0));
         }
         let file = fs::File::open(&path)?;
+        // Acquire shared lock for consistent reads
+        let _ = file.try_lock_shared();
         let file_len = file.metadata()?.len();
         if offset >= file_len {
             return Ok((Vec::new(), file_len));

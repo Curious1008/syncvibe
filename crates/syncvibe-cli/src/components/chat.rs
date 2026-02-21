@@ -63,7 +63,7 @@ enum ChatLine {
     DateSep { label: String },
 }
 
-pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
+pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
     let is_focused = state.focus == Panel::Chat;
     let border_color = if is_focused {
         Color::Cyan
@@ -124,15 +124,23 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
         items.push(ChatLine::Message { idx: i });
     }
 
-    // Estimate line counts for each item.
-    // TODO(M23): estimate_lines is recalculated every frame. Consider caching
-    // line counts in AppState (keyed by message id + width), invalidating when
-    // the message list or terminal width changes.
+    // Invalidate line count cache if terminal width changed
+    if state.line_count_cache_width != inner_width {
+        state.line_count_cache.clear();
+        state.line_count_cache_width = inner_width;
+    }
+
+    // Estimate line counts, using cache for messages
     let line_counts: Vec<usize> = items
         .iter()
         .map(|item| match item {
             ChatLine::DateSep { .. } => 1,
-            ChatLine::Message { idx } => estimate_lines(&msgs[*idx], inner_width),
+            ChatLine::Message { idx } => {
+                let msg = &msgs[*idx];
+                *state.line_count_cache.entry(msg.id.clone()).or_insert_with(|| {
+                    estimate_lines(msg, inner_width)
+                })
+            }
         })
         .collect();
 
