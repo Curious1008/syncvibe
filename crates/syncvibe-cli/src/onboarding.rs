@@ -354,6 +354,7 @@ pub struct SetupItem {
 }
 
 /// Show an interactive checklist and return whether the user confirmed.
+/// All items are displayed — already-done items are shown grayed out.
 pub fn confirm_setup(items: &mut [SetupItem]) -> io::Result<bool> {
     let actionable: Vec<usize> = items
         .iter()
@@ -366,8 +367,8 @@ pub fn confirm_setup(items: &mut [SetupItem]) -> io::Result<bool> {
         return Ok(true);
     }
 
-    // Reserve screen space: items + 1 hover + 1 blank + 1 confirm + 2 (blank+hint)
-    reserve_lines(actionable.len() + 5)?;
+    // All items shown: actionable + done + 1 hover + 1 blank + 1 confirm + 2 (blank+hint)
+    reserve_lines(items.len() + 5)?;
 
     terminal::enable_raw_mode()?;
     let result = run_checklist(items, &actionable);
@@ -446,9 +447,26 @@ fn render_checklist(
     // Jump to absolute start position and clear everything below
     write!(out, "\x1b[{};1H\x1b[J", start_row + 1)?; // ANSI rows are 1-based
 
-    for (i, &idx) in actionable.iter().enumerate() {
-        let item = &items[idx];
-        let selected = i == cursor;
+    // Map actionable index → position in actionable list (for cursor matching)
+    let actionable_set: std::collections::HashMap<usize, usize> = actionable
+        .iter()
+        .enumerate()
+        .map(|(pos, &idx)| (idx, pos))
+        .collect();
+
+    for (idx, item) in items.iter().enumerate() {
+        if item.already_done {
+            // Show already-done items grayed out (not interactive)
+            write!(
+                out,
+                "    {DIM}[✓] {:<16} {}{R}\r\n",
+                item.file, item.description
+            )?;
+            continue;
+        }
+
+        let actionable_pos = actionable_set[&idx];
+        let selected = actionable_pos == cursor;
 
         // Arrow
         let arrow = if selected {

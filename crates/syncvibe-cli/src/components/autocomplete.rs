@@ -117,16 +117,8 @@ pub fn build_mentions(presence: &[PresenceInfo], self_id: &str) -> Vec<MentionIt
         }
     }
 
-    // Only show @agent if at least one agent is present
+    // Show specific agent mentions for agents in the room
     if !seen_agents.is_empty() {
-        items.push(MentionItem {
-            handle: "@agent".to_string(),
-            name: "agent".to_string(),
-            hint: "AI agent".to_string(),
-            color: Color::Cyan,
-        });
-
-        // Only show specific agent mentions for agents in the room
         for aid in &seen_agents {
             if let Some(agent) = agents::find(aid) {
                 items.push(MentionItem {

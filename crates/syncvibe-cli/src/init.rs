@@ -133,6 +133,9 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
     let claude_md_done = file_contains_syncvibe(&cwd.join("CLAUDE.md"));
     let agents_md_done = file_contains_syncvibe(&cwd.join("AGENTS.md"));
 
+    // Determine which agent was selected (if any)
+    let agent_id = room.as_ref().and_then(|r| r.agent.as_deref());
+
     let mut items = vec![
         SetupItem {
             file: ".syncvibe/".to_string(),
@@ -152,41 +155,86 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
             checked: true,
             already_done: gitignore_done || !has_git,
         },
-        SetupItem {
-            file: ".mcp.json".to_string(),
-            description: "Register MCP server for Claude Code".to_string(),
-            reason: "Lets Claude Code call read_chat/send_chat to collaborate with your team."
-                .to_string(),
-            required: false,
-            checked: true,
-            already_done: mcp_done,
-        },
-        SetupItem {
-            file: ".codex/config.toml".to_string(),
-            description: "Register MCP server for Codex CLI".to_string(),
-            reason: "Lets Codex call read_chat/send_chat to collaborate with your team."
-                .to_string(),
-            required: false,
-            checked: true,
-            already_done: codex_mcp_done,
-        },
-        SetupItem {
-            file: "CLAUDE.md".to_string(),
-            description: "SyncVibe hint for Claude Code".to_string(),
-            reason: "Minimal pointer so Claude knows MCP chat tools are available.".to_string(),
-            required: false,
-            checked: true,
-            already_done: claude_md_done,
-        },
-        SetupItem {
-            file: "AGENTS.md".to_string(),
-            description: "SyncVibe hint for Codex / other agents".to_string(),
-            reason: "Minimal pointer so Codex knows MCP chat tools are available.".to_string(),
-            required: false,
-            checked: true,
-            already_done: agents_md_done,
-        },
     ];
+
+    // Add agent-specific config files based on selected agent
+    match agent_id {
+        Some("claude") => {
+            items.push(SetupItem {
+                file: ".mcp.json".to_string(),
+                description: "Register MCP server for Claude Code".to_string(),
+                reason: "Lets Claude Code call read_chat/send_chat to collaborate with your team."
+                    .to_string(),
+                required: false,
+                checked: true,
+                already_done: mcp_done,
+            });
+            items.push(SetupItem {
+                file: "CLAUDE.md".to_string(),
+                description: "SyncVibe hint for Claude Code".to_string(),
+                reason: "Minimal pointer so Claude knows MCP chat tools are available.".to_string(),
+                required: false,
+                checked: true,
+                already_done: claude_md_done,
+            });
+        }
+        Some("codex") => {
+            items.push(SetupItem {
+                file: ".codex/config.toml".to_string(),
+                description: "Register MCP server for Codex CLI".to_string(),
+                reason: "Lets Codex call read_chat/send_chat to collaborate with your team."
+                    .to_string(),
+                required: false,
+                checked: true,
+                already_done: codex_mcp_done,
+            });
+            items.push(SetupItem {
+                file: "AGENTS.md".to_string(),
+                description: "SyncVibe hint for Codex".to_string(),
+                reason: "Minimal pointer so Codex knows MCP chat tools are available.".to_string(),
+                required: false,
+                checked: true,
+                already_done: agents_md_done,
+            });
+        }
+        _ => {
+            // No agent or unknown — show all options
+            items.push(SetupItem {
+                file: ".mcp.json".to_string(),
+                description: "Register MCP server for Claude Code".to_string(),
+                reason: "Lets Claude Code call read_chat/send_chat to collaborate with your team."
+                    .to_string(),
+                required: false,
+                checked: true,
+                already_done: mcp_done,
+            });
+            items.push(SetupItem {
+                file: ".codex/config.toml".to_string(),
+                description: "Register MCP server for Codex CLI".to_string(),
+                reason: "Lets Codex call read_chat/send_chat to collaborate with your team."
+                    .to_string(),
+                required: false,
+                checked: true,
+                already_done: codex_mcp_done,
+            });
+            items.push(SetupItem {
+                file: "CLAUDE.md".to_string(),
+                description: "SyncVibe hint for Claude Code".to_string(),
+                reason: "Minimal pointer so Claude knows MCP chat tools are available.".to_string(),
+                required: false,
+                checked: true,
+                already_done: claude_md_done,
+            });
+            items.push(SetupItem {
+                file: "AGENTS.md".to_string(),
+                description: "SyncVibe hint for Codex / other agents".to_string(),
+                reason: "Minimal pointer so Codex knows MCP chat tools are available.".to_string(),
+                required: false,
+                checked: true,
+                already_done: agents_md_done,
+            });
+        }
+    }
 
     // Check if there's anything to do
     let has_work = items.iter().any(|item| !item.already_done);

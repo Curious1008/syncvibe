@@ -25,7 +25,7 @@ struct AgentIdentity {
     user_id: String,
     user_name: String,
     user_color: String,
-    mentions: Vec<String>, // mentions this agent responds to (including @agent)
+    mentions: Vec<String>, // mentions this agent responds to (@claude, @codex, etc.)
 }
 
 /// Incremental read state — persists across calls within one MCP session
@@ -318,8 +318,8 @@ impl SyncVibeMcp {
             .and_then(|room| room.agent.as_deref().and_then(agents::find))
             .unwrap_or_else(agents::default);
 
-        // Build mentions list: @agent (universal) + agent-specific mentions
-        let mut mentions: Vec<String> = vec!["@agent".to_string()];
+        // Build mentions list from agent-specific mentions
+        let mut mentions: Vec<String> = Vec::new();
         for m in agent.mentions {
             mentions.push(m.to_string());
         }

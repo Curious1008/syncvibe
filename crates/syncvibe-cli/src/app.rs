@@ -33,7 +33,7 @@ const TIPS: &[&str] = &[
     "Tip: /invite (/i) shows your room's invite code — share it to add teammates",
     "Tip: /chats lets you switch between SyncVibe rooms",
     "Tip: /mute (/m) toggles the @mention notification bell",
-    "Tip: @agent <task> sends a task directly to your AI agent — no pane switching needed",
+    "Tip: @claude or @codex <task> sends a task directly to your AI agent",
     "Tip: Drop a file path into chat to share images with your team",
     "Tip: /clear wipes the chat view — messages stay safe on disk",
     "Tip: AI agents auto-read this chat before starting work — just discuss here, then assign tasks",
@@ -364,7 +364,7 @@ impl AppState {
                 self.system_msg("/quit     — exit SyncVibe  (/q)");
                 self.system_msg("");
                 self.system_msg("@name     — mention a teammate (highlights + bell)");
-                self.system_msg("@agent    — send task to your AI agent");
+                self.system_msg("@claude/@codex — send task to your AI agent");
             }
             "/invite" | "/i" => match self.storage.read_room_config() {
                 Ok(room) => {
@@ -757,9 +757,8 @@ impl AppState {
         Ok(())
     }
 
-    /// If message contains an @agent mention, show confirmation.
-    /// The task is already saved to chat-log.jsonl — the AI agent picks it up
-    /// via read_chat MCP tool which highlights @agent mentions as pending tasks.
+    /// If message contains an @claude/@codex mention, notify the agent pane via send-keys.
+    /// The task is saved to chat-log.jsonl and the agent picks it up via read_chat.
     fn handle_agent_mention(&mut self, msg: &ChatMessage) {
         if msg.user_id != self.user.profile.user_id {
             return;
@@ -767,10 +766,35 @@ impl AppState {
 
         let content_lower = msg.content.to_lowercase();
         if let Some(agent_name) = crate::agents::find_mentioned_agent(&content_lower) {
-            self.tip_msg(&format!(
-                "\u{26a1} Task sent — switch to {} pane (Ctrl+G) and ask it to check chat",
-                agent_name
-            ));
+            // Try to send "read chat" to the agent pane via tmux send-keys.
+            // Text is sent with -l (literal), then C-m submits it. Plain
+            // "Enter" doesn't work for Claude Code (Kitty keyboard protocol
+            // treats it as newline), but C-m works universally.
+            if let Some(pane) = discover_agent_pane() {
+                let pane = pane.clone();
+                let task_text = format!("{}, read chat", msg.content);
+                std::thread::spawn(move || {
+                    let send = |args: &[&str]| -> bool {
+                        std::process::Command::new("tmux")
+                            .args(args)
+                            .stdin(std::process::Stdio::null())
+                            .stdout(std::process::Stdio::null())
+                            .stderr(std::process::Stdio::null())
+                            .status()
+                            .map(|s| s.success())
+                            .unwrap_or(false)
+                    };
+                    send(&["send-keys", "-t", &pane, "-l", &task_text]);
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                    send(&["send-keys", "-t", &pane, "C-m"]);
+                });
+                self.tip_msg(&format!("\u{26a1} Task sent to {}", agent_name));
+            } else {
+                self.tip_msg(&format!(
+                    "\u{26a1} Task sent — ask {} to read chat",
+                    agent_name
+                ));
+            }
         }
     }
 

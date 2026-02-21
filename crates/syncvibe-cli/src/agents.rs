@@ -64,9 +64,6 @@ pub fn select_agent() -> Result<String> {
 /// Check if a message contains any known agent mention (for TUI highlighting).
 /// Returns the display name of the matched agent, or None.
 pub fn find_mentioned_agent(content_lower: &str) -> Option<&'static str> {
-    if content_lower.contains("@agent") {
-        return Some("agent");
-    }
     for agent in AGENTS {
         if agent.mentions.iter().any(|m| content_lower.contains(m)) {
             return Some(agent.name);
