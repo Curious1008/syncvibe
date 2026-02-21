@@ -167,13 +167,11 @@ pub fn launch_or_attach(project_path: &str) -> Result<()> {
         .map(|o| o.status.success())
         .unwrap_or(false);
 
-    if !tmux_available {
-        if !try_install_tmux()? {
-            // User declined — run TUI inline
-            env::set_current_dir(project_path)?;
-            let rt = tokio::runtime::Runtime::new()?;
-            return rt.block_on(crate::app::run());
-        }
+    if !tmux_available && !try_install_tmux()? {
+        // User declined — run TUI inline
+        env::set_current_dir(project_path)?;
+        let rt = tokio::runtime::Runtime::new()?;
+        return rt.block_on(crate::app::run());
     }
 
     // Read room config to determine agent
