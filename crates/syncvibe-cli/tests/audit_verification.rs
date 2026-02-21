@@ -59,7 +59,7 @@ async fn connect_and_auth(
         }
     });
     write
-        .send(Message::Text(auth.to_string().into()))
+        .send(Message::Text(auth.to_string()))
         .await
         .expect("Failed to send auth");
 
@@ -251,7 +251,7 @@ async fn h9_auth_reentry_blocked() {
         }
     });
     write
-        .send(Message::Text(auth.to_string().into()))
+        .send(Message::Text(auth.to_string()))
         .await
         .unwrap();
 
@@ -270,7 +270,7 @@ async fn h9_auth_reentry_blocked() {
         }
     });
     write
-        .send(Message::Text(auth2.to_string().into()))
+        .send(Message::Text(auth2.to_string()))
         .await
         .unwrap();
 
@@ -329,7 +329,7 @@ async fn screen_share_messages_relay() {
         }
     });
     write_a
-        .send(Message::Text(start_msg.to_string().into()))
+        .send(Message::Text(start_msg.to_string()))
         .await
         .unwrap();
 
@@ -350,7 +350,7 @@ async fn screen_share_messages_relay() {
         }
     });
     write_a
-        .send(Message::Text(frame_msg.to_string().into()))
+        .send(Message::Text(frame_msg.to_string()))
         .await
         .unwrap();
 
@@ -371,7 +371,7 @@ async fn screen_share_messages_relay() {
         }
     });
     write_a
-        .send(Message::Text(stop_msg.to_string().into()))
+        .send(Message::Text(stop_msg.to_string()))
         .await
         .unwrap();
 
@@ -479,7 +479,7 @@ async fn oversized_user_id_rejected() {
         }
     });
     write
-        .send(Message::Text(auth.to_string().into()))
+        .send(Message::Text(auth.to_string()))
         .await
         .unwrap();
 

@@ -173,7 +173,7 @@ mod tests {
 
     #[test]
     fn invite_code_rejects_bad_length() {
-        let short = format!("syncvibe://{}", URL_SAFE_NO_PAD.encode(&[0u8; 10]));
+        let short = format!("syncvibe://{}", URL_SAFE_NO_PAD.encode([0u8; 10]));
         assert!(RoomConfig::from_invite_code(&short).is_err());
     }
 

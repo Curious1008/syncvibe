@@ -59,7 +59,7 @@ async fn connect_and_auth(
         }
     });
     write
-        .send(Message::Text(auth.to_string().into()))
+        .send(Message::Text(auth.to_string()))
         .await
         .expect("Failed to send auth");
 
@@ -157,7 +157,7 @@ async fn test_chat_message_broadcast() {
         }
     });
     write_a
-        .send(Message::Text(chat_msg.to_string().into()))
+        .send(Message::Text(chat_msg.to_string()))
         .await
         .unwrap();
 
@@ -228,7 +228,7 @@ async fn test_ping_pong() {
     // Send ping
     let ping = serde_json::json!({"type": "ping"});
     write_a
-        .send(Message::Text(ping.to_string().into()))
+        .send(Message::Text(ping.to_string()))
         .await
         .unwrap();
 
@@ -274,7 +274,7 @@ async fn test_three_users_broadcast() {
         }
     });
     write_a
-        .send(Message::Text(chat_msg.to_string().into()))
+        .send(Message::Text(chat_msg.to_string()))
         .await
         .unwrap();
 
