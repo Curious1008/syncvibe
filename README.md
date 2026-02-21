@@ -19,17 +19,15 @@ SyncVibe connects teammates and their AI agents (Claude Code, Codex, or any MCP-
 
 ## Install
 
-**macOS** (recommended):
+```bash
+curl -fsSL https://syncvibe.online/install.sh | sh
+```
+
+Or via **Homebrew** (macOS):
 
 ```bash
 brew tap curious1008/syncvibe
 brew install syncvibe
-```
-
-**Linux:**
-
-```bash
-curl -fsSL https://syncvibe.online/install.sh | sh
 ```
 
 Supports **macOS** (Apple Silicon + Intel) and **Linux** (x86_64, aarch64).
@@ -63,18 +61,18 @@ Chat syncs in real time. The AI agent auto-configures via MCP — no manual setu
 ## How It Works
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│  Split Terminal                                                   │
-│  ┌─────────────────────┐     ┌────────────────────────────────┐  │
-│  │  SyncVibe Chat (30%)│     │  AI Agent — Claude/Codex (70%) │  │
-│  │                     │     │                                │  │
-│  │  Alice: red theme?  │     │  Reading team chat via MCP...  │  │
-│  │  Harry: @codex make │────►│  ⚡ Task: make a calculator    │  │
-│  │    a calculator     │     │  Creating index.html...        │  │
-│  │  Codex: Done ✓      │◄────│  Done — reporting to chat      │  │
-│  └─────────────────────┘     └────────────────────────────────┘  │
-│                     Ctrl+G to switch                              │
-└──────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  Split Terminal                                                 │
+│  ┌─────────────────────┐    ┌────────────────────────────────┐  │
+│  │  SyncVibe Chat (30%)│    │  AI Agent — Claude/Codex (70%) │  │
+│  │                     │    │                                │  │
+│  │  Alice: red theme?  │    │  Reading team chat via MCP...  │  │
+│  │  Harry: @codex make │───►│  ⚡ Task: make a calculator    │  │
+│  │    a calculator     │    │  Creating index.html...        │  │
+│  │  Codex: Done ✓      │◄───│  Done — reporting to chat      │  │
+│  └─────────────────────┘    └────────────────────────────────┘  │
+│                    Ctrl+G to switch                             │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 **Data flow:**
@@ -132,10 +130,12 @@ All state lives locally in `.syncvibe/`. The relay only handles real-time sync �
 | `syncvibe invite` | Show invite code for current room |
 | `syncvibe connect <code>` | Join a room with an invite code |
 | `syncvibe profile` | Edit display name and color |
-| `syncvibe auth` | Link CLI with your SyncVibe web account |
+| `syncvibe chat "<msg>"` | Send a message without opening the TUI |
+| `syncvibe auth` | Link CLI to your web account at syncvibe.online |
 | `syncvibe status` | Show current room info |
 | `syncvibe switch` | Switch between rooms |
 | `syncvibe leave` | Leave current room |
+| `syncvibe completions` | Generate shell completions (bash/zsh/fish) |
 
 ### TUI Slash Commands
 
@@ -225,6 +225,14 @@ cargo test                    # Unit + integration tests (88 tests)
 cargo test -- --ignored       # Include relay deployment tests
 ```
 
+### Shell Completions
+
+```bash
+syncvibe completions bash > ~/.local/share/bash-completion/completions/syncvibe
+syncvibe completions zsh  > ~/.zfunc/_syncvibe
+syncvibe completions fish > ~/.config/fish/completions/syncvibe.fish
+```
+
 ---
 
 ## Project Structure
@@ -232,24 +240,43 @@ cargo test -- --ignored       # Include relay deployment tests
 ```
 syncvibe/
 ├── crates/
-│   ├── syncvibe-cli/           # TUI binary
+│   ├── syncvibe-cli/              # TUI binary
 │   │   └── src/
-│   │       ├── app.rs          # Event loop + slash commands
-│   │       ├── session.rs      # Interactive onboarding
-│   │       ├── init.rs         # Room init (MCP, CLAUDE.md, .codex/)
-│   │       ├── tmux.rs         # tmux session management
-│   │       ├── mcp/server.rs   # MCP server: read_chat, send_chat
-│   │       ├── network/        # WebSocket client
-│   │       └── components/     # TUI rendering (ratatui)
+│   │       ├── cli.rs             # Command definitions (Clap)
+│   │       ├── onboarding.rs      # Interactive setup wizard
+│   │       ├── auth.rs            # Web account linking
+│   │       ├── config.rs          # Configuration management
+│   │       ├── invite.rs          # Invite code logic
+│   │       ├── agents.rs          # AI agent configuration
+│   │       ├── sync.rs            # Chat sync engine
+│   │       ├── app.rs             # Event loop + slash commands
+│   │       ├── tui.rs             # Terminal UI bootstrap
+│   │       ├── picker.rs          # Room picker
+│   │       ├── init.rs            # Room init (MCP, CLAUDE.md, .codex/)
+│   │       ├── tmux.rs            # tmux session management
+│   │       ├── git/               # Git integration
+│   │       ├── mcp/               # MCP server: read_chat, send_chat
+│   │       ├── network/           # WebSocket client
+│   │       └── components/        # TUI rendering (ratatui)
 │   │
-│   └── syncvibe-core/          # Shared library
+│   └── syncvibe-core/             # Shared library
 │       └── src/
-│           ├── protocol.rs     # WebSocket message types
-│           ├── storage.rs      # Atomic file I/O
-│           └── models/         # Chat, room, user types
+│           ├── protocol.rs        # WebSocket message types
+│           ├── storage.rs         # Atomic file I/O
+│           └── models/            # Chat, room, user types
 │
-└── install.sh                  # One-line installer
+└── install.sh                     # One-line installer
 ```
+
+---
+
+## Security
+
+- Install script verifies binary integrity via **SHA256 checksums**
+- GitHub Actions workflows are **pinned to commit SHAs** to prevent supply chain attacks
+- `cargo audit` runs in CI to catch known vulnerabilities in dependencies
+- **No server-side message storage** — the relay handles real-time sync only; all chat data stays local
+- Room secrets never leave your machine; invite codes are short-lived and scoped
 
 ---
 
