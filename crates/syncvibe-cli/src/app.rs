@@ -908,7 +908,11 @@ fn current_pane_id() -> Option<String> {
         .ok()?;
     if output.status.success() {
         let id = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if id.is_empty() { None } else { Some(id) }
+        if id.is_empty() {
+            None
+        } else {
+            Some(id)
+        }
     } else {
         None
     }

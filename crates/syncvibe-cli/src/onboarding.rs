@@ -30,7 +30,7 @@ pub fn print_banner() {
     let blank: String = " ".repeat(W);
 
     //            ← 12 spaces →                  ← 13 spaces →
-    let lp = "            ";  // left pad  (centering title)
+    let lp = "            "; // left pad  (centering title)
     let rp = "             "; // right pad
     let title = "S y n c V i b e";
 
@@ -44,13 +44,13 @@ pub fn print_banner() {
     std::thread::sleep(Duration::from_millis(150));
 
     let frames: &[(&str, &str, &str)] = &[
-        ("",               "S", " y n c V i b e"),
-        ("S ",             "y", " n c V i b e"),
-        ("S y ",           "n", " c V i b e"),
-        ("S y n ",         "c", " V i b e"),
-        ("S y n c ",       "V", " i b e"),
-        ("S y n c V ",     "i", " b e"),
-        ("S y n c V i ",   "b", " e"),
+        ("", "S", " y n c V i b e"),
+        ("S ", "y", " n c V i b e"),
+        ("S y ", "n", " c V i b e"),
+        ("S y n ", "c", " V i b e"),
+        ("S y n c ", "V", " i b e"),
+        ("S y n c V ", "i", " b e"),
+        ("S y n c V i ", "b", " e"),
         ("S y n c V i b ", "e", ""),
     ];
 

@@ -4,7 +4,7 @@ use anyhow::Result;
 
 use crate::agents;
 use crate::config;
-use crate::onboarding::{self, GREEN, R, RED, TEAL, DIM, YELLOW};
+use crate::onboarding::{self, DIM, GREEN, R, RED, TEAL, YELLOW};
 
 /// Generate a unique tmux session name from project name + full path hash.
 /// Prevents collisions between projects with the same folder basename.
@@ -49,7 +49,10 @@ fn try_install_tmux() -> Result<bool> {
         } else if command_exists("dnf") {
             ("dnf", vec!["sudo", "dnf", "install", "-y", "tmux"])
         } else if command_exists("pacman") {
-            ("pacman", vec!["sudo", "pacman", "-S", "--noconfirm", "tmux"])
+            (
+                "pacman",
+                vec!["sudo", "pacman", "-S", "--noconfirm", "tmux"],
+            )
         } else if command_exists("brew") {
             ("Homebrew", vec!["brew", "install", "tmux"])
         } else {
@@ -60,7 +63,9 @@ fn try_install_tmux() -> Result<bool> {
         }
     };
 
-    println!("\n  {TEAL}◆{R} tmux enables the split terminal layout (chat + AI agent side by side).");
+    println!(
+        "\n  {TEAL}◆{R} tmux enables the split terminal layout (chat + AI agent side by side)."
+    );
     if !onboarding::confirm(&format!("  {TEAL}◆{R} Install tmux via {pkg_mgr}?"))? {
         println!("  {DIM}Continuing without split layout...{R}\n");
         return Ok(false);
@@ -77,7 +82,10 @@ fn try_install_tmux() -> Result<bool> {
             Ok(true)
         }
         Ok(s) => {
-            println!("  {RED}✗{R} tmux installation failed (exit code: {:?})", s.code());
+            println!(
+                "  {RED}✗{R} tmux installation failed (exit code: {:?})",
+                s.code()
+            );
             println!("  {DIM}Continuing without split layout...{R}\n");
             Ok(false)
         }
