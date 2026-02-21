@@ -250,10 +250,7 @@ async fn h9_auth_reentry_blocked() {
             "user_color": "#ffffff",
         }
     });
-    write
-        .send(Message::Text(auth.to_string()))
-        .await
-        .unwrap();
+    write.send(Message::Text(auth.to_string())).await.unwrap();
 
     let msg = recv_text(&mut read, 5).await.expect("No auth_ok");
     assert_eq!(msg["type"], "auth_ok");
@@ -269,10 +266,7 @@ async fn h9_auth_reentry_blocked() {
             "user_color": "#000000",
         }
     });
-    write
-        .send(Message::Text(auth2.to_string()))
-        .await
-        .unwrap();
+    write.send(Message::Text(auth2.to_string())).await.unwrap();
 
     // Should receive Close frame with code 4003
     let result = time::timeout(Duration::from_secs(5), async {
@@ -478,10 +472,7 @@ async fn oversized_user_id_rejected() {
             "user_color": "#ffffff",
         }
     });
-    write
-        .send(Message::Text(auth.to_string()))
-        .await
-        .unwrap();
+    write.send(Message::Text(auth.to_string())).await.unwrap();
 
     let msg = recv_text(&mut read, 5).await.expect("No response");
     assert_eq!(

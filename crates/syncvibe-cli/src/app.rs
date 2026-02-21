@@ -2475,7 +2475,8 @@ mod tests {
     fn uuid_chars_rejects_empty() {
         let empty = "";
         // An empty string must fail UUID validation: it must be non-empty AND all valid chars.
-        let is_valid_uuid_chars = !empty.is_empty() && empty.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
+        let is_valid_uuid_chars =
+            !empty.is_empty() && empty.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
         assert!(!is_valid_uuid_chars);
     }
 }

@@ -227,10 +227,7 @@ async fn test_ping_pong() {
 
     // Send ping
     let ping = serde_json::json!({"type": "ping"});
-    write_a
-        .send(Message::Text(ping.to_string()))
-        .await
-        .unwrap();
+    write_a.send(Message::Text(ping.to_string())).await.unwrap();
 
     // Should receive pong
     let msg = recv_text(&mut read_a, 5).await.expect("No pong received");
