@@ -772,6 +772,7 @@ impl AppState {
             // treats it as newline), but C-m works universally.
             if let Some(pane) = discover_agent_pane() {
                 let pane = pane.clone();
+                let chat_pane = current_pane_id();
                 let task_text = format!("{}, read chat", msg.content);
                 std::thread::spawn(move || {
                     let send = |args: &[&str]| -> bool {
@@ -787,6 +788,11 @@ impl AppState {
                     send(&["send-keys", "-t", &pane, "-l", &task_text]);
                     std::thread::sleep(std::time::Duration::from_millis(200));
                     send(&["send-keys", "-t", &pane, "C-m"]);
+                    // Ensure focus stays on the chat pane (left side)
+                    if let Some(ref cp) = chat_pane {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        send(&["select-pane", "-t", cp]);
+                    }
                 });
                 self.tip_msg(&format!("\u{26a1} Task sent to {}", agent_name));
             } else {
@@ -890,6 +896,23 @@ fn shell_escape(s: &str) -> String {
 
 /// Max lines allowed in a screen frame (prevents OOM from malicious frames).
 const MAX_SCREEN_LINES: usize = 500;
+
+/// Get the current tmux pane ID (e.g. "%0") so we can re-select it after send-keys.
+fn current_pane_id() -> Option<String> {
+    let output = std::process::Command::new("tmux")
+        .args(["display-message", "-p", "#{pane_id}"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if id.is_empty() { None } else { Some(id) }
+    } else {
+        None
+    }
+}
 
 /// Discover the agent pane target (session:window.pane_index).
 fn discover_agent_pane() -> Option<String> {

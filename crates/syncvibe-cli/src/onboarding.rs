@@ -24,22 +24,54 @@ pub(crate) const R: &str = "\x1b[0m";
 /// Print the SyncVibe splash banner (used on first launch).
 pub fn print_banner() {
     const W: usize = 40;
+    const WHITE: &str = "\x1b[38;2;255;255;255m";
+
     let hr: String = "─".repeat(W);
     let blank: String = " ".repeat(W);
-    // Pad a visible-width string to W columns
-    let pad = |used: usize| " ".repeat(W.saturating_sub(used));
+
+    //            ← 12 spaces →                  ← 13 spaces →
+    let lp = "            ";  // left pad  (centering title)
+    let rp = "             "; // right pad
+    let title = "S y n c V i b e";
 
     println!();
     println!("  {DIM_TEAL}╭{hr}╮{R}");
     println!("  {DIM_TEAL}│{R}{blank}{DIM_TEAL}│{R}");
-    println!(
-        "  {DIM_TEAL}│{R}      {TEAL}{B}S y n c V i b e{R}{}{DIM_TEAL}│{R}",
-        pad(6 + 15)
-    );
-    println!(
-        "  {DIM_TEAL}│{R}      {DIM}collaborate in the terminal{R}{}{DIM_TEAL}│{R}",
-        pad(6 + 27)
-    );
+
+    // ── Shimmer animation: dim → left-to-right white sweep → teal ──
+    print!("  {DIM_TEAL}│{R}{lp}{DIM}{title}{R}{rp}{DIM_TEAL}│{R}");
+    let _ = io::stdout().flush();
+    std::thread::sleep(Duration::from_millis(150));
+
+    let frames: &[(&str, &str, &str)] = &[
+        ("",               "S", " y n c V i b e"),
+        ("S ",             "y", " n c V i b e"),
+        ("S y ",           "n", " c V i b e"),
+        ("S y n ",         "c", " V i b e"),
+        ("S y n c ",       "V", " i b e"),
+        ("S y n c V ",     "i", " b e"),
+        ("S y n c V i ",   "b", " e"),
+        ("S y n c V i b ", "e", ""),
+    ];
+
+    for &(before, ch, after) in frames {
+        print!("\r  {DIM_TEAL}│{R}{lp}");
+        if !before.is_empty() {
+            print!("{TEAL}{B}{before}{R}");
+        }
+        print!("{WHITE}{B}{ch}{R}");
+        if !after.is_empty() {
+            print!("{DIM}{after}{R}");
+        }
+        print!("{rp}{DIM_TEAL}│{R}");
+        let _ = io::stdout().flush();
+        std::thread::sleep(Duration::from_millis(35));
+    }
+
+    println!("\r  {DIM_TEAL}│{R}{lp}{TEAL}{B}{title}{R}{rp}{DIM_TEAL}│{R}");
+
+    //            ← 7 spaces →                         ← 6 spaces →
+    println!("  {DIM_TEAL}│{R}       {DIM}collaborate in the terminal{R}      {DIM_TEAL}│{R}");
     println!("  {DIM_TEAL}│{R}{blank}{DIM_TEAL}│{R}");
     println!("  {DIM_TEAL}╰{hr}╯{R}");
     println!();
