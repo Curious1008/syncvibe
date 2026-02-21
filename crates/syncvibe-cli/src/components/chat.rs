@@ -137,9 +137,10 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
             ChatLine::DateSep { .. } => 1,
             ChatLine::Message { idx } => {
                 let msg = &msgs[*idx];
-                *state.line_count_cache.entry(msg.id.clone()).or_insert_with(|| {
-                    estimate_lines(msg, inner_width)
-                })
+                *state
+                    .line_count_cache
+                    .entry(msg.id.clone())
+                    .or_insert_with(|| estimate_lines(msg, inner_width))
             }
         })
         .collect();
