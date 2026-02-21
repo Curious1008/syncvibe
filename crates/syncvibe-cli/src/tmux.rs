@@ -160,6 +160,22 @@ pub fn launch_project(project_path: &std::path::Path) -> Result<()> {
 /// Launch a new tmux session for a project or attach/switch to an existing one.
 /// Uses default agent (Claude) — called from picker/switch flows.
 pub fn launch_or_attach(project_path: &str) -> Result<()> {
+    // Check tmux availability every time — prompt to install if missing
+    let tmux_available = std::process::Command::new("tmux")
+        .arg("-V")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if !tmux_available {
+        if !try_install_tmux()? {
+            // User declined — run TUI inline
+            env::set_current_dir(project_path)?;
+            let rt = tokio::runtime::Runtime::new()?;
+            return rt.block_on(crate::app::run());
+        }
+    }
+
     // Read room config to determine agent
     let room_json = std::path::Path::new(project_path)
         .join(".syncvibe")
