@@ -54,16 +54,8 @@ warn() {
     printf "  ${YELLOW}!${R} %s\n" "$1"
 }
 
-# Read a single keypress from /dev/tty (works even when piped via curl)
-read_key() {
-    saved=$(stty -g </dev/tty 2>/dev/null)
-    stty raw -echo </dev/tty 2>/dev/null
-    key=$(dd bs=1 count=1 </dev/tty 2>/dev/null)
-    stty "$saved" </dev/tty 2>/dev/null
-    printf '%s' "$key"
-}
-
 # 1/2 confirmation prompt (matches SyncVibe onboarding UI)
+# Uses single-keypress (stty raw) when possible, falls back to line read.
 confirm() {
     if [ "$HAS_TTY" = false ]; then
         return 0
@@ -72,16 +64,32 @@ confirm() {
     printf "\n  %s\n\n" "$1"
     printf "  ${TEAL}1${R} Yes\n"
     printf "  ${DIM}2${R} No\n\n"
-    printf "  ${DIM}Press 1 or 2:${R} "
 
-    while true; do
-        key=$(read_key)
-        case "$key" in
-            1|y|Y) printf "${GREEN}Yes${R}\n"; return 0 ;;
-            2|n|N) printf "${DIM}No${R}\n"; return 1 ;;
-            *) ;;
-        esac
-    done
+    # Try single-keypress mode via stty raw + dd
+    if saved=$(stty -g </dev/tty 2>/dev/null) && [ -n "$saved" ]; then
+        printf "  ${DIM}Press 1 or 2:${R} "
+        while true; do
+            stty raw -echo </dev/tty 2>/dev/null
+            key=$(dd bs=1 count=1 </dev/tty 2>/dev/null)
+            stty "$saved" </dev/tty 2>/dev/null
+            case "$key" in
+                1|y|Y) printf "${GREEN}Yes${R}\n"; return 0 ;;
+                2|n|N) printf "${DIM}No${R}\n"; return 1 ;;
+                *) ;;
+            esac
+        done
+    else
+        # Fallback: line-based input (type 1 or 2 then Enter)
+        printf "  ${DIM}Enter 1 or 2:${R} "
+        while true; do
+            read -r key </dev/tty 2>/dev/null || return 1
+            case "$key" in
+                1|y|Y) printf "\033[A  ${DIM}Enter 1 or 2:${R} ${GREEN}Yes${R}\n"; return 0 ;;
+                2|n|N) printf "\033[A  ${DIM}Enter 1 or 2:${R} ${DIM}No${R}\n"; return 1 ;;
+                *) printf "  ${DIM}Enter 1 or 2:${R} " ;;
+            esac
+        done
+    fi
 }
 
 # ── Banner ───────────────────────────────────────────────────────
