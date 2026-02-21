@@ -54,6 +54,26 @@ warn() {
     printf "  ${YELLOW}!${R} %s\n" "$1"
 }
 
+# Fetch a URL to stdout (curl preferred, wget fallback)
+fetch() {
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$1"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO- "$1"
+    else
+        err "curl or wget is required"
+    fi
+}
+
+# Fetch a URL to a file
+fetch_to() {
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$1" -o "$2"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q "$1" -O "$2"
+    fi
+}
+
 # 1/2 confirmation prompt (matches SyncVibe onboarding UI)
 # Uses single-keypress (stty raw) when possible, falls back to line read.
 confirm() {
@@ -90,6 +110,16 @@ confirm() {
             esac
         done
     fi
+}
+
+# Like confirm() but requires interactive TTY — never auto-approves.
+# Used for operations that run sudo.
+confirm_interactive() {
+    if [ "$HAS_TTY" = false ]; then
+        warn "Skipping (non-interactive environment)"
+        return 1
+    fi
+    confirm "$1"
 }
 
 # ── Banner ───────────────────────────────────────────────────────
@@ -173,35 +203,54 @@ get_version() {
     info "Fetching latest version..."
 
     RELEASE_URL="https://api.github.com/repos/${REPO}/releases/latest"
-
-    if command -v curl >/dev/null 2>&1; then
-        RESPONSE=$(curl -fsSL "$RELEASE_URL") || err "Failed to fetch release info. Check your internet connection."
-    elif command -v wget >/dev/null 2>&1; then
-        RESPONSE=$(wget -qO- "$RELEASE_URL") || err "Failed to fetch release info. Check your internet connection."
-    else
-        err "curl or wget is required"
-    fi
+    RESPONSE=$(fetch "$RELEASE_URL") || err "Failed to fetch release info. Check your internet connection."
 
     VERSION=$(printf '%s' "$RESPONSE" | grep '"tag_name"' | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
 
     if [ -z "$VERSION" ]; then
         err "Could not determine latest version"
     fi
+
+    # Sanitize: version must match vN.N.N pattern
+    case "$VERSION" in
+        v[0-9]*.[0-9]*.[0-9]*) ;;
+        *) err "Invalid version format: $VERSION" ;;
+    esac
 }
 
 download() {
     FILENAME="syncvibe-${TARGET}.tar.gz"
     URL="https://github.com/${REPO}/releases/download/${VERSION}/${FILENAME}"
+    CHECKSUM_URL="https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt"
 
     info "Downloading syncvibe ${VERSION} for ${TARGET}..."
 
     TMP_DIR=$(mktemp -d "${TMPDIR_BASE}/syncvibe-install.XXXXXX")
     trap cleanup EXIT
 
-    if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "$URL" -o "${TMP_DIR}/${FILENAME}" || err "Download failed. Is ${VERSION} a valid release?"
-    elif command -v wget >/dev/null 2>&1; then
-        wget -q "$URL" -O "${TMP_DIR}/${FILENAME}" || err "Download failed. Is ${VERSION} a valid release?"
+    fetch_to "$URL" "${TMP_DIR}/${FILENAME}" || err "Download failed. Is ${VERSION} a valid release?"
+
+    # Verify SHA256 checksum
+    if fetch_to "$CHECKSUM_URL" "${TMP_DIR}/checksums.txt" 2>/dev/null; then
+        EXPECTED=$(grep "${FILENAME}" "${TMP_DIR}/checksums.txt" | cut -d ' ' -f1)
+        if [ -n "$EXPECTED" ]; then
+            if command -v sha256sum >/dev/null 2>&1; then
+                ACTUAL=$(sha256sum "${TMP_DIR}/${FILENAME}" | cut -d ' ' -f1)
+            elif command -v shasum >/dev/null 2>&1; then
+                ACTUAL=$(shasum -a 256 "${TMP_DIR}/${FILENAME}" | cut -d ' ' -f1)
+            else
+                warn "Cannot verify checksum (sha256sum/shasum not found)"
+                ACTUAL="$EXPECTED"
+            fi
+            if [ "$ACTUAL" != "$EXPECTED" ]; then
+                err "Checksum mismatch! Expected ${EXPECTED}, got ${ACTUAL}. Download may be corrupted or tampered."
+            fi
+            ok "Checksum verified"
+        else
+            warn "No checksum found for ${FILENAME}, skipping verification"
+        fi
+    else
+        warn "Checksums file not available, skipping verification"
     fi
 }
 
@@ -211,7 +260,7 @@ install_binary() {
     info "Installing to ${INSTALL_DIR}..."
 
     mkdir -p "$INSTALL_DIR"
-    tar xzf "${TMP_DIR}/${FILENAME}" -C "$TMP_DIR"
+    tar xzf "${TMP_DIR}/${FILENAME}" --no-same-owner -C "$TMP_DIR"
 
     # Remove old binary first (macOS caches code signature rejections)
     rm -f "${INSTALL_DIR}/syncvibe"
@@ -263,7 +312,8 @@ check_tmux() {
     dim "SyncVibe uses tmux for split-terminal collaboration"
     dim "with AI agents. Install tmux for the complete experience."
 
-    if confirm "Install tmux?"; then
+    # Use confirm_interactive — never auto-approve sudo in non-interactive mode
+    if confirm_interactive "Install tmux?"; then
         install_tmux
     else
         printf "\n"
