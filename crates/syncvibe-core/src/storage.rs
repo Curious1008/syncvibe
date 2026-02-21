@@ -157,6 +157,37 @@ impl Storage {
         Ok((messages, file_len))
     }
 
+    /// Remove messages older than `retention_days` from the chat log.
+    /// Returns the number of pruned messages, or 0 if nothing was pruned.
+    pub fn prune_old_messages(&self, retention_days: u32) -> Result<usize> {
+        let path = self.root.join("chat-log.jsonl");
+        if !path.exists() {
+            return Ok(0);
+        }
+        let all_messages = self.read_chat_messages()?;
+        if all_messages.is_empty() {
+            return Ok(0);
+        }
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days as i64);
+        let retained: Vec<&ChatMessage> = all_messages
+            .iter()
+            .filter(|m| m.timestamp >= cutoff)
+            .collect();
+        let pruned_count = all_messages.len() - retained.len();
+        if pruned_count == 0 {
+            return Ok(0);
+        }
+        // Rewrite atomically: write to temp file, then rename
+        let mut lines = String::new();
+        for msg in &retained {
+            let line = serde_json::to_string(msg)?;
+            lines.push_str(&line);
+            lines.push('\n');
+        }
+        atomic_write(&path, &lines)?;
+        Ok(pruned_count)
+    }
+
     /// Get the current byte size of the chat log file.
     pub fn chat_log_size(&self) -> u64 {
         let path = self.root.join("chat-log.jsonl");

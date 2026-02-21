@@ -273,10 +273,14 @@ syncvibe/
 ## Security
 
 - Install script verifies binary integrity via **SHA256 checksums**
-- GitHub Actions workflows are **pinned to commit SHAs** to prevent supply chain attacks
-- `cargo audit` runs in CI to catch known vulnerabilities in dependencies
-- **No server-side message storage** — the relay handles real-time sync only; all chat data stays local
-- Room secrets never leave your machine; invite codes are short-lived and scoped
+- GitHub Actions workflows are **pinned to commit SHAs**
+- `cargo audit` runs in CI to catch known vulnerabilities
+- **TLS enforced** — all relay connections use WSS; plaintext rejected
+- **No server-side storage** — the relay forwards messages in real time and does not persist them
+- Room secrets authenticate your connection over TLS — never stored server-side
+- Local files use `0600` permissions (owner-only read/write)
+
+For full details, see [Data & Privacy](https://syncvibe.online/docs/data-privacy).
 
 ---
 

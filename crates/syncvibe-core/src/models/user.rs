@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+fn default_retention_days() -> u32 {
+    90
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserConfig {
     pub profile: UserProfile,
@@ -7,6 +11,8 @@ pub struct UserConfig {
     pub account: Option<AccountConfig>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub shown_community: bool,
+    #[serde(default = "default_retention_days")]
+    pub retention_days: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +53,7 @@ impl UserConfig {
             },
             account: None,
             shown_community: false,
+            retention_days: default_retention_days(),
         }
     }
 }

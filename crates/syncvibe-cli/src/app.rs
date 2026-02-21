@@ -121,6 +121,9 @@ pub struct ScreenFrameState {
 
 impl AppState {
     pub fn new(storage: Storage, user: UserConfig) -> Result<Self> {
+        // Prune old messages based on retention_days config (silent cleanup)
+        let _ = storage.prune_old_messages(user.retention_days);
+
         let mut all_msgs = match storage.read_chat_messages() {
             Ok(msgs) => msgs
                 .into_iter()
