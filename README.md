@@ -276,8 +276,9 @@ syncvibe/
 - GitHub Actions workflows are **pinned to commit SHAs**
 - `cargo audit` runs in CI to catch known vulnerabilities
 - **TLS enforced** — all relay connections use WSS; plaintext rejected
-- **No server-side storage** — the relay forwards messages in real time and does not persist them
-- Room secrets authenticate your connection over TLS — never stored server-side
+- **No message storage** — the relay forwards chat, screen shares, and MCP traffic in real time; nothing is logged or persisted
+- Room secrets authenticate your connection over TLS — stored server-side only for reconnection support
+- Invite codes expire automatically after 7 days
 - Local files use `0600` permissions (owner-only read/write)
 
 For full details, see [Data & Privacy](https://syncvibe.online/docs/data-privacy).
