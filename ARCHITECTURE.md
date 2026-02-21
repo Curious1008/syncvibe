@@ -25,6 +25,10 @@ syncvibe/
 │   │       ├── cli.rs             # Clap command definitions
 │   │       ├── config.rs          # ~/.syncvibe/ config + project registry
 │   │       ├── onboarding.rs      # Interactive prompts + input validation
+│   │       ├── auth.rs            # Web account linking (syncvibe auth)
+│   │       ├── invite.rs          # Invite code create/resolve via relay API
+│   │       ├── agents.rs          # AI agent configuration (Claude, Codex)
+│   │       ├── sync.rs            # Room metadata sync to Supabase
 │   │       ├── tui.rs             # Terminal setup/teardown (crossterm)
 │   │       ├── components/        # TUI rendering (ratatui)
 │   │       │   ├── status_bar.rs  # Top bar: project name + presence
@@ -34,7 +38,7 @@ syncvibe/
 │   │       ├── network/
 │   │       │   └── ws_client.rs   # WebSocket client (tokio-tungstenite)
 │   │       ├── mcp/
-│   │       │   └── server.rs      # MCP server: read_chat tool
+│   │       │   └── server.rs      # MCP server: read_chat, send_chat
 │   │       └── git/
 │   │           └── ops.rs         # Git repo name detection
 │   │
@@ -79,9 +83,17 @@ syncvibe/
 - Ctrl+G to switch panes, styled pane borders
 - Project switching between tmux sessions
 
+### Screen Sharing
+- `/share` — toggle sharing your agent pane with teammates
+- `/watch <name>` — view a teammate's agent screen in real time
+- Delta-encoded frames: compares current frame to previous, sends only changed lines
+- Max 500 lines per frame, 1-second capture interval
+- Protocol: `ScreenShareStart` → `ScreenFrame` (delta) → `ScreenShareStop`
+
 ### MCP Server
-- 1 tool: `read_chat` (smart incremental reads with digest file offloading)
-- Injected via `.mcp.json` at init time
+- 2 tools: `read_chat` and `send_chat`, injected via `.mcp.json` at init time
+- **`read_chat`**: smart incremental reads with session scoping, time filtering, byte-offset tracking, and digest file offloading
+- **`send_chat`**: sends a message to the team chat as the AI agent
 - **Context-aware response sizing**: small conversations (< 30 msgs) return inline; large conversations write full content to `.syncvibe/chat-digest.md` and return a brief summary — prevents flooding the agent's context window
 - **Message grouping**: consecutive messages from the same user are collapsed under one header, saving ~20-30% tokens
 
@@ -114,13 +126,11 @@ Three reinforcement layers ensure the agent always reads chat:
 2. **MCP server instructions** — "IMPORTANT: call read_chat before starting ANY task"
 3. **Agent behavior** — agent acknowledges the discussion, making it visible to the user
 
-### What agents do natively (no MCP needed)
-- **Send chat**: Append JSONL line to `.syncvibe/chat-log.jsonl` — native file writing
-
-### What MCP adds (smart capabilities agents can't do natively)
+### What MCP adds
 | MCP Tool | Why it exists |
 |---|---|
 | `read_chat` | **Smart filtering**: session scoping, incremental byte-offset reads, time-based filtering, digest file offloading for large conversations — not possible with raw file read |
+| `send_chat` | **Structured messaging**: creates properly formatted ChatMessage with user metadata, appends to JSONL, and broadcasts via WebSocket relay |
 
 ### What Claude Code provides natively
 | Capability | How SyncVibe leverages it |
@@ -150,6 +160,12 @@ AI Agent → Writes .syncvibe/ files → Hook touches .updated → TUI file watc
 Agent A → Appends chat-log.jsonl → Agent B reads via MCP read_chat (incremental)
 ```
 
+### Screen Sharing
+```
+Sharer's agent pane → tmux capture-pane → Delta encode
+  → ScreenFrame (WSS) → Relay (forward, no storage) → Viewer's TUI overlay
+```
+
 ## .syncvibe/ Directory
 
 ```
@@ -162,14 +178,81 @@ Agent A → Appends chat-log.jsonl → Agent B reads via MCP read_chat (incremen
 
 `.syncvibe/` is gitignored. The WebSocket relay provides real-time sync; local files are the source of truth.
 
+## Server-Side Infrastructure
+
+### Relay (Cloudflare Workers + Durable Objects)
+
+The relay at `relay.syncvibe.online` handles real-time WebSocket forwarding only.
+
+**What it stores:**
+
+| Data | Storage | Duration |
+|------|---------|----------|
+| Room secret (for auth) | Durable Objects | Persistent |
+| Invite codes | KV store | 7-day TTL, auto-deleted |
+| Connected users | In-memory only | Session only |
+| Chat messages | Not stored | Forwarded in real time |
+| Screen share frames | Not stored | Forwarded in real time |
+
+**What it does NOT do:** log messages, index content, read source code, run analytics.
+
+All relay traffic uses WSS (TLS). The relay sees message content in memory during forwarding — this is transport encryption, not E2E. E2E encryption is on the roadmap.
+
+### Database (Supabase)
+
+When a user links their CLI to a web account (`syncvibe auth`), room metadata is synced via RPC:
+
+| Data | Purpose |
+|------|---------|
+| Room ID | Identify the room |
+| Project name | Display name in dashboard |
+| Room secret | Allow re-joining from other devices |
+
+**No chat content, messages, or files are ever stored in the database.**
+
+Three RPC functions:
+- `sync_room` — sync a single room on create/join
+- `bulk_sync_rooms` — sync all local rooms after authentication
+- `leave_room` — remove room association, returns remaining member count
+
+### Invite Code Flow
+
+```
+Creator: POST /invite {room_id, room_secret, room_name}
+  → Relay generates short code (XXXX-XXXX), stores in KV with 7-day TTL
+  → Returns code to creator
+
+Joiner: GET /invite/{code}
+  → Relay looks up KV, returns {room_id, room_secret, relay_url}
+  → Joiner connects to room with those credentials
+```
+
+Rate limited: 10 requests/minute per IP.
+
+## Security & Privacy
+
+- **TLS enforced** — all relay connections use WSS; plaintext `ws://` rejected
+- **No message persistence** — relay forwards chat, screen shares, and MCP traffic in memory only; nothing logged or written to disk
+- **Relay visibility** — the relay sees plaintext message content during forwarding (transport encryption, not E2E). E2E is on the roadmap
+- **Room secrets** — 256-bit random (64 hex chars), sent over TLS for auth, stored server-side for reconnection support
+- **File permissions** — `.syncvibe/` dir is 0700, all files (room.json, chat-log.jsonl, config.toml) are 0600
+- **Atomic writes** — write to temp file + rename prevents partial reads
+- **Advisory file locking** — exclusive lock on chat-log.jsonl for concurrent write safety
+- **Message retention** — `retention_days` in `~/.syncvibe/config.toml` (default: 90). Old messages pruned atomically on startup
+- **Identity stamping** — relay stamps user identity server-side on messages to prevent spoofing
+- **Invite code expiry** — KV-stored codes auto-delete after 7 days
+
+For full details, see [Data & Privacy](https://syncvibe.online/docs/data-privacy).
+
 ## Key Design Decisions
 
 1. **Local-first**: All state in `.syncvibe/`, gitignored. WebSocket relay is ephemeral for real-time sync.
 2. **JSONL for chat**: Append-only, no merge conflicts, advisory file locking for concurrent writes.
 3. **Atomic file writes**: Write to `.tmp`, then rename. Prevents partial reads.
-4. **1 MCP tool, not many**: Only `read_chat` — adds value beyond native file access. Chat sending handled via direct file append.
+4. **2 MCP tools**: `read_chat` (smart filtering, digest offloading) and `send_chat` (structured messaging with relay broadcast).
 5. **Session auto-segmentation**: 30min silence → new session ID. MCP `read_chat` defaults to current session.
 6. **Offline-first**: TUI works fully with local files. WebSocket is optional.
 7. **Hooks integration**: `PostToolUse` hook signals TUI when agents modify `.syncvibe/` files.
-8. **Security**: room.json and config.toml use 0600 permissions. Room secret is 32 random bytes (64 hex chars).
+8. **Security**: All local files use 0600 permissions, TLS enforced on relay, identity stamped server-side. See Security & Privacy section above.
 9. **Context window protection**: MCP `read_chat` offloads large conversations to `.syncvibe/chat-digest.md` instead of returning them inline. Tool response stays bounded (~3 lines for large chats), agent reads the file at its own discretion.
+10. **Message retention**: Configurable `retention_days` (default 90). Old messages pruned atomically on startup — temp file + rename to prevent data loss.
