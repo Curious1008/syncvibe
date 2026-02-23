@@ -103,6 +103,14 @@ All state lives locally in `.syncvibe/`. The relay only handles real-time sync �
 - `/watch <name>` — view a teammate's agent screen in real time
 - Delta-encoded frames for efficient bandwidth
 
+### Git Remote Sync
+- Room creator's git remote is auto-detected and shared via invite codes
+- Joiners auto-clone the repo on connect — one step to get the code
+- `/remote` — set or show git remote URL
+- `/collab` — open GitHub collaborator settings to add teammates
+- Agents auto-push after completing tasks (via CLAUDE.md/AGENTS.md instructions)
+- Zero token storage — authentication handled by your existing git credentials
+
 ### Invite Codes
 - Short codes (`HKPT-3NWV`) auto-copied to clipboard
 - Paste to join — one step, no URLs or config files
@@ -150,6 +158,8 @@ All state lives locally in `.syncvibe/`. The relay only handles real-time sync �
 | `/watch <name>` | | Watch a teammate's screen |
 | `/name <n>` | | Change display name |
 | `/color <#hex>` | | Change color |
+| `/remote` | | Set or show git remote |
+| `/collab` | | Manage repo collaborators |
 | `/mute` | `/m` | Toggle @mention bell |
 | `/clear` | | Clear chat view |
 | `/rc` | | Reconnect to relay |

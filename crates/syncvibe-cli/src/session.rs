@@ -100,7 +100,7 @@ pub fn cmd_session() -> Result<()> {
         }
         let agent_id = crate::agents::select_agent()?;
         room.agent = Some(agent_id);
-        let path = init::prepare_project_dir(&name)?;
+        let path = init::prepare_project_dir_with_remote(&name, room.git_remote.as_deref())?;
         init::perform_init(&path, Some(room))?;
         return tmux::launch_project(&path);
     }
@@ -163,6 +163,7 @@ pub fn cmd_session() -> Result<()> {
                 let mut room = RoomConfig::new();
                 room.room_name = Some(name);
                 room.agent = Some(agent_id);
+                room.git_remote = crate::git::ops::detect_or_prompt_git_remote(&path);
                 init::perform_init(&path, Some(room))?;
                 tmux::launch_project(&path)
             } else {
@@ -201,7 +202,7 @@ pub fn cmd_session() -> Result<()> {
                 }
                 let agent_id = crate::agents::select_agent()?;
                 room.agent = Some(agent_id);
-                let path = init::prepare_project_dir(&name)?;
+                let path = init::prepare_project_dir_with_remote(&name, room.git_remote.as_deref())?;
                 init::perform_init(&path, Some(room))?;
                 tmux::launch_project(&path)
             }

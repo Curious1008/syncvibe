@@ -56,7 +56,10 @@ pub fn select_agent() -> Result<String> {
     println!();
 
     match onboarding::select_menu(&items)? {
-        Some(idx) => Ok(AGENTS[idx].id.to_string()),
+        Some(idx) => {
+            println!();
+            Ok(AGENTS[idx].id.to_string())
+        }
         None => anyhow::bail!("Cancelled."),
     }
 }

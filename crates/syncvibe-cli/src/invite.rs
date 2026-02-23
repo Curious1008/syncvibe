@@ -19,6 +19,7 @@ pub fn create_short_invite(room: &RoomConfig) -> Result<String> {
         "room_secret": room.room_secret,
         "room_name": room.room_name,
         "relay_url": room.relay_url,
+        "git_remote": room.git_remote,
     });
 
     let response: serde_json::Value = ureq::post(&url)
@@ -78,12 +79,15 @@ pub fn resolve_short_invite(code: &str) -> Result<RoomConfig> {
         .unwrap_or(DEFAULT_RELAY_URL)
         .to_string();
 
+    let git_remote = response["git_remote"].as_str().map(|s| s.to_string());
+
     Ok(RoomConfig {
         room_id,
         room_secret,
         relay_url,
         room_name,
         agent: None,
+        git_remote,
     })
 }
 

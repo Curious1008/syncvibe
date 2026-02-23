@@ -13,6 +13,8 @@ pub struct RoomConfig {
     pub room_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_remote: Option<String>,
 }
 
 impl Default for RoomConfig {
@@ -37,6 +39,7 @@ impl RoomConfig {
             relay_url: DEFAULT_RELAY_URL.to_string(),
             room_name: None,
             agent: None,
+            git_remote: None,
         }
     }
 
@@ -109,6 +112,7 @@ impl RoomConfig {
             relay_url: DEFAULT_RELAY_URL.to_string(),
             room_name,
             agent: None,
+            git_remote: None,
         })
     }
 }

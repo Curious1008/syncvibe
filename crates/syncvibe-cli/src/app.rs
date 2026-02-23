@@ -373,6 +373,8 @@ impl AppState {
                 self.system_msg("/name <n> — change display name");
                 self.system_msg("/color <#hex> — change your color");
                 self.system_msg("/mute     — toggle @mention bell     (/m)");
+                self.system_msg("/remote   — set or show git remote");
+                self.system_msg("/collab   — manage repo collaborators");
                 self.system_msg("/share    — toggle agent screen sharing");
                 self.system_msg("/watch    — view a teammate's shared screen");
                 self.system_msg("/clear    — clear chat view");
@@ -384,7 +386,14 @@ impl AppState {
                 self.system_msg("@claude/@codex — send task to your AI agent");
             }
             "/invite" | "/i" => match self.storage.read_room_config() {
-                Ok(room) => {
+                Ok(mut room) => {
+                    // Refresh git_remote — user may have added a remote after room creation
+                    if let Some(detected) = crate::git::ops::get_git_remote_in(self.storage.project_root()) {
+                        if room.git_remote.as_deref() != Some(&detected) {
+                            room.git_remote = Some(detected);
+                            let _ = self.storage.write_room_config(&room);
+                        }
+                    }
                     let code = crate::invite::create_short_invite(&room)
                         .or_else(|_| room.to_invite_code().map_err(|e| anyhow::anyhow!(e)));
                     match code {
@@ -492,6 +501,60 @@ impl AppState {
                 } else {
                     self.toast("Reconnecting...");
                     self.want_reconnect = true;
+                }
+            }
+            "/remote" => {
+                if arg.is_empty() {
+                    // Show current git remote info
+                    let room_remote = self.storage.read_room_config()
+                        .ok()
+                        .and_then(|r| r.git_remote);
+                    let actual_remote = crate::git::ops::get_git_remote_in(self.storage.project_root());
+                    match (&room_remote, &actual_remote) {
+                        (Some(r), _) => self.system_msg(&format!("Remote: {}", r)),
+                        (None, Some(a)) => self.system_msg(&format!("Git remote: {} (not in room config)", a)),
+                        (None, None) => self.system_msg("No git remote configured. Use /remote <url> to set one."),
+                    }
+                } else {
+                    let url = arg.to_string();
+                    if !url.starts_with("https://") && !url.starts_with("git@") {
+                        self.system_msg("URL must start with https:// or git@");
+                        return true;
+                    }
+                    // Set git remote on disk
+                    let project_root = self.storage.project_root().to_path_buf();
+                    let _ = crate::git::ops::set_git_remote(&project_root, &url);
+                    // Update room config
+                    if let Ok(mut room) = self.storage.read_room_config() {
+                        room.git_remote = Some(url.clone());
+                        let _ = self.storage.write_room_config(&room);
+                    }
+                    self.system_msg(&format!("✓ Remote set: {}", url));
+                }
+            }
+            "/collab" => {
+                let remote = self.storage.read_room_config()
+                    .ok()
+                    .and_then(|r| r.git_remote)
+                    .or_else(|| crate::git::ops::get_git_remote_in(self.storage.project_root()));
+                match remote.and_then(|u| crate::git::ops::parse_github_repo(&u)) {
+                    Some((owner, repo)) => {
+                        let url = format!("https://github.com/{}/{}/settings/access", owner, repo);
+                        self.system_msg(&format!("Opening {} ...", url));
+                        #[cfg(target_os = "macos")]
+                        { let _ = std::process::Command::new("open").arg(&url).spawn(); }
+                        #[cfg(target_os = "linux")]
+                        { let _ = std::process::Command::new("xdg-open").arg(&url).spawn(); }
+                    }
+                    None => {
+                        self.system_msg("No GitHub repo linked. Opening GitHub to create one...");
+                        self.system_msg("After creating, use /remote <url> to link it.");
+                        let url = "https://github.com/new";
+                        #[cfg(target_os = "macos")]
+                        { let _ = std::process::Command::new("open").arg(url).spawn(); }
+                        #[cfg(target_os = "linux")]
+                        { let _ = std::process::Command::new("xdg-open").arg(url).spawn(); }
+                    }
                 }
             }
             "/share" => {
@@ -1722,6 +1785,7 @@ fn handle_new_project() -> bool {
     let mut room = RoomConfig::new();
     room.room_name = Some(name);
     room.agent = Some(agent_id);
+    room.git_remote = crate::git::ops::detect_or_prompt_git_remote(&path);
 
     if init::perform_init(&path, Some(room)).is_err() {
         println!("  {DIM}Setup cancelled or failed.{R}");
@@ -1794,7 +1858,7 @@ fn handle_join_project() -> bool {
     };
     room.agent = Some(agent_id);
 
-    let path = match init::prepare_project_dir(&name) {
+    let path = match init::prepare_project_dir_with_remote(&name, room.git_remote.as_deref()) {
         Ok(p) => p,
         Err(_) => return false,
     };

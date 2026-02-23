@@ -18,6 +18,8 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/mute", "Toggle notification bell"),
     ("/share", "Toggle screen sharing"),
     ("/watch", "Watch a shared screen"),
+    ("/remote", "Set or show git remote"),
+    ("/collab", "Manage repo collaborators"),
     ("/leave", "Leave current room"),
     ("/clear", "Clear chat view"),
     ("/rc", "Reconnect to chat"),

@@ -75,6 +75,36 @@ pub fn prepare_project_dir(name: &str) -> Result<PathBuf> {
     }
 }
 
+/// Prepare a project directory with optional git clone from a remote URL.
+/// If git_remote is Some, attempts to clone first. On failure, falls back to normal prepare.
+pub fn prepare_project_dir_with_remote(
+    name: &str,
+    git_remote: Option<&str>,
+) -> Result<PathBuf> {
+    validate_room_name(name)?;
+    let target = projects_dir().join(name);
+
+    if let Some(url) = git_remote {
+        if !target.exists() {
+            match crate::git::ops::git_clone(url, &target) {
+                Ok(()) => {
+                    println!(
+                        "\n  {GREEN}✓{R} Cloned from {url}\n"
+                    );
+                    return Ok(target);
+                }
+                Err(_) => {
+                    println!("\n  {RED}✗{R} Clone failed — you may need repo access.");
+                    println!("    {DIM}Ask the room owner to add you on GitHub.");
+                    println!("    Starting in chat-only mode...{R}\n");
+                }
+            }
+        }
+    }
+
+    prepare_project_dir(name)
+}
+
 /// Try to create directory + git init. Returns error on failure.
 fn try_create_project_dir(path: &Path) -> Result<()> {
     if path.exists() && !path.is_dir() {
@@ -462,7 +492,16 @@ This project uses SyncVibe for real-time team collaboration.\n\
   - Task done → \"Done — [one-line summary]\"\n\
   - Need info → ask one short question.\n\
   - Long output → \"Check the agent pane (Ctrl+G) for details.\"\n\
-- Do not write to `.syncvibe/` files directly. Always use MCP tools.\n";
+- Do not write to `.syncvibe/` files directly. Always use MCP tools.\n\
+\n\
+### Code Sync\n\
+- This project uses Git for code collaboration.\n\
+- After completing code changes, always commit and push:\n\
+  `git add -A && git commit -m \"brief description\" && git push`\n\
+- Before starting new work, pull latest changes:\n\
+  `git pull`\n\
+- If there are merge conflicts, resolve them before continuing.\n\
+- Do NOT skip the push step — your teammates need to see your changes.\n";
 
 fn file_contains_syncvibe(path: &std::path::Path) -> bool {
     path.exists()

@@ -73,9 +73,28 @@ fn cmd_init() -> Result<()> {
         anyhow::bail!("Not in a git repository. Run `git init` first.");
     }
 
+    // If room already exists, just update git_remote and launch — skip agent selection
+    if cwd.join(".syncvibe").join("room.json").exists() {
+        let storage = Storage::find(&cwd)?;
+        let mut room = storage.read_room_config()?;
+        if let Some(detected) = crate::git::ops::get_git_remote_in(&cwd) {
+            if room.git_remote.as_deref() != Some(&detected) {
+                room.git_remote = Some(detected.clone());
+                storage.write_room_config(&room)?;
+                println!(
+                    "  {GREEN}✓{R} Remote updated: {detected}"
+                );
+            }
+        }
+        println!("  {DIM}Room already set up — launching...{R}\n");
+        let _user = session::ensure_user_profile()?;
+        return tmux::launch_project(&cwd);
+    }
+
     let agent_id = agents::select_agent()?;
     let mut room = syncvibe_core::models::RoomConfig::new();
     room.agent = Some(agent_id);
+    room.git_remote = crate::git::ops::detect_or_prompt_git_remote(&cwd);
     init::perform_init(&cwd, Some(room))?;
     let _user = session::ensure_user_profile()?;
     tmux::launch_project(&cwd)
@@ -188,8 +207,16 @@ fn cmd_chat(message: String) -> Result<()> {
 fn cmd_invite() -> Result<()> {
     let cwd = env::current_dir()?;
     let storage = Storage::find(&cwd)?;
-    let room = storage.read_room_config()?;
+    let mut room = storage.read_room_config()?;
     let user = config::load_user_config()?;
+
+    // Refresh git_remote — user may have added a remote after room creation
+    if let Some(detected) = git::ops::get_git_remote_in(storage.project_root()) {
+        if room.git_remote.as_deref() != Some(&detected) {
+            room.git_remote = Some(detected);
+            let _ = storage.write_room_config(&room);
+        }
+    }
 
     let code = invite::create_short_invite(&room)
         .or_else(|_| room.to_invite_code().map_err(|e| anyhow::anyhow!(e)))?;
@@ -231,7 +258,7 @@ fn cmd_connect(code: String) -> Result<()> {
     let agent_id = agents::select_agent()?;
     room.agent = Some(agent_id);
 
-    let path = init::prepare_project_dir(&name)?;
+    let path = init::prepare_project_dir_with_remote(&name, room.git_remote.as_deref())?;
     init::perform_init(&path, Some(room))?;
     tmux::launch_project(&path)
 }
