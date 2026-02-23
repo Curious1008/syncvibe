@@ -100,9 +100,10 @@ pub fn parse_github_repo(url: &str) -> Option<(String, String)> {
     None
 }
 
-/// Detect git remote in a directory, or prompt user to choose:
-/// 1. Paste URL  2. Create new repo (opens browser)  3. Skip
-/// Returns Some(url) if set, None if skipped.
+/// Detect git remote in a directory, or prompt user to choose.
+///
+/// Options: Paste URL, Create new repo (opens browser), Skip.
+/// Returns `Some(url)` if set, `None` if skipped.
 pub fn detect_or_prompt_git_remote(dir: &Path) -> Option<String> {
     use crate::onboarding::{self, MenuItem, DIM, GREEN, R, TEAL};
 
