@@ -54,7 +54,7 @@ Type `/invite` in the TUI — a short code like `HKPT-3NWV` is copied to your cl
 syncvibe connect HKPT-3NWV
 ```
 
-Chat syncs in real time. The AI agent auto-configures via MCP — no manual setup needed.
+Chat syncs in real time. If the room has a linked repo, the code auto-clones on connect. The AI agent auto-configures via MCP — no manual setup needed.
 
 ---
 
@@ -104,12 +104,12 @@ All state lives locally in `.syncvibe/`. The relay only handles real-time sync �
 - Delta-encoded frames for efficient bandwidth
 
 ### Git Remote Sync
-- Room creator's git remote is auto-detected and shared via invite codes
-- Joiners auto-clone the repo on connect — one step to get the code
-- `/remote` — set or show git remote URL
+- **Create a room** — SyncVibe auto-detects your git remote, or prompts you to paste/create one (optional, can skip)
+- **Teammate joins** — repo auto-clones on `syncvibe connect`. One step: join room + get code
+- **Agents auto-push** — CLAUDE.md/AGENTS.md instruct agents to commit & push after completing tasks
+- `/remote` — set or show git remote URL at any time
 - `/collab` — open GitHub collaborator settings to add teammates
-- Agents auto-push after completing tasks (via CLAUDE.md/AGENTS.md instructions)
-- Zero token storage — authentication handled by your existing git credentials
+- No tokens or PATs needed — authentication uses your existing git credentials
 
 ### Invite Codes
 - Short codes (`HKPT-3NWV`) auto-copied to clipboard
@@ -204,7 +204,7 @@ All room state lives in `.syncvibe/` inside your project:
 
 ```
 .syncvibe/
-├── room.json          # Room identity (room_id, secret, relay_url)
+├── room.json          # Room identity (room_id, secret, relay_url, git_remote)
 ├── chat-log.jsonl     # Append-only chat, one JSON per line
 ├── chat-digest.md     # Auto-generated digest for large conversations
 └── images/            # Shared images (UUID-named)
