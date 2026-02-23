@@ -247,4 +247,3 @@ pub fn draw_mentions(
     frame.render_widget(Clear, popup_rect);
     frame.render_widget(popup, popup_rect);
 }
-

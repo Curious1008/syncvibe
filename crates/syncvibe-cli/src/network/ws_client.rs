@@ -130,7 +130,11 @@ pub async fn connect_ws(
 
 fn classify_ws_error(e: &tokio_tungstenite::tungstenite::Error) -> &'static str {
     let s = e.to_string().to_lowercase();
-    if s.contains("dns") || s.contains("resolve") || s.contains("no such host") || s.contains("name or service not known") {
+    if s.contains("dns")
+        || s.contains("resolve")
+        || s.contains("no such host")
+        || s.contains("name or service not known")
+    {
         "relay not reachable \u{2014} check your internet"
     } else if s.contains("connection refused") {
         "relay is down \u{2014} try again later"

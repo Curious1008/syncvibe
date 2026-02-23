@@ -175,7 +175,11 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
             // Toast too long — truncate
             let available = remaining.saturating_sub(2);
             let truncated: String = if available > 3 {
-                toast_text.chars().take(available - 3).chain("...".chars()).collect()
+                toast_text
+                    .chars()
+                    .take(available - 3)
+                    .chain("...".chars())
+                    .collect()
             } else {
                 toast_text.chars().take(available).collect()
             };
