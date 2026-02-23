@@ -302,7 +302,7 @@ What's coming next (no ETAs — shipped when ready):
 - **End-to-end encryption** — message content encrypted client-side so the relay can't read it
 - **Windows support** — native binary + PowerShell/Windows Terminal integration
 - **Voice chat** — spatial audio channels inside the terminal session
-- **Self-hosted relay** — open source the relay server with Docker one-click deploy
+- **Managed relay for teams** — dedicated relay instances with custom domains and SLA
 - **File sharing** — send code snippets, patches, and files through chat
 - **Persistent rooms** — rejoin rooms across machines with cloud-synced state
 - **Git conflict resolution** — real-time merge conflict detection and assisted resolution
