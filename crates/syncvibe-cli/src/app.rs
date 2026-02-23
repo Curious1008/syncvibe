@@ -370,10 +370,10 @@ impl AppState {
                 self.system_msg("/new      — create a new room      (/n)");
                 self.system_msg("/join     — join with invite code   (/j)");
                 self.system_msg("/chats    — switch between rooms");
-                self.system_msg("/name <n> — change display name");
-                self.system_msg("/color <#hex> — change your color");
+                self.system_msg("/name <n> — change display name     e.g. /name Alice");
+                self.system_msg("/color <#hex> — change your color  e.g. #4ECDC4");
                 self.system_msg("/mute     — toggle @mention bell     (/m)");
-                self.system_msg("/remote   — set or show git remote");
+                self.system_msg("/remote   — set or show git remote  e.g. /remote https://...");
                 self.system_msg("/collab   — manage repo collaborators");
                 self.system_msg("/share    — toggle agent screen sharing");
                 self.system_msg("/watch    — view a teammate's shared screen");
@@ -413,8 +413,8 @@ impl AppState {
                                 self.system_msg(&format!("Invite saved to {}", path.display()));
                             }
                         }
-                        Err(_) => {
-                            self.system_msg("Error generating invite code.");
+                        Err(e) => {
+                            self.system_msg(&format!("Could not generate invite code: {e}"));
                         }
                     }
                 }
@@ -1202,7 +1202,7 @@ pub async fn run() -> Result<()> {
             }
             Err(e) => {
                 state.toast_err(&format!("Chat unavailable — {}", e));
-                reconnect_attempts = 1;
+                reconnect_attempts = 0;
                 reconnect_at = Some(tokio::time::Instant::now() + Duration::from_secs(10));
             }
         }

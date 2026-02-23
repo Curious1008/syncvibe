@@ -6,6 +6,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use syncvibe_core::protocol::PresenceInfo;
 
 use crate::agents;
+use crate::components::util::parse_hex_color;
 
 pub const COMMANDS: &[(&str, &str)] = &[
     ("/help", "Show all commands"),
@@ -13,8 +14,8 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/new", "Create a new room"),
     ("/join", "Join with invite code"),
     ("/chats", "Switch between rooms"),
-    ("/name", "Change display name"),
-    ("/color", "Change chat color"),
+    ("/name", "Change display name (/name Alice)"),
+    ("/color", "Change chat color (#RRGGBB)"),
     ("/mute", "Toggle notification bell"),
     ("/share", "Toggle screen sharing"),
     ("/watch", "Watch a shared screen"),
@@ -90,6 +91,7 @@ pub fn draw(frame: &mut ratatui::Frame, anchor: Rect, input: &str, selected: usi
 
     let block = Block::default()
         .borders(Borders::ALL)
+        .title(" Commands ")
         .border_style(Style::default().fg(Color::Rgb(60, 60, 70)))
         .style(Style::default().bg(Color::Rgb(30, 30, 40)));
 
@@ -246,13 +248,3 @@ pub fn draw_mentions(
     frame.render_widget(popup, popup_rect);
 }
 
-fn parse_hex_color(hex: &str) -> Color {
-    if hex.len() == 7 && hex.starts_with('#') {
-        let r = u8::from_str_radix(&hex[1..3], 16).unwrap_or(200);
-        let g = u8::from_str_radix(&hex[3..5], 16).unwrap_or(200);
-        let b = u8::from_str_radix(&hex[5..7], 16).unwrap_or(200);
-        Color::Rgb(r, g, b)
-    } else {
-        Color::White
-    }
-}

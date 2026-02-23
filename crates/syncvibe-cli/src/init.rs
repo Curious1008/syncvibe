@@ -91,6 +91,7 @@ pub fn prepare_project_dir_with_remote(name: &str, git_remote: Option<&str>) -> 
                 Err(_) => {
                     println!("\n  {RED}✗{R} Clone failed — you may need repo access.");
                     println!("    {DIM}Ask the room owner to add you on GitHub.");
+                    println!("    Once you have access, use /remote <url> to link the repo.");
                     println!("    Starting in chat-only mode...{R}\n");
                 }
             }

@@ -50,9 +50,14 @@ pub async fn connect_ws(
         })
         .collect();
     let url = format!("{}/ws/{}", relay_url, encoded_room_id);
-    let (ws_stream, _) = time::timeout(Duration::from_secs(5), connect_async(&url))
-        .await
-        .map_err(|_| anyhow::anyhow!("Connection timed out"))??;
+    let (ws_stream, _) = match time::timeout(Duration::from_secs(5), connect_async(&url)).await {
+        Ok(Ok(pair)) => pair,
+        Ok(Err(e)) => {
+            let msg = classify_ws_error(&e);
+            return Err(anyhow::anyhow!("{msg}"));
+        }
+        Err(_) => return Err(anyhow::anyhow!("connection timed out")),
+    };
     let (mut write, mut read) = ws_stream.split();
 
     // Channel for outgoing messages (256 to accommodate screen sharing frame bursts)
@@ -121,6 +126,19 @@ pub async fn connect_ws(
     });
 
     Ok((WsClient { tx: out_tx }, in_rx, alive_rx))
+}
+
+fn classify_ws_error(e: &tokio_tungstenite::tungstenite::Error) -> &'static str {
+    let s = e.to_string().to_lowercase();
+    if s.contains("dns") || s.contains("resolve") || s.contains("no such host") || s.contains("name or service not known") {
+        "relay not reachable \u{2014} check your internet"
+    } else if s.contains("connection refused") {
+        "relay is down \u{2014} try again later"
+    } else if s.contains("tls") || s.contains("certificate") || s.contains("ssl") {
+        "TLS error connecting to relay"
+    } else {
+        "could not connect to relay"
+    }
 }
 
 impl WsClient {
