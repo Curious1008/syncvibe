@@ -12,6 +12,10 @@ fn http_url(relay_url: &str) -> String {
 /// POST room config to the relay, returning a short code like "XXXX-XXXX".
 pub fn create_short_invite(room: &RoomConfig) -> Result<String> {
     let base = http_url(&room.relay_url);
+    anyhow::ensure!(
+        base.starts_with("https://"),
+        "Relay URL must use TLS (wss://)"
+    );
     let url = format!("{}/invite", base);
 
     let body = serde_json::json!({

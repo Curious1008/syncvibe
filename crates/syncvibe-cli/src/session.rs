@@ -202,7 +202,8 @@ pub fn cmd_session() -> Result<()> {
                 }
                 let agent_id = crate::agents::select_agent()?;
                 room.agent = Some(agent_id);
-                let path = init::prepare_project_dir_with_remote(&name, room.git_remote.as_deref())?;
+                let path =
+                    init::prepare_project_dir_with_remote(&name, room.git_remote.as_deref())?;
                 init::perform_init(&path, Some(room))?;
                 tmux::launch_project(&path)
             }

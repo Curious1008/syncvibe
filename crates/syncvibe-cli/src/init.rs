@@ -77,10 +77,7 @@ pub fn prepare_project_dir(name: &str) -> Result<PathBuf> {
 
 /// Prepare a project directory with optional git clone from a remote URL.
 /// If git_remote is Some, attempts to clone first. On failure, falls back to normal prepare.
-pub fn prepare_project_dir_with_remote(
-    name: &str,
-    git_remote: Option<&str>,
-) -> Result<PathBuf> {
+pub fn prepare_project_dir_with_remote(name: &str, git_remote: Option<&str>) -> Result<PathBuf> {
     validate_room_name(name)?;
     let target = projects_dir().join(name);
 
@@ -88,9 +85,7 @@ pub fn prepare_project_dir_with_remote(
         if !target.exists() {
             match crate::git::ops::git_clone(url, &target) {
                 Ok(()) => {
-                    println!(
-                        "\n  {GREEN}✓{R} Cloned from {url}\n"
-                    );
+                    println!("\n  {GREEN}✓{R} Cloned from {url}\n");
                     return Ok(target);
                 }
                 Err(_) => {

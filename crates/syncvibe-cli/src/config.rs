@@ -179,12 +179,25 @@ fn atomic_write(path: &std::path::Path, content: &str) -> Result<()> {
     Ok(())
 }
 
-/// Register or update a project in the registry
+/// Register or update a project in the registry.
+/// Uses a lock file to prevent concurrent writes from multiple instances.
 pub fn register_project(name: &str, path: &str) -> Result<()> {
+    use fs2::FileExt;
+
     // Canonicalize to avoid duplicates (e.g. /tmp vs /private/tmp on macOS)
     let canonical = std::fs::canonicalize(path)
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| path.to_string());
+
+    let dir = config_dir()?;
+    fs::create_dir_all(&dir)?;
+    let lock_path = dir.join("projects.lock");
+    let lock_file = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)?;
+    lock_file.lock_exclusive().ok();
 
     let mut registry = load_registry()?;
     if let Some(entry) = registry.projects.iter_mut().find(|p| p.path == canonical) {
@@ -197,5 +210,7 @@ pub fn register_project(name: &str, path: &str) -> Result<()> {
             last_opened: chrono::Utc::now(),
         });
     }
-    save_registry(&registry)
+    let result = save_registry(&registry);
+    lock_file.unlock().ok();
+    result
 }

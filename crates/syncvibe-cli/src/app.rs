@@ -388,7 +388,9 @@ impl AppState {
             "/invite" | "/i" => match self.storage.read_room_config() {
                 Ok(mut room) => {
                     // Refresh git_remote — user may have added a remote after room creation
-                    if let Some(detected) = crate::git::ops::get_git_remote_in(self.storage.project_root()) {
+                    if let Some(detected) =
+                        crate::git::ops::get_git_remote_in(self.storage.project_root())
+                    {
                         if room.git_remote.as_deref() != Some(&detected) {
                             room.git_remote = Some(detected);
                             let _ = self.storage.write_room_config(&room);
@@ -506,14 +508,20 @@ impl AppState {
             "/remote" => {
                 if arg.is_empty() {
                     // Show current git remote info
-                    let room_remote = self.storage.read_room_config()
+                    let room_remote = self
+                        .storage
+                        .read_room_config()
                         .ok()
                         .and_then(|r| r.git_remote);
-                    let actual_remote = crate::git::ops::get_git_remote_in(self.storage.project_root());
+                    let actual_remote =
+                        crate::git::ops::get_git_remote_in(self.storage.project_root());
                     match (&room_remote, &actual_remote) {
                         (Some(r), _) => self.system_msg(&format!("Remote: {}", r)),
-                        (None, Some(a)) => self.system_msg(&format!("Git remote: {} (not in room config)", a)),
-                        (None, None) => self.system_msg("No git remote configured. Use /remote <url> to set one."),
+                        (None, Some(a)) => {
+                            self.system_msg(&format!("Git remote: {} (not in room config)", a))
+                        }
+                        (None, None) => self
+                            .system_msg("No git remote configured. Use /remote <url> to set one."),
                     }
                 } else {
                     let url = arg.to_string();
@@ -533,7 +541,9 @@ impl AppState {
                 }
             }
             "/collab" => {
-                let remote = self.storage.read_room_config()
+                let remote = self
+                    .storage
+                    .read_room_config()
                     .ok()
                     .and_then(|r| r.git_remote)
                     .or_else(|| crate::git::ops::get_git_remote_in(self.storage.project_root()));
@@ -542,18 +552,26 @@ impl AppState {
                         let url = format!("https://github.com/{}/{}/settings/access", owner, repo);
                         self.system_msg(&format!("Opening {} ...", url));
                         #[cfg(target_os = "macos")]
-                        { let _ = std::process::Command::new("open").arg(&url).spawn(); }
+                        {
+                            let _ = std::process::Command::new("open").arg(&url).spawn();
+                        }
                         #[cfg(target_os = "linux")]
-                        { let _ = std::process::Command::new("xdg-open").arg(&url).spawn(); }
+                        {
+                            let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+                        }
                     }
                     None => {
                         self.system_msg("No GitHub repo linked. Opening GitHub to create one...");
                         self.system_msg("After creating, use /remote <url> to link it.");
                         let url = "https://github.com/new";
                         #[cfg(target_os = "macos")]
-                        { let _ = std::process::Command::new("open").arg(url).spawn(); }
+                        {
+                            let _ = std::process::Command::new("open").arg(url).spawn();
+                        }
                         #[cfg(target_os = "linux")]
-                        { let _ = std::process::Command::new("xdg-open").arg(url).spawn(); }
+                        {
+                            let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+                        }
                     }
                 }
             }
@@ -1543,6 +1561,14 @@ pub async fn run() -> Result<()> {
         // Handle /leave — leave current room, show room picker to switch
         if state.want_leave {
             state.want_leave = false;
+
+            // Notify relay so it can track membership for idle cleanup
+            if let Some(ref ws) = state.ws_client {
+                let ws = ws.clone();
+                let uid = state.user.profile.user_id.clone();
+                let _ = ws.send(WsMessage::LeaveRoom { user_id: uid }).await;
+            }
+
             drop(key_rx); // Stop key bridge so it doesn't steal stdin
             tui::teardown(&mut terminal)?;
 
@@ -1827,10 +1853,16 @@ fn handle_join_project() -> bool {
         }
     };
 
-    let name = room
+    let raw_name = room
         .room_name
         .clone()
         .unwrap_or_else(|| "syncvibe-room".to_string());
+    let name = crate::onboarding::sanitize_name(&raw_name);
+    let name = if name.is_empty() {
+        "syncvibe-room".to_string()
+    } else {
+        name
+    };
 
     if room.room_name.is_some() {
         println!("  {GREEN}✓{R} Code accepted — {B}{name}{R}\n");

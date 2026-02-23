@@ -60,7 +60,12 @@ impl Storage {
     pub fn read_room_config(&self) -> Result<RoomConfig> {
         let path = self.root.join("room.json");
         let content = fs::read_to_string(&path)?;
-        Ok(serde_json::from_str(&content)?)
+        serde_json::from_str(&content).map_err(|_| {
+            SyncVibeError::Other(format!(
+                "room.json is corrupted. Run `syncvibe init` to recreate it. ({})",
+                path.display()
+            ))
+        })
     }
 
     pub fn write_room_config(&self, config: &RoomConfig) -> Result<()> {
@@ -111,8 +116,10 @@ impl Storage {
             return Ok(Vec::new());
         }
         let file = fs::File::open(&path)?;
-        // Acquire shared lock for consistent reads
-        let _ = file.try_lock_shared();
+        // Acquire shared lock for consistent reads (non-blocking, warn on failure)
+        if file.try_lock_shared().is_err() {
+            eprintln!("Warning: could not acquire shared lock on chat log");
+        }
         let reader = std::io::BufReader::new(file);
         let mut messages = Vec::new();
         for line in reader.lines() {
@@ -137,8 +144,10 @@ impl Storage {
             return Ok((Vec::new(), 0));
         }
         let file = fs::File::open(&path)?;
-        // Acquire shared lock for consistent reads
-        let _ = file.try_lock_shared();
+        // Acquire shared lock for consistent reads (non-blocking, warn on failure)
+        if file.try_lock_shared().is_err() {
+            eprintln!("Warning: could not acquire shared lock on chat log");
+        }
         let file_len = file.metadata()?.len();
         if offset >= file_len {
             return Ok((Vec::new(), file_len));
@@ -261,16 +270,20 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     let tmp = path.with_extension(format!("{}.{}.tmp", std::process::id(), nanos));
-    {
+    let result = (|| -> Result<()> {
         let mut opts = fs::OpenOptions::new();
         opts.write(true).create_new(true);
         #[cfg(unix)]
         opts.mode(0o600);
         let mut file = opts.open(&tmp)?;
         file.write_all(content.as_bytes())?;
+        fs::rename(&tmp, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp); // Clean up temp file on failure
     }
-    fs::rename(&tmp, path)?;
-    Ok(())
+    result
 }
 
 /// Set file to owner-only read/write (0600) on Unix

@@ -25,7 +25,11 @@ pub fn get_git_remote() -> Option<String> {
         return None;
     }
     let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if url.is_empty() { None } else { Some(url) }
+    if url.is_empty() {
+        None
+    } else {
+        Some(url)
+    }
 }
 
 /// Read git remote origin URL in a specific directory.
@@ -38,11 +42,21 @@ pub fn get_git_remote_in(dir: &Path) -> Option<String> {
         return None;
     }
     let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if url.is_empty() { None } else { Some(url) }
+    if url.is_empty() {
+        None
+    } else {
+        Some(url)
+    }
 }
 
 /// Clone a git repository to a target directory.
+///
+/// Only allows https://, git@, and ssh:// URL schemes to prevent
+/// arbitrary code execution via git's ext:: protocol or other unsafe transports.
 pub fn git_clone(url: &str, target: &Path) -> Result<()> {
+    if !url.starts_with("https://") && !url.starts_with("git@") && !url.starts_with("ssh://") {
+        anyhow::bail!("Unsupported git URL scheme — must start with https://, git@, or ssh://");
+    }
     let status = Command::new("git")
         .args(["clone", url, &target.to_string_lossy()])
         .stdout(std::process::Stdio::null())
@@ -70,7 +84,14 @@ pub fn add_git_remote(dir: &Path, url: &str) -> Result<()> {
 /// Set (or update) git remote origin URL in a specific directory.
 pub fn set_git_remote(dir: &Path, url: &str) -> Result<()> {
     let status = Command::new("git")
-        .args(["-C", &dir.to_string_lossy(), "remote", "set-url", "origin", url])
+        .args([
+            "-C",
+            &dir.to_string_lossy(),
+            "remote",
+            "set-url",
+            "origin",
+            url,
+        ])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()?;
@@ -117,9 +138,18 @@ pub fn detect_or_prompt_git_remote(dir: &Path) -> Option<String> {
     println!("    Without it, chat + AI agent still work — just no code sync.{R}\n");
 
     let items = vec![
-        MenuItem { label: "Paste a repo URL".to_string(), hint: String::new() },
-        MenuItem { label: "Create new repo".to_string(), hint: "(opens GitHub)".to_string() },
-        MenuItem { label: "Skip".to_string(), hint: "(no code sync)".to_string() },
+        MenuItem {
+            label: "Paste a repo URL".to_string(),
+            hint: String::new(),
+        },
+        MenuItem {
+            label: "Create new repo".to_string(),
+            hint: "(opens GitHub)".to_string(),
+        },
+        MenuItem {
+            label: "Skip".to_string(),
+            hint: "(no code sync)".to_string(),
+        },
     ];
 
     let choice = onboarding::select_menu(&items).ok().flatten();
@@ -147,11 +177,20 @@ pub fn detect_or_prompt_git_remote(dir: &Path) -> Option<String> {
             // Create new repo — open browser, then prompt for URL
             println!("\n    {DIM}Opening GitHub...{R}");
             #[cfg(target_os = "macos")]
-            { let _ = std::process::Command::new("open").arg("https://github.com/new").spawn(); }
+            {
+                let _ = std::process::Command::new("open")
+                    .arg("https://github.com/new")
+                    .spawn();
+            }
             #[cfg(target_os = "linux")]
-            { let _ = std::process::Command::new("xdg-open").arg("https://github.com/new").spawn(); }
+            {
+                let _ = std::process::Command::new("xdg-open")
+                    .arg("https://github.com/new")
+                    .spawn();
+            }
             println!("    {DIM}Create your repo, then paste the URL below.{R}\n");
-            let input = onboarding::prompt(&format!("    {TEAL}Remote URL (Enter to skip):{R} ")).ok()?;
+            let input =
+                onboarding::prompt(&format!("    {TEAL}Remote URL (Enter to skip):{R} ")).ok()?;
             let input = input.trim().to_string();
             if input.is_empty() {
                 return None;

@@ -68,6 +68,11 @@ pub enum WsMessage {
         rows: u16,
     },
 
+    // Room lifecycle
+    LeaveRoom {
+        user_id: String,
+    },
+
     // Keepalive
     Ping,
     Pong,

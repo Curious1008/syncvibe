@@ -6,6 +6,24 @@ use crossterm::terminal;
 
 const MAX_NAME_LEN: usize = 32;
 
+/// RAII guard that restores terminal raw mode on drop.
+/// Prevents the terminal from being left in raw mode if the process
+/// is interrupted (e.g., Ctrl+C) while raw mode is active.
+struct RawModeGuard;
+
+impl RawModeGuard {
+    fn enable() -> io::Result<Self> {
+        terminal::enable_raw_mode()?;
+        Ok(Self)
+    }
+}
+
+impl Drop for RawModeGuard {
+    fn drop(&mut self) {
+        let _ = terminal::disable_raw_mode();
+    }
+}
+
 // ── Color palette (RGB true color) ───────────────────────────────
 
 pub(crate) const TEAL: &str = "\x1b[38;2;78;205;196m";
@@ -117,7 +135,7 @@ pub fn confirm(msg: &str) -> io::Result<bool> {
     print!("  {DIM}Press 1 or 2:{R} ");
     io::stdout().flush()?;
 
-    terminal::enable_raw_mode()?;
+    let _guard = RawModeGuard::enable()?;
     let result = (|| -> io::Result<bool> {
         loop {
             if let Event::Key(key) = event::read()? {
@@ -136,7 +154,7 @@ pub fn confirm(msg: &str) -> io::Result<bool> {
             }
         }
     })();
-    terminal::disable_raw_mode()?;
+    drop(_guard);
     let result = result?;
 
     // Print the choice and clean up
@@ -158,7 +176,7 @@ pub fn confirm_destructive(msg: &str) -> io::Result<bool> {
     println!("  {DIM}1 Yes{R}");
     println!("  {DIM}2{R} No\n");
 
-    terminal::enable_raw_mode()?;
+    let _guard = RawModeGuard::enable()?;
     let result = (|| -> io::Result<bool> {
         // 5-second countdown using wall-clock time (immune to keypresses)
         let start = std::time::Instant::now();
@@ -216,7 +234,7 @@ pub fn confirm_destructive(msg: &str) -> io::Result<bool> {
             }
         }
     })();
-    terminal::disable_raw_mode()?;
+    drop(_guard);
     let result = result?;
 
     if result {
@@ -298,9 +316,9 @@ pub fn select_menu(items: &[MenuItem]) -> io::Result<Option<usize>> {
     }
     // Reserve screen space: items + blank + hint
     reserve_lines(items.len() + 2)?;
-    terminal::enable_raw_mode()?;
+    let _guard = RawModeGuard::enable()?;
     let result = run_menu(items);
-    terminal::disable_raw_mode()?;
+    drop(_guard);
     print!("\r");
     io::stdout().flush()?;
     result
@@ -402,9 +420,9 @@ pub fn confirm_setup(items: &mut [SetupItem]) -> io::Result<bool> {
     // All items shown: actionable + done + 1 hover + 1 blank + 1 confirm + 2 (blank+hint)
     reserve_lines(items.len() + 5)?;
 
-    terminal::enable_raw_mode()?;
+    let _guard = RawModeGuard::enable()?;
     let result = run_checklist(items, &actionable);
-    terminal::disable_raw_mode()?;
+    drop(_guard);
 
     print!("\r");
     io::stdout().flush()?;

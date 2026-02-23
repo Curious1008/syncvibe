@@ -81,9 +81,7 @@ fn cmd_init() -> Result<()> {
             if room.git_remote.as_deref() != Some(&detected) {
                 room.git_remote = Some(detected.clone());
                 storage.write_room_config(&room)?;
-                println!(
-                    "  {GREEN}✓{R} Remote updated: {detected}"
-                );
+                println!("  {GREEN}✓{R} Remote updated: {detected}");
             }
         }
         println!("  {DIM}Room already set up — launching...{R}\n");
@@ -242,10 +240,16 @@ fn cmd_connect(code: String) -> Result<()> {
 
     let _user = session::ensure_user_profile()?;
 
-    let name = room
+    let raw_name = room
         .room_name
         .clone()
         .unwrap_or_else(|| "syncvibe-room".to_string());
+    let name = onboarding::sanitize_name(&raw_name);
+    let name = if name.is_empty() {
+        "syncvibe-room".to_string()
+    } else {
+        name
+    };
 
     let proj = init::projects_dir().join(&name);
 

@@ -2057,6 +2057,7 @@ dependencies = [
  "clap_complete",
  "crossterm",
  "dirs",
+ "fs2",
  "futures-util",
  "notify",
  "rand",

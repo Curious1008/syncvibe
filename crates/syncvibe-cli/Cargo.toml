@@ -25,6 +25,7 @@ dirs = "6"
 anyhow = "1"
 rmcp = { version = "0.15", features = ["server", "transport-io"] }
 schemars = "1"
+fs2 = "0.4"
 futures-util = "0.3"
 unicode-width = "0.2"
 ureq = { version = "3", features = ["json"] }

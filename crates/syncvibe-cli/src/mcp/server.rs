@@ -149,6 +149,13 @@ fn format_message_body(m: &ChatMessage, agent_mentions: &[String]) -> String {
     format!("{}{}", quote_prefix, body)
 }
 
+/// Escape message boundary markers in user content to prevent prompt injection.
+/// Replaces `[USER:` and `[END MESSAGE]` patterns so users can't inject fake boundaries.
+fn escape_boundaries(text: &str) -> String {
+    text.replace("[USER:", "[USER\u{200B}:")
+        .replace("[END MESSAGE]", "[END\u{200B}MESSAGE]")
+}
+
 /// Format messages in compact grouped form.
 /// Consecutive messages from the same user are grouped under one header.
 fn format_compact(msgs: &[&ChatMessage], agent_mentions: &[String]) -> String {
@@ -163,10 +170,13 @@ fn format_compact(msgs: &[&ChatMessage], agent_mentions: &[String]) -> String {
         let time = m.timestamp.with_timezone(&Local).format("%H:%M");
 
         // Collect consecutive messages from same user
-        let mut group = vec![format_message_body(m, agent_mentions)];
+        let mut group = vec![escape_boundaries(&format_message_body(m, agent_mentions))];
         let mut j = i + 1;
         while j < msgs.len() && msgs[j].user_name == m.user_name {
-            group.push(format_message_body(msgs[j], agent_mentions));
+            group.push(escape_boundaries(&format_message_body(
+                msgs[j],
+                agent_mentions,
+            )));
             j += 1;
         }
 
