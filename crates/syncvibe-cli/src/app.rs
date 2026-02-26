@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use notify::{RecursiveMode, Watcher};
 use ratatui::layout::{Constraint, Direction, Layout};
 use tokio::sync::mpsc;
@@ -67,6 +67,8 @@ pub struct AppState {
 
     // Chat selection (index into chat_messages, None = auto-scroll to bottom)
     pub chat_selected: Option<usize>,
+    // New messages received while user is scrolled up (selection mode)
+    pub unread_below: usize,
 
     // Input
     pub input_buffer: String,
@@ -114,6 +116,10 @@ pub struct AppState {
     // Cached line counts for chat rendering (keyed by msg id, valid for a given terminal width)
     pub line_count_cache: std::collections::HashMap<String, usize>,
     pub line_count_cache_width: usize,
+
+    // Chat area bounds (for mouse scroll hit testing)
+    pub chat_area_top: u16,
+    pub chat_area_bottom: u16,
 
     // Message ID set for O(1) deduplication
     msg_id_set: std::collections::HashSet<String>,
@@ -184,6 +190,7 @@ impl AppState {
             disk_msg_count,
             presence,
             chat_selected: None,
+            unread_below: 0,
             input_buffer: String::new(),
             input_cursor: 0,
             input_scroll: 0,
@@ -207,8 +214,86 @@ impl AppState {
             active_toast: None,
             line_count_cache: std::collections::HashMap::new(),
             line_count_cache_width: 0,
+            chat_area_top: 0,
+            chat_area_bottom: 0,
             msg_id_set,
         })
+    }
+
+    /// Clear selection and unread counter (return to auto-scroll bottom)
+    pub fn deselect_chat(&mut self) {
+        self.chat_selected = None;
+        self.unread_below = 0;
+    }
+
+    fn is_selectable(msg: &ChatMessage) -> bool {
+        matches!(
+            msg.message_type,
+            MessageType::User | MessageType::Image | MessageType::GitCommit
+        )
+    }
+
+    /// Scroll chat up by `n` messages. Enters selection mode if needed.
+    pub fn scroll_chat_up(&mut self, n: usize) {
+        let total = self.chat_messages.len();
+        if total == 0 {
+            return;
+        }
+        match self.chat_selected {
+            None => {
+                if let Some(i) = (0..total)
+                    .rev()
+                    .find(|&i| Self::is_selectable(&self.chat_messages[i]))
+                {
+                    self.focus = Panel::Chat;
+                    self.chat_selected = Some(i);
+                }
+            }
+            Some(idx) => {
+                let mut pos = idx;
+                for _ in 0..n {
+                    let prev = (0..pos)
+                        .rev()
+                        .find(|&i| Self::is_selectable(&self.chat_messages[i]));
+                    if let Some(prev) = prev {
+                        pos = prev;
+                    } else {
+                        let loaded = self.load_more_history();
+                        if loaded > 0 {
+                            pos += loaded;
+                            if let Some(p) = (0..pos)
+                                .rev()
+                                .find(|&i| Self::is_selectable(&self.chat_messages[i]))
+                            {
+                                pos = p;
+                            }
+                        }
+                        break;
+                    }
+                }
+                self.chat_selected = Some(pos);
+            }
+        }
+    }
+
+    /// Scroll chat down by `n` messages. Exits selection mode at bottom.
+    pub fn scroll_chat_down(&mut self, n: usize) {
+        let total = self.chat_messages.len();
+        if let Some(idx) = self.chat_selected {
+            let mut pos = idx;
+            for _ in 0..n {
+                let next = ((pos + 1)..total)
+                    .find(|&i| Self::is_selectable(&self.chat_messages[i]));
+                if let Some(next) = next {
+                    pos = next;
+                } else {
+                    self.deselect_chat();
+                    self.focus = Panel::Input;
+                    return;
+                }
+            }
+            self.chat_selected = Some(pos);
+        }
     }
 
     pub fn reload_data(&mut self) {
@@ -231,18 +316,31 @@ impl AppState {
                         self.toast(&msg.content);
                         continue;
                     }
+                    // Track unread count when scrolled up
+                    if self.chat_selected.is_some()
+                        && matches!(
+                            msg.message_type,
+                            MessageType::User | MessageType::Image
+                        )
+                    {
+                        self.unread_below += 1;
+                    }
                     self.msg_id_set.insert(msg.id.clone());
                     self.chat_messages.push(msg);
                 }
                 // Cap to prevent unbounded growth
                 if self.chat_messages.len() > MAX_DISPLAY_MESSAGES {
                     let excess = self.chat_messages.len() - MAX_DISPLAY_MESSAGES;
+                    // Remove drained message IDs from dedup set
+                    for msg in &self.chat_messages[..excess] {
+                        self.msg_id_set.remove(&msg.id);
+                    }
                     self.chat_messages.drain(..excess);
                     // Adjust selection index to compensate for removed messages
                     if let Some(ref mut idx) = self.chat_selected {
                         *idx = idx.saturating_sub(excess);
                         if *idx == 0 {
-                            self.chat_selected = None;
+                            self.deselect_chat();
                         }
                     }
                 }
@@ -498,7 +596,9 @@ impl AppState {
             "/clear" => {
                 self.chat_messages.clear();
                 self.older_messages.clear();
-                self.chat_selected = None;
+                self.msg_id_set.clear();
+                self.line_count_cache.clear();
+                self.deselect_chat();
             }
             "/rc" | "/reconnect" => {
                 if self.is_online {
@@ -843,7 +943,7 @@ impl AppState {
         self.input_buffer.clear();
         self.input_cursor = 0;
         self.input_scroll = 0;
-        self.chat_selected = None;
+        self.deselect_chat();
 
         // Detect @agent mention — show confirmation AFTER the message
         if msg.message_type == MessageType::User {
@@ -868,7 +968,16 @@ impl AppState {
         }
 
         let content_lower = msg.content.to_lowercase();
-        if let Some(agent_name) = crate::agents::find_mentioned_agent(&content_lower) {
+        // Only trigger send-keys for the agent running in THIS room
+        let local_agent = self
+            .local_agent_id
+            .as_deref()
+            .and_then(crate::agents::find);
+        let agent_name = match local_agent {
+            Some(a) if a.mentions.iter().any(|m| content_lower.contains(m)) => a.name,
+            _ => return,
+        };
+        {
             // Try to send "read chat" to the agent pane via tmux send-keys.
             // Text is sent with -l (literal), then C-m submits it. Plain
             // "Enter" doesn't work for Claude Code (Kitty keyboard protocol
@@ -1329,10 +1438,16 @@ pub async fn run() -> Result<()> {
         tokio::select! {
             // Terminal key events (bridged through tokio channel for reliable wakeup)
             maybe_event = key_rx.recv() => {
-                if let Some(Event::Key(key)) = maybe_event {
-                    if let Err(e) = handle_key_event(&mut state, key) {
-                        state.toast_err(&format!("Error: {}", e));
+                match maybe_event {
+                    Some(Event::Key(key)) => {
+                        if let Err(e) = handle_key_event(&mut state, key) {
+                            state.toast_err(&format!("Error: {}", e));
+                        }
                     }
+                    Some(Event::Mouse(mouse)) => {
+                        handle_mouse_event(&mut state, mouse);
+                    }
+                    _ => {}
                 }
             }
 
@@ -2049,8 +2164,8 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
             state.toast(&format!("{} left", name));
         }
         WsMessage::ChatMessage(msg) => {
-            // Deduplicate by message ID
-            if state.chat_messages.iter().any(|m| m.id == msg.id) {
+            // Deduplicate by message ID (O(1) via HashSet)
+            if state.msg_id_set.contains(&msg.id) {
                 return;
             }
             // Reject spoofed system message types from remote peers
@@ -2069,16 +2184,25 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
             {
                 state.ring_bell();
             }
+            // Track unread count when scrolled up
+            if state.chat_selected.is_some() {
+                state.unread_below += 1;
+            }
             let _ = state.storage.append_chat_message(&msg);
             state.disk_msg_count += 1;
             state.msg_id_set.insert(msg.id.clone());
             state.chat_messages.push(msg);
             // Cap to prevent unbounded growth
             if state.chat_messages.len() > MAX_DISPLAY_MESSAGES {
-                state.chat_messages.remove(0);
+                let removed = state.chat_messages.remove(0);
+                state.msg_id_set.remove(&removed.id);
                 // Adjust selection index to compensate for removed message
                 if let Some(ref mut idx) = state.chat_selected {
-                    *idx = idx.saturating_sub(1);
+                    if *idx == 0 {
+                        state.deselect_chat();
+                    } else {
+                        *idx -= 1;
+                    }
                 }
             }
         }
@@ -2201,6 +2325,23 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
     }
 }
 
+fn handle_mouse_event(state: &mut AppState, mouse: MouseEvent) {
+    // Only handle scroll events in the chat area
+    let in_chat = mouse.row >= state.chat_area_top && mouse.row < state.chat_area_bottom;
+    if !in_chat {
+        return;
+    }
+    match mouse.kind {
+        MouseEventKind::ScrollUp => {
+            state.scroll_chat_up(3);
+        }
+        MouseEventKind::ScrollDown => {
+            state.scroll_chat_down(3);
+        }
+        _ => {}
+    }
+}
+
 fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
     // Ctrl+C to quit
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
@@ -2215,7 +2356,6 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
                 if total == 0 {
                     return Ok(());
                 }
-                // Helper: find prev selectable (User/Image/GitCommit) message
                 let find_prev = |from: usize| -> Option<usize> {
                     (0..from).rev().find(|&i| {
                         matches!(
@@ -2226,7 +2366,6 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
                 };
                 match state.chat_selected {
                     None => {
-                        // Start from bottom, find last selectable
                         if let Some(i) = (0..total).rev().find(|&i| {
                             matches!(
                                 state.chat_messages[i].message_type,
@@ -2240,10 +2379,8 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
                         if let Some(prev) = find_prev(idx) {
                             state.chat_selected = Some(prev);
                         } else {
-                            // At the top — load more history
                             let loaded = state.load_more_history();
                             if loaded > 0 {
-                                // Keep pointing at the same message (shifted by loaded count)
                                 state.chat_selected = Some(idx + loaded);
                             }
                         }
@@ -2254,7 +2391,6 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
                 let total = state.chat_messages.len();
                 match state.chat_selected {
                     Some(idx) => {
-                        // Find next selectable message
                         if let Some(next) = ((idx + 1)..total).find(|&i| {
                             matches!(
                                 state.chat_messages[i].message_type,
@@ -2263,17 +2399,21 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
                         }) {
                             state.chat_selected = Some(next);
                         } else {
-                            // Past last selectable → back to input
-                            state.chat_selected = None;
+                            state.deselect_chat();
                             state.focus = Panel::Input;
                         }
                     }
                     _ => {
-                        // Esc or already None → back to input
-                        state.chat_selected = None;
+                        state.deselect_chat();
                         state.focus = Panel::Input;
                     }
                 }
+            }
+            KeyCode::PageUp => {
+                state.scroll_chat_up(10);
+            }
+            KeyCode::PageDown => {
+                state.scroll_chat_down(10);
             }
             KeyCode::Enter => {
                 if state.selected_is_image() {
@@ -2285,7 +2425,7 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
                                 user_name: msg.user_name.clone(),
                                 content: msg.content.clone(),
                             });
-                            state.chat_selected = None;
+                            state.deselect_chat();
                             state.focus = Panel::Input;
                         }
                     }
@@ -2437,7 +2577,6 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
                 }
                 KeyCode::Up => {
                     let total = state.chat_messages.len();
-                    // Find last selectable message (skip System/Tip)
                     if let Some(i) = (0..total).rev().find(|&i| {
                         matches!(
                             state.chat_messages[i].message_type,
@@ -2447,6 +2586,12 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
                         state.focus = Panel::Chat;
                         state.chat_selected = Some(i);
                     }
+                }
+                KeyCode::PageUp => {
+                    state.scroll_chat_up(10);
+                }
+                KeyCode::PageDown => {
+                    state.scroll_chat_down(10);
                 }
                 _ => {}
             }
@@ -2463,35 +2608,48 @@ fn strip_ansi(s: &str) -> String {
     let mut chars = s.chars().peekable();
     while let Some(c) = chars.next() {
         if c == '\x1b' {
-            // CSI: ESC [
-            if chars.peek() == Some(&'[') {
-                chars.next();
-                // consume until final byte (0x40-0x7E)
-                while let Some(&ch) = chars.peek() {
+            match chars.peek() {
+                // CSI: ESC [
+                Some(&'[') => {
                     chars.next();
-                    if ch.is_ascii() && (0x40..=0x7E).contains(&(ch as u8)) {
-                        break;
-                    }
-                }
-            // OSC: ESC ]
-            } else if chars.peek() == Some(&']') {
-                chars.next();
-                // consume until ST (ESC \ or BEL)
-                while let Some(ch) = chars.next() {
-                    if ch == '\x07' {
-                        break;
-                    }
-                    if ch == '\x1b' && chars.peek() == Some(&'\\') {
+                    // consume until final byte (0x40-0x7E)
+                    while let Some(&ch) = chars.peek() {
                         chars.next();
-                        break;
+                        if ch.is_ascii() && (0x40..=0x7E).contains(&(ch as u8)) {
+                            break;
+                        }
                     }
                 }
-            } else {
+                // OSC: ESC ] — terminated by ST (ESC \) or BEL
+                Some(&']') => {
+                    chars.next();
+                    while let Some(ch) = chars.next() {
+                        if ch == '\x07' {
+                            break;
+                        }
+                        if ch == '\x1b' && chars.peek() == Some(&'\\') {
+                            chars.next();
+                            break;
+                        }
+                    }
+                }
+                // DCS (ESC P), APC (ESC _), PM (ESC ^), SOS (ESC X) — all ST-terminated
+                Some(&'P') | Some(&'_') | Some(&'^') | Some(&'X') => {
+                    chars.next();
+                    while let Some(ch) = chars.next() {
+                        if ch == '\x1b' && chars.peek() == Some(&'\\') {
+                            chars.next();
+                            break;
+                        }
+                    }
+                }
                 // Other escape — skip the next char
-                chars.next();
+                _ => {
+                    chars.next();
+                }
             }
         } else if c.is_ascii_control() && c != '\n' && c != '\t' {
-            // Skip other control chars (BEL, etc.) but keep newline/tab
+            // Skip control chars (BEL, CR, etc.) but keep newline/tab
             continue;
         } else {
             out.push(c);
@@ -2514,6 +2672,8 @@ fn draw_ui(frame: &mut ratatui::Frame, state: &mut AppState) {
         .split(area);
 
     components::status_bar::draw(frame, chunks[0], state);
+    state.chat_area_top = chunks[1].y;
+    state.chat_area_bottom = chunks[1].y + chunks[1].height;
     components::chat::draw(frame, chunks[1], state);
     components::input::draw(frame, chunks[2], state);
 

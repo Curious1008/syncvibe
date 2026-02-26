@@ -238,9 +238,32 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
         }
     }
 
+    // "↓ N new messages" indicator when scrolled up
+    if state.unread_below > 0 && state.chat_selected.is_some() {
+        let label = if state.unread_below == 1 {
+            " ↓ 1 new message ".to_string()
+        } else {
+            format!(" ↓ {} new messages ", state.unread_below)
+        };
+        lines.push(Line::from(Span::styled(
+            label,
+            Style::default()
+                .fg(Color::White)
+                .bg(Color::Rgb(30, 100, 160))
+                .add_modifier(Modifier::BOLD),
+        )));
+    }
+
+    // Scroll to bottom if rendered lines exceed visible area
+    let scroll_offset = if lines.len() > inner_height {
+        (lines.len() - inner_height) as u16
+    } else {
+        0
+    };
     let paragraph = Paragraph::new(lines)
         .block(block)
-        .wrap(Wrap { trim: false });
+        .wrap(Wrap { trim: false })
+        .scroll((scroll_offset, 0));
     frame.render_widget(paragraph, area);
 }
 

@@ -186,7 +186,7 @@ async fn test_wrong_secret_rejected() {
         connect_and_auth(&room_id, "wrong-secret", "user-bad", "Eve", "#000000").await;
     let msg = recv_text(&mut read_bad, 5).await.expect("No auth_fail");
     assert_eq!(msg["type"], "auth_fail");
-    assert_eq!(msg["data"]["reason"], "Invalid room secret");
+    assert_eq!(msg["data"]["reason"], "Invalid room secret format");
 }
 
 #[tokio::test]

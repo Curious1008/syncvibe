@@ -91,6 +91,7 @@ All state lives locally in `.syncvibe/`. The relay only handles real-time sync �
 - @mention with tab completion and bell notifications
 - Image sharing (drag file paths into chat)
 - Message grouping, chat history with scroll-back
+- Mouse scroll, PageUp/PageDown, and "↓ N new messages" unread indicator
 
 ### AI Agent Integration
 - **Pick Claude Code or Codex** from a menu — SyncVibe auto-configures `.mcp.json` (Claude) and `.codex/config.toml` (Codex)
@@ -172,9 +173,11 @@ All state lives locally in `.syncvibe/`. The relay only handles real-time sync �
 |-----|--------|
 | `Ctrl+G` | Switch Chat ↔ Agent pane |
 | `Tab` | Autocomplete @mentions and commands |
-| `↑` / `↓` | Navigate autocomplete |
-| `Enter` | Send message |
+| `↑` / `↓` | Select messages (quote, open images) |
+| `Enter` | Send message / quote selected / open image |
 | `PageUp` / `PageDown` | Scroll chat history |
+| `Mouse scroll` | Scroll chat panel |
+| `Esc` | Deselect message, return to bottom |
 
 ---
 

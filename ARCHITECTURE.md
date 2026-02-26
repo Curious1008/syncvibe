@@ -67,14 +67,17 @@ syncvibe/
 ### TUI Chat
 - Real-time chat with presence indicators
 - Slash commands: `/help` (`/?`), `/invite` (`/i`), `/new` (`/n`), `/join` (`/j`), `/name`, `/color`, `/mute` (`/m`), `/remote`, `/collab`, `/clear`, `/rc`, `/quit` (`/q`)
-- **@mentions**: `@name` highlights + bell notification; `@agent` / `@claude` prompts agent to read chat for new tasks (no content duplication)
+- **@mentions**: `@name` highlights + bell notification; `@agent` / `@claude` prompts agent to read chat for new tasks (only the room's configured agent responds — mentioning a different agent is ignored)
 - Image sharing (drag path into input)
 - Horizontal scrolling for long input lines
+- **Mouse scroll** + PageUp/PageDown for chat navigation (mouse events scoped to chat panel)
+- **Unread indicator**: "↓ N new messages" banner when scrolled up and new messages arrive; auto-resets on return to bottom
+- **Message selection**: Up/Down arrows select messages for quoting or opening images; Esc deselects
 - Message grouping by user, bell only on @mention (with debounce)
-- Chat truncation for performance (>5000 msgs → keep last 2000 in memory)
+- Chat truncation for performance (>5000 msgs → keep last 2000 in memory, msg_id_set pruned in sync)
 
 ### Status Bar & Presence
-- **Version display**: shows current version (e.g. `v0.3.8`) in status bar
+- **Version display**: shows current version (e.g. `v0.3.9`) in status bar
 - **Fixed positions**: current user (rightmost, bold with color) + agent indicator (`◆ Agent` in teal, when in tmux)
 - **Carousel rotation**: other online users rotate every 3 seconds when they don't all fit
 - **Dynamic width**: calculates available space, shows as many users as fit, `+N` indicator for hidden ones
@@ -291,6 +294,7 @@ CLI                          Relay                        Web
 - **Atomic writes** — write to temp file + rename prevents partial reads
 - **Advisory file locking** — exclusive lock on chat-log.jsonl for concurrent write safety
 - **Message retention** — `retention_days` in `~/.syncvibe/config.toml` (default: 90). Old messages pruned atomically on startup
+- **ANSI stripping** — remote peer content is stripped of CSI, OSC, DCS, APC, PM, SOS escape sequences and control chars to prevent terminal injection
 - **Identity stamping** — relay stamps user identity server-side on messages to prevent spoofing
 - **Invite code expiry** — KV-stored codes auto-delete after 7 days
 - **Auth token exchange** — relay-mediated, UUID auth codes with 5-min TTL, one-time use, one-write-only (see Auth Token Exchange section)
