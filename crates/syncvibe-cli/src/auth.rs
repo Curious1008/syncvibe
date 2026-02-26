@@ -24,7 +24,7 @@ pub fn run_auth() -> Result<()> {
     }
 
     let auth_code = uuid::Uuid::new_v4().to_string();
-    let url = format!("{}/authorize?code={}", WEB_BASE, auth_code);
+    let url = format!("{}/authorize/{}", WEB_BASE, auth_code);
 
     println!("  {TEAL}◆{R} Opening browser for authentication...\n");
     println!("  {DIM}If the browser doesn't open, visit:{R}");
