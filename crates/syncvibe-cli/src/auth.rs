@@ -156,7 +156,8 @@ fn handle_connection(mut stream: std::net::TcpStream, expected_nonce: &str) -> C
     let cors_headers = format!(
         "Access-Control-Allow-Origin: {}\r\n\
          Access-Control-Allow-Methods: POST, OPTIONS\r\n\
-         Access-Control-Allow-Headers: Content-Type",
+         Access-Control-Allow-Headers: Content-Type\r\n\
+         Access-Control-Allow-Private-Network: true",
         CORS_ORIGIN
     );
 
