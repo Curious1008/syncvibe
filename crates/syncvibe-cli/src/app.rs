@@ -282,8 +282,8 @@ impl AppState {
         if let Some(idx) = self.chat_selected {
             let mut pos = idx;
             for _ in 0..n {
-                let next = ((pos + 1)..total)
-                    .find(|&i| Self::is_selectable(&self.chat_messages[i]));
+                let next =
+                    ((pos + 1)..total).find(|&i| Self::is_selectable(&self.chat_messages[i]));
                 if let Some(next) = next {
                     pos = next;
                 } else {
@@ -318,10 +318,7 @@ impl AppState {
                     }
                     // Track unread count when scrolled up
                     if self.chat_selected.is_some()
-                        && matches!(
-                            msg.message_type,
-                            MessageType::User | MessageType::Image
-                        )
+                        && matches!(msg.message_type, MessageType::User | MessageType::Image)
                     {
                         self.unread_below += 1;
                     }
@@ -969,10 +966,7 @@ impl AppState {
 
         let content_lower = msg.content.to_lowercase();
         // Only trigger send-keys for the agent running in THIS room
-        let local_agent = self
-            .local_agent_id
-            .as_deref()
-            .and_then(crate::agents::find);
+        let local_agent = self.local_agent_id.as_deref().and_then(crate::agents::find);
         let agent_name = match local_agent {
             Some(a) if a.mentions.iter().any(|m| content_lower.contains(m)) => a.name,
             _ => return,

@@ -63,4 +63,3 @@ pub fn select_agent() -> Result<String> {
         None => anyhow::bail!("Cancelled."),
     }
 }
-
