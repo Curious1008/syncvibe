@@ -299,9 +299,28 @@ fn launch_or_attach_with_agent(
         let _ = std::process::Command::new("tmux")
             .args(["switch-client", "-t", &session_name])
             .status();
+        // Session is now attached (we switched to it).
+        // Set destroy-unattached so if the terminal closes later,
+        // the session (and agent processes) are cleaned up.
+        let _ = std::process::Command::new("tmux")
+            .args([
+                "set-option",
+                "-t",
+                &session_name,
+                "destroy-unattached",
+                "on",
+            ])
+            .env_remove("TMUX")
+            .status();
     } else {
+        // attach-session blocks until the user detaches
         let _ = std::process::Command::new("tmux")
             .args(["attach-session", "-t", &session_name])
+            .status();
+        // Client detached — kill session to clean up agent processes
+        let _ = std::process::Command::new("tmux")
+            .args(["kill-session", "-t", &session_name])
+            .env_remove("TMUX")
             .status();
     }
 
@@ -329,10 +348,16 @@ fn create_session(
     agent_name: &str,
     agent_color: &str,
 ) -> Result<()> {
-    // Create session with a plain shell (not agent_cmd directly).
-    // This prevents the session from dying if the agent command exits or isn't found.
     let status = std::process::Command::new("tmux")
-        .args(["new-session", "-d", "-s", session_name, "-c", project_path])
+        .args([
+            "new-session",
+            "-d",
+            "-s",
+            session_name,
+            "-c",
+            project_path,
+            agent_cmd,
+        ])
         .env_remove("TMUX")
         .status()?;
 
@@ -368,14 +393,6 @@ fn create_session(
         }
         _ => {}
     }
-
-    // Start the agent command in the right pane (pane 0 = original) via send-keys.
-    // The shell stays alive if the agent exits, so the session won't die.
-    let agent_target = format!("{}:0.0", session_name);
-    let _ = std::process::Command::new("tmux")
-        .args(["send-keys", "-t", &agent_target, agent_cmd, "Enter"])
-        .env_remove("TMUX")
-        .status();
 
     let _ = std::process::Command::new("tmux")
         .args(["select-pane", "-t", &format!("{}.1", session_name)])
