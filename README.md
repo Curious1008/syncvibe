@@ -95,7 +95,7 @@ All state lives locally in `.syncvibe/`. The relay only handles real-time sync �
 ### AI Agent Integration
 - **Pick Claude Code or Codex** from a menu — SyncVibe auto-configures `.mcp.json` (Claude) and `.codex/config.toml` (Codex)
 - **MCP tools** — `read_chat` with smart incremental filtering, session scoping, and digest offloading; `send_chat` for agent-to-human messages
-- **@agent** — send tasks to your AI directly from chat
+- **@agent** — mention your AI in chat to assign tasks; agent auto-reads chat for full context
 - Each teammate picks their own agent; all agents share the same chat context
 
 ### Screen Sharing
@@ -119,7 +119,7 @@ All state lives locally in `.syncvibe/`. The relay only handles real-time sync �
 ### Split Terminal
 - Auto-creates side-by-side layout: Chat (30%) | AI Agent (70%)
 - `Ctrl+G` to switch between panes
-- Styled borders and status bar
+- Version display and styled status bar
 - `/chats` to switch between room sessions
 
 ### Zero AI Costs

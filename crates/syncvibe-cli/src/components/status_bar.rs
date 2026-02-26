@@ -13,7 +13,8 @@ use crate::components::util::parse_hex_color;
 pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
     let width = area.width as usize;
 
-    // Fixed left: brand + project + status
+    // Fixed left: brand + version + project + status
+    let version = env!("CARGO_PKG_VERSION");
     let mut spans = vec![
         Span::styled(
             " SyncVibe ",
@@ -23,7 +24,11 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            format!(" │ {} ", state.project_name),
+            format!("v{} ", version),
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled(
+            format!("│ {} ", state.project_name),
             Style::default().fg(Color::White),
         ),
     ];
@@ -96,8 +101,13 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
         .collect();
 
     // Calculate how much space is left for other users
-    let left_used =
-        12 + state.project_name.width() + 3 + if state.is_online { 2 } else { 10 } + live_width;
+    let version_width = version.width() + 2; // "vX.Y.Z "
+    let left_used = 12
+        + version_width
+        + state.project_name.width()
+        + 2
+        + if state.is_online { 2 } else { 10 }
+        + live_width;
     let spacer_min = 2; // at least some separator
     let available_for_others = width
         .saturating_sub(left_used)

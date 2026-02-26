@@ -876,7 +876,7 @@ impl AppState {
             if let Some(pane) = discover_agent_pane() {
                 let pane = pane.clone();
                 let chat_pane = current_pane_id();
-                let task_text = format!("{}, read chat", msg.content);
+                let task_text = "You have a new task in chat, read chat to see it".to_string();
                 std::thread::spawn(move || {
                     let send = |args: &[&str]| -> bool {
                         std::process::Command::new("tmux")
@@ -1168,10 +1168,11 @@ pub async fn run() -> Result<()> {
     let mut state = AppState::new(storage, user)?;
 
     // Background version check — non-blocking, silent on failure
-    let (update_tx, mut update_rx) = tokio::sync::oneshot::channel();
+    let (update_tx, update_rx_inner) = tokio::sync::oneshot::channel();
     tokio::task::spawn_blocking(move || {
         let _ = update_tx.send(crate::updates::check_for_update());
     });
+    let mut update_rx = Some(update_rx_inner);
 
     // Load room config for WebSocket connections
     let room_config = state.storage.read_room_config().ok();
@@ -1464,8 +1465,9 @@ pub async fn run() -> Result<()> {
                 state.chat_messages.retain(|m| m.message_type != MessageType::Tip);
             }
 
-            // Version update check result
-            result = &mut update_rx => {
+            // Version update check result (oneshot — poll only while pending)
+            result = async { match update_rx.as_mut() { Some(rx) => rx.await, None => std::future::pending().await } }, if update_rx.is_some() => {
+                update_rx = None;
                 if let Ok(Some(new_ver)) = result {
                     let current = env!("CARGO_PKG_VERSION");
                     state.toast(&format!("Update available: {current} → {new_ver} · brew upgrade syncvibe"));

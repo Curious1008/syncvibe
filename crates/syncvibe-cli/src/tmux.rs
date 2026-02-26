@@ -348,6 +348,11 @@ fn create_session(
     agent_name: &str,
     agent_color: &str,
 ) -> Result<()> {
+    let escaped_bin = shell_escape(bin_str);
+
+    // Create session with dashboard (left pane) — dashboard is long-lived,
+    // so the session survives even if the agent command exits or isn't found.
+    let dashboard_cmd = format!("{} dashboard", escaped_bin);
     let status = std::process::Command::new("tmux")
         .args([
             "new-session",
@@ -356,7 +361,7 @@ fn create_session(
             session_name,
             "-c",
             project_path,
-            agent_cmd,
+            &dashboard_cmd,
         ])
         .env_remove("TMUX")
         .status()?;
@@ -365,18 +370,18 @@ fn create_session(
         anyhow::bail!("Failed to create tmux session");
     }
 
-    let escaped_bin = shell_escape(bin_str);
+    // Split right pane for agent (70%)
     let split_status = std::process::Command::new("tmux")
         .args([
             "split-window",
             "-t",
             session_name,
-            "-hb",
+            "-h",
             "-l",
-            "30%",
+            "70%",
             "-c",
             project_path,
-            &format!("{} dashboard", escaped_bin),
+            agent_cmd,
         ])
         .env_remove("TMUX")
         .status();
@@ -394,8 +399,9 @@ fn create_session(
         _ => {}
     }
 
+    // Focus the agent pane (right, pane 1)
     let _ = std::process::Command::new("tmux")
-        .args(["select-pane", "-t", &format!("{}.1", session_name)])
+        .args(["select-pane", "-t", &format!("{}:0.1", session_name)])
         .env_remove("TMUX")
         .status();
 

@@ -67,19 +67,23 @@ syncvibe/
 ### TUI Chat
 - Real-time chat with presence indicators
 - Slash commands: `/help` (`/?`), `/invite` (`/i`), `/new` (`/n`), `/join` (`/j`), `/name`, `/color`, `/mute` (`/m`), `/remote`, `/collab`, `/clear`, `/rc`, `/quit` (`/q`)
-- **@mentions**: `@name` highlights + bell notification; `@agent` / `@claude` sends task directly to Claude Code pane via tmux send-keys
+- **@mentions**: `@name` highlights + bell notification; `@agent` / `@claude` prompts agent to read chat for new tasks (no content duplication)
 - Image sharing (drag path into input)
+- Horizontal scrolling for long input lines
 - Message grouping by user, bell only on @mention (with debounce)
 - Chat truncation for performance (>5000 msgs → keep last 2000 in memory)
 
 ### Status Bar & Presence
+- **Version display**: shows current version (e.g. `v0.3.8`) in status bar
 - **Fixed positions**: current user (rightmost, bold with color) + agent indicator (`◆ Agent` in teal, when in tmux)
 - **Carousel rotation**: other online users rotate every 3 seconds when they don't all fit
 - **Dynamic width**: calculates available space, shows as many users as fit, `+N` indicator for hidden ones
 - **Online/offline indicator**: green `●` when connected, gray `○ offline` when disconnected
 
 ### tmux Integration
-- Auto-creates split layout: SyncVibe Chat (30%) | Claude Code (70%)
+- Auto-creates split layout: SyncVibe Dashboard (30%, left) | AI Agent (70%, right)
+- Dashboard is the long-lived process; agent pane is split after session creation
+- Session cleanup: `kill-session` on detach (outside tmux) or `destroy-unattached` (inside tmux) prevents orphaned agent processes
 - Ctrl+G to switch panes, styled pane borders
 - Project switching between tmux sessions
 
