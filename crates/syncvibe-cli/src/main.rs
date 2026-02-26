@@ -15,6 +15,7 @@ mod session;
 mod sync;
 mod tmux;
 mod tui;
+mod updates;
 
 use std::env;
 

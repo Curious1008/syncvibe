@@ -191,6 +191,16 @@ jobs:
               bin.install "syncvibe"
             end
 
+            def caveats
+              <<~EOS
+                Get started — cd into any git project, then run:
+
+                  syncvibe
+
+                Docs: https://github.com/Curious1008/syncvibe
+              EOS
+            end
+
             test do
               assert_match "syncvibe", shell_output("#{bin}/syncvibe --help")
             end

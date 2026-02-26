@@ -1163,6 +1163,12 @@ pub async fn run() -> Result<()> {
 
     let mut state = AppState::new(storage, user)?;
 
+    // Background version check — non-blocking, silent on failure
+    let (update_tx, mut update_rx) = tokio::sync::oneshot::channel();
+    tokio::task::spawn_blocking(move || {
+        let _ = update_tx.send(crate::updates::check_for_update());
+    });
+
     // Load room config for WebSocket connections
     let room_config = state.storage.read_room_config().ok();
 
@@ -1452,6 +1458,14 @@ pub async fn run() -> Result<()> {
             } => {
                 tip_expire_at = None;
                 state.chat_messages.retain(|m| m.message_type != MessageType::Tip);
+            }
+
+            // Version update check result
+            result = &mut update_rx => {
+                if let Ok(Some(new_ver)) = result {
+                    let current = env!("CARGO_PKG_VERSION");
+                    state.toast(&format!("Update available: {current} → {new_ver} · brew upgrade syncvibe"));
+                }
             }
 
             // Screen sharing capture — send delta frames every second (skip when offline)
