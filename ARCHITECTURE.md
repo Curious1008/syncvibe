@@ -25,7 +25,7 @@ syncvibe/
 │   │       ├── cli.rs             # Clap command definitions
 │   │       ├── config.rs          # ~/.syncvibe/ config + project registry
 │   │       ├── onboarding.rs      # Interactive prompts + input validation
-│   │       ├── auth.rs            # Web account linking (syncvibe auth)
+│   │       ├── auth.rs            # Web account linking via relay-mediated token exchange
 │   │       ├── invite.rs          # Invite code create/resolve via relay API
 │   │       ├── agents.rs          # AI agent configuration (Claude, Codex)
 │   │       ├── sync.rs            # Room metadata sync to Supabase
@@ -250,6 +250,33 @@ Joiner: GET /invite/{code}
 
 Rate limited: 10 requests/minute per IP.
 
+### Auth Token Exchange (CLI ↔ Web via Relay)
+
+Allows users to link their CLI to their web account at syncvibe.online. The token exchange is mediated by the relay to avoid Chrome's Private Network Access restrictions (HTTPS page → HTTP localhost is blocked).
+
+```
+CLI                          Relay                        Web
+ │                            │                            │
+ ├─ generate auth_code (UUID) │                            │
+ ├─ open browser ─────────────┼──────────────────────────► │ /authorize?code=ABC
+ │                            │                            │
+ │  poll GET /auth/ABC ──────►│ 404 (not yet)              │ user signs in
+ │  poll GET /auth/ABC ──────►│ 404                        │ user clicks Authorize
+ │                            │◄── POST /auth/ABC ─────────┤ { token, urls }
+ │  poll GET /auth/ABC ──────►│ 200 { token, urls }        │ shows "Authenticated!"
+ │  ◄─────────────────────────│ (delete from KV)           │
+ │  save token                │                            │
+```
+
+**Security:**
+- Auth code is UUID v4 (128-bit random) — guessing is infeasible
+- 5-minute TTL — expired codes auto-deleted from KV
+- One-time use — token deleted from KV after first retrieval
+- One-write-only — relay rejects POST if auth code already has a token (prevents overwrite / session fixation)
+- Explicit user click on "Authorize" prevents login CSRF
+- Token validated as hex on relay, CLI, and web
+- Rate limited: 10 requests/minute per IP
+
 ## Security & Privacy
 
 - **TLS enforced** — all relay connections use WSS; plaintext `ws://` rejected
@@ -262,6 +289,7 @@ Rate limited: 10 requests/minute per IP.
 - **Message retention** — `retention_days` in `~/.syncvibe/config.toml` (default: 90). Old messages pruned atomically on startup
 - **Identity stamping** — relay stamps user identity server-side on messages to prevent spoofing
 - **Invite code expiry** — KV-stored codes auto-delete after 7 days
+- **Auth token exchange** — relay-mediated, UUID auth codes with 5-min TTL, one-time use, one-write-only (see Auth Token Exchange section)
 
 For full details, see [Data & Privacy](https://syncvibe.online/docs/data-privacy).
 
