@@ -71,6 +71,7 @@ pub struct AppState {
     // Input
     pub input_buffer: String,
     pub input_cursor: usize,
+    pub input_scroll: usize, // horizontal scroll offset (in characters)
     pub pending_quote: Option<Quote>,
     pub autocomplete_idx: usize,
 
@@ -185,6 +186,7 @@ impl AppState {
             chat_selected: None,
             input_buffer: String::new(),
             input_cursor: 0,
+            input_scroll: 0,
             pending_quote: None,
             autocomplete_idx: 0,
             project_name,
@@ -358,6 +360,7 @@ impl AppState {
 
         self.input_buffer.clear();
         self.input_cursor = 0;
+        self.input_scroll = 0;
 
         let parts: Vec<&str> = normalized.splitn(2, ' ').collect();
         let cmd = parts[0];
@@ -839,6 +842,7 @@ impl AppState {
         self.chat_messages.push(msg.clone());
         self.input_buffer.clear();
         self.input_cursor = 0;
+        self.input_scroll = 0;
         self.chat_selected = None;
 
         // Detect @agent mention — show confirmation AFTER the message
@@ -2424,6 +2428,7 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
                 }
                 KeyCode::Home => {
                     state.input_cursor = 0;
+                    state.input_scroll = 0;
                 }
                 KeyCode::End => {
                     state.input_cursor = state.input_buffer.chars().count();
