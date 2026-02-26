@@ -58,10 +58,7 @@ pub fn run_auth() -> Result<()> {
                     .read_json()
                     .context("Failed to parse auth response")?;
 
-                let token = v
-                    .get("token")
-                    .and_then(|t| t.as_str())
-                    .unwrap_or("");
+                let token = v.get("token").and_then(|t| t.as_str()).unwrap_or("");
 
                 if token.is_empty() || !token.chars().all(|c| c.is_ascii_hexdigit()) {
                     anyhow::bail!("Received invalid token from relay");
@@ -69,8 +66,14 @@ pub fn run_auth() -> Result<()> {
 
                 break AuthPayload {
                     token: token.to_string(),
-                    api_url: v.get("supabase_url").and_then(|v| v.as_str()).map(String::from),
-                    api_key: v.get("supabase_anon_key").and_then(|v| v.as_str()).map(String::from),
+                    api_url: v
+                        .get("supabase_url")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
+                    api_key: v
+                        .get("supabase_anon_key")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
                 };
             }
             Err(ureq::Error::StatusCode(404)) => {
