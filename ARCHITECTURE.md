@@ -67,7 +67,7 @@ syncvibe/
 ### TUI Chat
 - Real-time chat with presence indicators
 - Slash commands: `/help` (`/?`), `/invite` (`/i`), `/new` (`/n`), `/join` (`/j`), `/name`, `/color`, `/mute` (`/m`), `/remote`, `/collab`, `/clear`, `/rc`, `/quit` (`/q`)
-- **@mentions**: `@name` highlights + bell notification; `@agent` / `@claude` prompts agent to read chat for new tasks (only the room's configured agent responds — mentioning a different agent is ignored)
+- **@mentions**: `@name` highlights + bell notification; `@agent` / `@claude` prompts agent to read chat for new tasks (only the room's configured agent responds — mentioning a different agent is ignored). Remote @mentions also trigger the local agent (30s debounce) — teammates can assign tasks to each other's agents across machines
 - Image sharing (drag path into input)
 - Horizontal scrolling for long input lines
 - **Mouse scroll** + PageUp/PageDown for chat navigation (mouse events scoped to chat panel)
@@ -149,7 +149,7 @@ The core UX: **users discuss in SyncVibe chat, then assign tasks to their agent 
 ```
 
 Three reinforcement layers ensure the agent always reads chat:
-1. **CLAUDE.md** — "Before starting ANY task, call read_chat"
+1. **CLAUDE.md / AGENTS.md** — "Before starting ANY task, call read_chat" + "After completing work, ALWAYS call send_chat"
 2. **MCP server instructions** — "IMPORTANT: call read_chat before starting ANY task"
 3. **Agent behavior** — agent acknowledges the discussion, making it visible to the user
 
@@ -184,7 +184,9 @@ AI Agent → Writes .syncvibe/ files → Hook touches .updated → TUI file watc
 
 ### AI Agent ↔ AI Agent
 ```
-Agent A → Appends chat-log.jsonl → Agent B reads via MCP read_chat (incremental)
+Agent A → Appends chat-log.jsonl → TUI reload_data() detects agent- prefix
+  → Broadcasts via WebSocket → Relay preserves agent identity → Remote TUI
+  → Writes to remote chat-log.jsonl → Agent B reads via MCP read_chat
 ```
 
 ### Screen Sharing
@@ -295,7 +297,7 @@ CLI                          Relay                        Web
 - **Advisory file locking** — exclusive lock on chat-log.jsonl for concurrent write safety
 - **Message retention** — `retention_days` in `~/.syncvibe/config.toml` (default: 90). Old messages pruned atomically on startup
 - **ANSI stripping** — remote peer content is stripped of CSI, OSC, DCS, APC, PM, SOS escape sequences and control chars to prevent terminal injection
-- **Identity stamping** — relay stamps user identity server-side on messages to prevent spoofing
+- **Identity stamping** — relay stamps user identity server-side on messages to prevent spoofing. Agent messages (`agent-{id}` prefix) are verified against the connection's `agentId` claim — only a peer that authenticated with `agentId: "claude"` can send as `agent-claude`; human messages are always overwritten with the authenticated identity
 - **Invite code expiry** — KV-stored codes auto-delete after 7 days
 - **Auth token exchange** — relay-mediated, UUID auth codes with 5-min TTL, one-time use, one-write-only (see Auth Token Exchange section)
 

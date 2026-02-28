@@ -78,7 +78,7 @@ Chat syncs in real time. If the room has a linked repo, the code auto-clones on 
 **Data flow:**
 - **Human ↔ Human:** TUI → WebSocket relay → other TUI
 - **Human → Agent:** `@codex` message → agent reads via MCP `read_chat`
-- **Agent → Human:** agent calls MCP `send_chat` → appears in chat
+- **Agent → Human:** agent calls MCP `send_chat` → appears in chat → broadcasts to all teammates
 
 All state lives locally in `.syncvibe/`. The relay only handles real-time sync — no messages are stored server-side.
 
@@ -97,6 +97,8 @@ All state lives locally in `.syncvibe/`. The relay only handles real-time sync �
 - **Pick Claude Code or Codex** from a menu — SyncVibe auto-configures `.mcp.json` (Claude) and `.codex/config.toml` (Codex)
 - **MCP tools** — `read_chat` with smart incremental filtering, session scoping, and digest offloading; `send_chat` for agent-to-human messages
 - **@agent** — mention your AI in chat to assign tasks; agent auto-reads chat for full context
+- **Cross-machine agent tasks** — `@claude` from a remote teammate triggers your local agent automatically (30s debounce)
+- **Agent messages broadcast** — AI agent responses sync to all teammates in real time via WebSocket
 - Each teammate picks their own agent; all agents share the same chat context
 
 ### Screen Sharing

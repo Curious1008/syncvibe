@@ -482,12 +482,15 @@ const SYNCVIBE_HINT: &str = "\n\
 This project uses SyncVibe for real-time team collaboration.\n\
 \n\
 ### How to participate\n\
-- When the user asks you to \"check chat\" or \"read messages\", call `read_chat` (MCP tool, no parameters).\n\
-- Messages marked with ⚡ are tasks assigned to you. Complete them, then report back with `send_chat`.\n\
-- `send_chat` messages go to a shared chat window. Keep them to 1-2 sentences.\n\
+- **Before starting ANY task**, call `read_chat` to see what the team needs.\n\
+- Briefly acknowledge what you read via `send_chat` (e.g. \"Got it, working on X\").\n\
+- Messages marked with ⚡ are tasks assigned to you. Complete them, then report back.\n\
+- **After completing work**, ALWAYS call `send_chat` with a short summary.\n\
   - Task done → \"Done — [one-line summary]\"\n\
+  - Hit a problem → briefly describe the blocker.\n\
   - Need info → ask one short question.\n\
   - Long output → \"Check the agent pane (Ctrl+G) for details.\"\n\
+- `send_chat` messages go to a shared chat window. Keep them to 1-2 sentences.\n\
 - Do not write to `.syncvibe/` files directly. Always use MCP tools.\n\
 \n\
 ### Code Sync\n\

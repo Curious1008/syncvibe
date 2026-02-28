@@ -104,6 +104,7 @@ pub struct AppState {
     pub sharing_screen: bool,
     last_screen_snapshot: Vec<String>,
     cached_agent_pane: Option<String>, // e.g. "session:0.1" — cached tmux pane target
+    last_remote_trigger: Option<std::time::Instant>,
 
     // Screen sharing (viewer side) — latest full frame per user_id
     pub screen_frames: std::collections::HashMap<String, ScreenFrameState>,
@@ -208,6 +209,7 @@ impl AppState {
             sharing_screen: false,
             last_screen_snapshot: Vec::new(),
             cached_agent_pane: None,
+            last_remote_trigger: None,
             screen_frames: std::collections::HashMap::new(),
             watching_pane_id: None,
             toast_queue: Vec::new(),
@@ -323,6 +325,17 @@ impl AppState {
                         self.unread_below += 1;
                     }
                     self.msg_id_set.insert(msg.id.clone());
+                    // Broadcast locally-originated agent messages to remote peers
+                    if msg.user_id.starts_with("agent-") {
+                        if let Some(ws) = self.ws_client.clone() {
+                            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                                let ws_msg = WsMessage::ChatMessage(msg.clone());
+                                handle.spawn(async move {
+                                    let _ = ws.send(ws_msg).await;
+                                });
+                            }
+                        }
+                    }
                     self.chat_messages.push(msg);
                 }
                 // Cap to prevent unbounded growth
@@ -2182,10 +2195,58 @@ fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
             if state.chat_selected.is_some() {
                 state.unread_below += 1;
             }
+            // Extract fields for remote @mention trigger before push moves msg
+            let remote_sender_name = msg.user_name.clone();
+            let remote_sender_id = msg.user_id.clone();
+            let remote_content = msg.content.clone();
             let _ = state.storage.append_chat_message(&msg);
             state.disk_msg_count += 1;
             state.msg_id_set.insert(msg.id.clone());
             state.chat_messages.push(msg);
+            // Trigger local agent if a remote peer @mentions it
+            if remote_sender_id != state.user.profile.user_id
+                && !remote_sender_id.starts_with("agent-")
+            {
+                let content_lower = remote_content.to_lowercase();
+                let local_agent = state
+                    .local_agent_id
+                    .as_deref()
+                    .and_then(crate::agents::find);
+                if let Some(agent) = local_agent {
+                    if agent.mentions.iter().any(|m| content_lower.contains(m)) {
+                        let debounce_ok = state
+                            .last_remote_trigger
+                            .map(|t| t.elapsed() > Duration::from_secs(30))
+                            .unwrap_or(true);
+                        if debounce_ok {
+                            state.last_remote_trigger = Some(std::time::Instant::now());
+                            if let Some(pane) = discover_agent_pane() {
+                                let task_text =
+                                    "You have a new task in chat, read chat to see it".to_string();
+                                std::thread::spawn(move || {
+                                    let send = |args: &[&str]| -> bool {
+                                        std::process::Command::new("tmux")
+                                            .args(args)
+                                            .stdin(std::process::Stdio::null())
+                                            .stdout(std::process::Stdio::null())
+                                            .stderr(std::process::Stdio::null())
+                                            .status()
+                                            .map(|s| s.success())
+                                            .unwrap_or(false)
+                                    };
+                                    send(&["send-keys", "-t", &pane, "-l", &task_text]);
+                                    std::thread::sleep(std::time::Duration::from_millis(200));
+                                    send(&["send-keys", "-t", &pane, "C-m"]);
+                                });
+                            }
+                            state.toast(&format!(
+                                "\u{26a1} {} assigned task to {}",
+                                remote_sender_name, agent.name
+                            ));
+                        }
+                    }
+                }
+            }
             // Cap to prevent unbounded growth
             if state.chat_messages.len() > MAX_DISPLAY_MESSAGES {
                 let removed = state.chat_messages.remove(0);
