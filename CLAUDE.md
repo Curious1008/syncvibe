@@ -14,6 +14,13 @@ This project uses SyncVibe for team coordination. All shared state lives in `.sy
 - SyncVibe has 3 components: **CLI** (Rust, this repo), **Relay** (Cloudflare Workers, syncvibe-relay), **Web** (React/Vite, syncvibe-web)
 - When modifying features, consider the impact on all 3 components (e.g. protocol changes affect CLI + relay, auth changes affect all 3)
 
+### Agent Message Flow
+- Agent messages use `user_id` with `agent-` prefix (e.g. `agent-claude`)
+- TUI `reload_data()` detects `agent-` messages from disk and broadcasts via WebSocket
+- Relay preserves agent identity: only connections with matching `agentId` can send as `agent-{id}`; human messages are always stamped with authenticated identity
+- Remote @mentions trigger local agent via tmux send-keys (30s debounce)
+- Dedup prevents broadcast loops: `msg_id_set` insert before broadcast, relay excludes sender
+
 ### UI Consistency
 - Any UI changes must match the existing visual style and design language
 - Follow established patterns for colors, spacing, typography, and component structure
