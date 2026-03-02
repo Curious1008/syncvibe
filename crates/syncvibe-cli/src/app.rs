@@ -1719,19 +1719,27 @@ pub async fn run() -> Result<()> {
                 // Kill only the agent pane (right side), keep dashboard alive
                 kill_agent_pane(state.in_tmux);
 
-                // Show the session menu (choose room / create / join)
-                // This runs in our own (dashboard) pane — tmux session stays alive
-                match crate::session::cmd_session() {
-                    Ok(()) => {
-                        // cmd_session launched a new tmux session and switched to it.
-                        // The old session now only has this pane — kill it after switch.
-                        kill_current_tmux_session(state.in_tmux);
-                        return Ok(());
-                    }
-                    Err(_) => {
-                        // User cancelled or error — nothing to go back to, exit cleanly
-                        kill_current_tmux_session(state.in_tmux);
-                        return Ok(());
+                // Show the session menu (choose room / create / join).
+                // Loop so user can retry if auth or input fails.
+                loop {
+                    match crate::session::cmd_session() {
+                        Ok(()) => {
+                            // cmd_session launched a new tmux session and switched to it.
+                            // The old session now only has this pane — kill it after switch.
+                            kill_current_tmux_session(state.in_tmux);
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            let msg = e.to_string();
+                            // User intentionally cancelled — exit cleanly
+                            if msg.contains("Cancelled") {
+                                kill_current_tmux_session(state.in_tmux);
+                                return Ok(());
+                            }
+                            // Recoverable error — show message and retry the menu
+                            println!("\n  \x1b[31m✗\x1b[0m {}\n", msg);
+                            continue;
+                        }
                     }
                 }
             }
