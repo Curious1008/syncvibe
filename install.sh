@@ -378,7 +378,11 @@ main() {
     check_path
     verify
     check_tmux
-    print_getting_started
+
+    # Launch SyncVibe immediately after install
+    printf "\n"
+    info "Launching SyncVibe...\n"
+    exec "${INSTALL_DIR}/syncvibe"
 }
 
 main
