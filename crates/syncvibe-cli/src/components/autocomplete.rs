@@ -121,9 +121,11 @@ pub fn build_mentions(presence: &[PresenceInfo], self_id: &str) -> Vec<MentionIt
         }
     }
 
-    // Show specific agent mentions for agents in the room
+    // Show specific agent mentions for agents in the room (sorted for stable order)
     if !seen_agents.is_empty() {
-        for aid in &seen_agents {
+        let mut sorted_agents: Vec<_> = seen_agents.iter().cloned().collect();
+        sorted_agents.sort();
+        for aid in &sorted_agents {
             if let Some(agent) = agents::find(aid) {
                 items.push(MentionItem {
                     handle: format!("@{}", agent.id),
