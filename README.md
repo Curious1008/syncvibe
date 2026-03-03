@@ -10,10 +10,10 @@
 SyncVibe connects teammates and their AI agents (Claude Code, Codex, or any MCP-compatible agent) in a shared terminal chat room — real-time coordination without a single LLM API call.
 
 <p align="center">
-  <img src="assets/demo.png" alt="SyncVibe — Alice and Harry collaborating with Codex AI agent" width="900">
+  <video src="https://github.com/Curious1008/syncvibe/releases/download/v0.4.3/SyncVibe-Demo.mp4" width="900" autoplay loop muted playsinline></video>
 </p>
 
-> *Left: shared chat between teammates + AI agents. Right: Codex reading the chat via MCP and executing a task autonomously.*
+> *Two developers collaborating with their AI agents (Codex + Claude) in real time.*
 
 ---
 
