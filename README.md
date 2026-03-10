@@ -7,7 +7,7 @@
 [![Website](https://img.shields.io/badge/Web-syncvibe.online-teal.svg)](https://syncvibe.online)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2.svg?logo=discord&logoColor=white)](https://discord.gg/Nb3wkCBZ55)
 
-SyncVibe connects teammates and their AI agents (Claude Code, Codex, or any MCP-compatible agent) in a shared terminal chat room — real-time coordination without a single LLM API call.
+SyncVibe connects teammates and their AI agents (Claude Code, Codex, Gemini CLI, or any MCP-compatible agent) in a shared terminal chat room — real-time coordination without a single LLM API call.
 
 <p align="center">
   <a href="https://github.com/nev901008-cmyk/syncvibe/releases/download/v0.4.3/SyncVibe-Demo.mp4">
@@ -15,7 +15,7 @@ SyncVibe connects teammates and their AI agents (Claude Code, Codex, or any MCP-
   </a>
 </p>
 
-> *Two developers collaborating with their AI agents (Codex + Claude) in real time. [Watch full demo](https://github.com/nev901008-cmyk/syncvibe/releases/download/v0.4.3/SyncVibe-Demo.mp4)*
+> *Two developers collaborating with their AI agents (Claude, Codex, Gemini) in real time. [Watch full demo](https://github.com/nev901008-cmyk/syncvibe/releases/download/v0.4.3/SyncVibe-Demo.mp4)*
 
 ---
 
@@ -44,7 +44,7 @@ Supports **macOS** (Apple Silicon + Intel) and **Linux** (x86_64, aarch64).
 syncvibe
 ```
 
-Interactive onboarding — pick your name, choose an AI agent (Claude or Codex), and create a room.
+Interactive onboarding — pick your name, choose an AI agent (Claude, Codex, or Gemini), and create a room.
 
 **2. Invite your team**
 
@@ -66,7 +66,7 @@ Chat syncs in real time. If the room has a linked repo, the code auto-clones on 
 ┌─────────────────────────────────────────────────────────────────┐
 │  Split Terminal                                                 │
 │  ┌─────────────────────┐    ┌────────────────────────────────┐  │
-│  │  SyncVibe Chat (30%)│    │  AI Agent — Claude/Codex (70%) │  │
+│  │  SyncVibe Chat (30%)│    │  AI Agent — Claude/Codex/Gemini│  │
 │  │                     │    │                                │  │
 │  │  Alice: red theme?  │    │  Reading team chat via MCP...  │  │
 │  │  Harry: @codex make │───►│  ⚡ Task: make a calculator    │  │
@@ -96,7 +96,7 @@ All state lives locally in `.syncvibe/`. The relay only handles real-time sync �
 - Mouse scroll, PageUp/PageDown, and "↓ N new messages" unread indicator
 
 ### AI Agent Integration
-- **Pick Claude Code or Codex** from a menu — SyncVibe auto-configures `.mcp.json` (Claude) and `.codex/config.toml` (Codex)
+- **Pick Claude Code, Codex, or Gemini** from a menu — SyncVibe auto-configures `.mcp.json` (Claude), `.codex/config.toml` (Codex), and `.gemini/settings.json` (Gemini)
 - **MCP tools** — `read_chat` with smart incremental filtering, session scoping, and digest offloading; `send_chat` for agent-to-human messages
 - **@agent** — mention your AI in chat to assign tasks; agent auto-reads chat for full context
 - **Cross-machine agent tasks** — `@claude` from a remote teammate triggers your local agent automatically (30s debounce)
@@ -195,8 +195,9 @@ Room setup auto-generates:
 |------|---------|
 | `.mcp.json` | MCP server config for Claude Code |
 | `.codex/config.toml` | MCP server config for Codex CLI |
+| `.gemini/settings.json` | MCP server config for Gemini CLI |
 | `CLAUDE.md` | Instructs Claude to use chat tools |
-| `AGENTS.md` | Instructs Codex/other agents to use chat tools |
+| `AGENTS.md` | Instructs Codex/Gemini/other agents to use chat tools |
 
 | MCP Tool | Description |
 |----------|-------------|
@@ -269,7 +270,7 @@ syncvibe/
 │   │       ├── app.rs             # Event loop + slash commands
 │   │       ├── tui.rs             # Terminal UI bootstrap
 │   │       ├── picker.rs          # Room picker
-│   │       ├── init.rs            # Room init (MCP, CLAUDE.md, .codex/)
+│   │       ├── init.rs            # Room init (MCP, CLAUDE.md, .codex/, .gemini/)
 │   │       ├── tmux.rs            # tmux session management
 │   │       ├── git/               # Git integration
 │   │       ├── mcp/               # MCP server: read_chat, send_chat

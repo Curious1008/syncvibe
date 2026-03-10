@@ -17,7 +17,7 @@ syncvibe/
 │   ├── syncvibe-cli/              # Main binary
 │   │   └── src/
 │   │       ├── main.rs            # Entry point, clap CLI dispatch, simple commands
-│   │       ├── init.rs            # Room init (.syncvibe/, .mcp.json, .claude, CLAUDE.md)
+│   │       ├── init.rs            # Room init (.syncvibe/, .mcp.json, .codex/, .gemini/, CLAUDE.md)
 │   │       ├── session.rs         # Interactive onboarding + project launch
 │   │       ├── tmux.rs            # tmux session management, layout, keybindings
 │   │       ├── app.rs             # TUI app state + async event loop
@@ -27,7 +27,7 @@ syncvibe/
 │   │       ├── onboarding.rs      # Interactive prompts + input validation
 │   │       ├── auth.rs            # Web account linking via relay-mediated token exchange
 │   │       ├── invite.rs          # Invite code create/resolve via relay API
-│   │       ├── agents.rs          # AI agent configuration (Claude, Codex)
+│   │       ├── agents.rs          # AI agent configuration (Claude, Codex, Gemini)
 │   │       ├── sync.rs            # Room metadata sync to Supabase
 │   │       ├── tui.rs             # Terminal setup/teardown (crossterm)
 │   │       ├── components/        # TUI rendering (ratatui)
@@ -67,7 +67,7 @@ syncvibe/
 ### TUI Chat
 - Real-time chat with presence indicators
 - Slash commands: `/help` (`/?`), `/invite` (`/i`), `/new` (`/n`), `/join` (`/j`), `/name`, `/color`, `/mute` (`/m`), `/remote`, `/collab`, `/clear`, `/rc`, `/quit` (`/q`)
-- **@mentions**: `@name` highlights + bell notification; `@agent` / `@claude` prompts agent to read chat for new tasks (only the room's configured agent responds — mentioning a different agent is ignored). Remote @mentions also trigger the local agent (30s debounce) — teammates can assign tasks to each other's agents across machines
+- **@mentions**: `@name` highlights + bell notification; `@agent` / `@claude` / `@codex` / `@gemini` prompts agent to read chat for new tasks (only the room's configured agent responds — mentioning a different agent is ignored). Remote @mentions also trigger the local agent (30s debounce) — teammates can assign tasks to each other's agents across machines
 - Image sharing (drag path into input)
 - Horizontal scrolling for long input lines
 - **Mouse scroll** + PageUp/PageDown for chat navigation (mouse events scoped to chat panel)
@@ -105,7 +105,7 @@ Allows teammates to auto-clone the project repo when joining a room.
 1. Room creator: `detect_or_prompt_git_remote()` detects or prompts for git remote URL → stored in `room.json` as `git_remote`
 2. `/invite`: refreshes `git_remote` from actual git remote before creating invite code → relay stores it in KV alongside room credentials
 3. Joiner: `resolve_short_invite()` receives `git_remote` → `prepare_project_dir_with_remote()` attempts `git clone` → falls back to empty dir on failure
-4. Agents: CLAUDE.md/AGENTS.md instruct commit+push after tasks, pull before new work
+4. Agents: CLAUDE.md/AGENTS.md instruct commit+push after tasks (applies to Claude, Codex, and Gemini), pull before new work
 
 **Security model:** Zero token storage. `git_remote` is just a URL (public info). Authentication is handled entirely by the user's existing git credential manager — same as running `git push` manually.
 
@@ -136,9 +136,12 @@ The core UX: **users discuss in SyncVibe chat, then assign tasks to their agent 
 
 ```
 1. syncvibe init
-   → .mcp.json       (registers SyncVibe MCP server)
-   → CLAUDE.md        (instructs agent: "call read_chat before ANY task")
-   → .claude/settings (hooks for file change notifications)
+   → .mcp.json              (MCP config for Claude Code)
+   → .codex/config.toml     (MCP config for Codex CLI)
+   → .gemini/settings.json  (MCP config for Gemini CLI)
+   → CLAUDE.md              (instructs Claude: "call read_chat before ANY task")
+   → AGENTS.md              (instructs Codex/Gemini: same workflow)
+   → .claude/settings       (hooks for file change notifications)
 
 2. User gives agent a task
    → Agent calls read_chat (MCP) — instructed by CLAUDE.md
