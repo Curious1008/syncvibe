@@ -25,6 +25,13 @@ pub const AGENTS: &[AgentDef] = &[
         color: "#00FF88",
         mentions: &["@codex", "@openai"],
     },
+    AgentDef {
+        id: "gemini",
+        name: "Gemini",
+        command: "gemini",
+        color: "#4285F4",
+        mentions: &["@gemini", "@gemini-cli"],
+    },
 ];
 
 /// Find an agent by id.

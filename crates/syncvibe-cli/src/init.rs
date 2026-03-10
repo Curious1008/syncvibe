@@ -154,6 +154,14 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
                 .unwrap_or(false)
     };
 
+    let gemini_mcp_done = {
+        let path = cwd.join(".gemini/settings.json");
+        path.exists()
+            && std::fs::read_to_string(&path)
+                .map(|c| c.contains("syncvibe"))
+                .unwrap_or(false)
+    };
+
     let has_git = cwd.join(".git").exists();
 
     let claude_md_done = file_contains_syncvibe(&cwd.join("CLAUDE.md"));
@@ -223,6 +231,25 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
                 already_done: agents_md_done,
             });
         }
+        Some("gemini") => {
+            items.push(SetupItem {
+                file: ".gemini/settings.json".to_string(),
+                description: "Register MCP server for Gemini CLI".to_string(),
+                reason: "Lets Gemini call read_chat/send_chat to collaborate with your team."
+                    .to_string(),
+                required: false,
+                checked: true,
+                already_done: gemini_mcp_done,
+            });
+            items.push(SetupItem {
+                file: "AGENTS.md".to_string(),
+                description: "SyncVibe hint for Gemini CLI".to_string(),
+                reason: "Minimal pointer so Gemini knows MCP chat tools are available.".to_string(),
+                required: false,
+                checked: true,
+                already_done: agents_md_done,
+            });
+        }
         _ => {
             // No agent or unknown — show all options
             items.push(SetupItem {
@@ -252,9 +279,18 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
                 already_done: claude_md_done,
             });
             items.push(SetupItem {
+                file: ".gemini/settings.json".to_string(),
+                description: "Register MCP server for Gemini CLI".to_string(),
+                reason: "Lets Gemini call read_chat/send_chat to collaborate with your team."
+                    .to_string(),
+                required: false,
+                checked: true,
+                already_done: gemini_mcp_done,
+            });
+            items.push(SetupItem {
                 file: "AGENTS.md".to_string(),
-                description: "SyncVibe hint for Codex / other agents".to_string(),
-                reason: "Minimal pointer so Codex knows MCP chat tools are available.".to_string(),
+                description: "SyncVibe hint for Codex / Gemini / other agents".to_string(),
+                reason: "Minimal pointer so agents know MCP chat tools are available.".to_string(),
                 required: false,
                 checked: true,
                 already_done: agents_md_done,
@@ -312,6 +348,7 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
             ".gitignore" => setup_gitignore(cwd)?,
             ".mcp.json" => setup_mcp_json(cwd)?,
             ".codex/config.toml" => setup_codex_mcp(cwd)?,
+            ".gemini/settings.json" => setup_gemini_mcp(cwd)?,
             "CLAUDE.md" => append_syncvibe_hint(&cwd.join("CLAUDE.md"))?,
             "AGENTS.md" => append_syncvibe_hint(&cwd.join("AGENTS.md"))?,
             _ => {} // .syncvibe/ is handled above via find_or_init_storage
@@ -475,6 +512,62 @@ fn setup_codex_mcp(cwd: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+fn setup_gemini_mcp(cwd: &std::path::Path) -> Result<()> {
+    let gemini_dir = cwd.join(".gemini");
+    if !gemini_dir.exists() {
+        std::fs::create_dir_all(&gemini_dir)?;
+    }
+
+    let settings_path = gemini_dir.join("settings.json");
+    let syncvibe_entry = serde_json::json!({
+        "command": "syncvibe",
+        "args": ["mcp-server"]
+    });
+
+    if settings_path.exists() {
+        let content = std::fs::read_to_string(&settings_path)?;
+        if let Ok(mut config) = serde_json::from_str::<serde_json::Value>(&content) {
+            let servers = config
+                .as_object_mut()
+                .map(|o| o.entry("mcpServers").or_insert(serde_json::json!({})))
+                .and_then(|v| v.as_object_mut());
+            if let Some(servers) = servers {
+                if !servers.contains_key("syncvibe") {
+                    servers.insert("syncvibe".to_string(), syncvibe_entry);
+                    std::fs::write(&settings_path, serde_json::to_string_pretty(&config)?)?;
+                }
+            }
+        }
+    } else {
+        let config = serde_json::json!({
+            "mcpServers": {
+                "syncvibe": syncvibe_entry
+            }
+        });
+        std::fs::write(&settings_path, serde_json::to_string_pretty(&config)?)?;
+    }
+
+    // Add .gemini/ to .gitignore
+    let gitignore_path = cwd.join(".gitignore");
+    if gitignore_path.exists() {
+        let content = std::fs::read_to_string(&gitignore_path)?;
+        if !content
+            .lines()
+            .any(|l| l.trim() == ".gemini/" || l.trim() == ".gemini")
+        {
+            let mut file = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&gitignore_path)?;
+            if !content.ends_with('\n') {
+                std::io::Write::write_all(&mut file, b"\n")?;
+            }
+            std::io::Write::write_all(&mut file, b".gemini/\n")?;
+        }
+    }
+
+    Ok(())
+}
+
 const SYNCVIBE_HINT_MARKER: &str = "## SyncVibe";
 
 const SYNCVIBE_HINT: &str = "\n\
@@ -484,7 +577,7 @@ This project uses SyncVibe for real-time team collaboration.\n\
 ### How to participate\n\
 - **Before starting ANY task**, call `read_chat` to see what the team needs.\n\
 - Briefly acknowledge what you read via `send_chat` (e.g. \"Got it, working on X\").\n\
-- Messages marked with ⚡ are tasks assigned to you. Complete them, then report back.\n\
+- Messages marked with ⚡ are tasks assigned to you — from ANY teammate, not just your owner. Complete them, then report back.\n\
 - **After completing work**, ALWAYS call `send_chat` with a short summary.\n\
   - Task done → \"Done — [one-line summary]\"\n\
   - Hit a problem → briefly describe the blocker.\n\

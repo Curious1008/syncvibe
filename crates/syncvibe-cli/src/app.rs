@@ -33,7 +33,7 @@ const TIPS: &[&str] = &[
     "Tip: /invite (/i) shows your room's invite code — share it to add teammates",
     "Tip: /chats lets you switch between SyncVibe rooms",
     "Tip: /mute (/m) toggles the @mention notification bell",
-    "Tip: @claude or @codex <task> sends a task directly to your AI agent",
+    "Tip: @claude, @codex, or @gemini <task> sends a task directly to your AI agent",
     "Tip: Drop a file path into chat to share images with your team",
     "Tip: /clear wipes the chat view — messages stay safe on disk",
     "Tip: AI agents auto-read this chat before starting work — just discuss here, then assign tasks",
@@ -494,7 +494,7 @@ impl AppState {
                 self.system_msg("/quit     — exit SyncVibe  (/q)");
                 self.system_msg("");
                 self.system_msg("@name     — mention a teammate (highlights + bell)");
-                self.system_msg("@claude/@codex — send task to your AI agent");
+                self.system_msg("@claude/@codex/@gemini — send task to your AI agent");
             }
             "/invite" | "/i" => match self.storage.read_room_config() {
                 Ok(mut room) => {
