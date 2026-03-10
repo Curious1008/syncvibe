@@ -202,12 +202,36 @@ fn validated_color(color: &str) -> &str {
     }
 }
 
+/// Kill orphaned sv-* tmux sessions that have no attached clients.
+/// Runs silently on every launch to prevent process accumulation.
+fn cleanup_orphaned_sessions() {
+    let output = std::process::Command::new("tmux")
+        .args(["list-sessions", "-F", "#{session_name}:#{session_attached}"])
+        .env_remove("TMUX")
+        .output();
+
+    if let Ok(o) = output {
+        let text = String::from_utf8_lossy(&o.stdout);
+        for line in text.lines() {
+            if let Some((name, attached)) = line.split_once(':') {
+                if name.starts_with("sv-") && attached == "0" {
+                    let _ = std::process::Command::new("tmux")
+                        .args(["kill-session", "-t", name])
+                        .env_remove("TMUX")
+                        .status();
+                }
+            }
+        }
+    }
+}
+
 fn launch_or_attach_with_agent(
     project_path: &str,
     agent_cmd: &str,
     agent_name: &str,
     agent_color: &str,
 ) -> Result<()> {
+    cleanup_orphaned_sessions();
     let agent_color = validated_color(agent_color);
     let project_dir = std::path::Path::new(project_path);
     let project_name = project_dir
@@ -299,19 +323,6 @@ fn launch_or_attach_with_agent(
         let _ = std::process::Command::new("tmux")
             .args(["switch-client", "-t", &session_name])
             .status();
-        // Session is now attached (we switched to it).
-        // Set destroy-unattached so if the terminal closes later,
-        // the session (and agent processes) are cleaned up.
-        let _ = std::process::Command::new("tmux")
-            .args([
-                "set-option",
-                "-t",
-                &session_name,
-                "destroy-unattached",
-                "on",
-            ])
-            .env_remove("TMUX")
-            .status();
     } else {
         // attach-session blocks until the user detaches
         let _ = std::process::Command::new("tmux")
@@ -398,6 +409,13 @@ fn create_session(
         }
         _ => {}
     }
+
+    // Auto-destroy session when no clients are attached.
+    // Prevents orphaned dashboard/agent processes if the terminal window is force-closed.
+    let _ = std::process::Command::new("tmux")
+        .args(["set-option", "-t", session_name, "destroy-unattached", "on"])
+        .env_remove("TMUX")
+        .status();
 
     // Focus the agent pane (right, pane 1)
     let _ = std::process::Command::new("tmux")

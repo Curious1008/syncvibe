@@ -11,7 +11,7 @@ pub fn check_for_update() -> Option<String> {
     );
 
     let mut response = agent
-        .get("https://api.github.com/repos/Curious1008/syncvibe/releases/latest")
+        .get("https://api.github.com/repos/nev901008-cmyk/syncvibe/releases/latest")
         .header("Accept", "application/vnd.github+json")
         .header("User-Agent", "syncvibe-cli")
         .call()
