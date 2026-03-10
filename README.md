@@ -28,7 +28,7 @@ curl -fsSL https://syncvibe.online/install.sh | sh
 Or via **Homebrew** (macOS):
 
 ```bash
-brew tap curious1008/syncvibe
+brew tap nev901008-cmyk/syncvibe
 brew install syncvibe
 ```
 
