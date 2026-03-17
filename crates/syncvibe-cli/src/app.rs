@@ -1897,7 +1897,7 @@ fn maybe_show_community() {
         return; // Already shown
     }
     println!("  {DIM}Enjoying SyncVibe? Join us:{R}");
-    println!("  {DIM}⭐ github.com/nev901008-cmyk/syncvibe{R}");
+    println!("  {DIM}⭐ github.com/Curious1008/syncvibe{R}");
     println!("  {DIM}💬 discord.com/invite/Nb3wkCBZ55{R}");
     println!();
     user.shown_community = true;

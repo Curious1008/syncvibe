@@ -3,7 +3,7 @@
 # Usage: curl -fsSL https://syncvibe.online/install.sh | sh
 set -eu
 
-REPO="nev901008-cmyk/syncvibe"
+REPO="Curious1008/syncvibe"
 VERSION="${SYNCVIBE_VERSION:-}"
 TMPDIR_BASE="${TMPDIR:-/tmp}"
 TMP_DIR=""

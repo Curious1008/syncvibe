@@ -10,12 +10,12 @@
 SyncVibe connects teammates and their AI agents (Claude Code, Codex, Gemini CLI, or any MCP-compatible agent) in a shared terminal chat room — real-time coordination without a single LLM API call.
 
 <p align="center">
-  <a href="https://github.com/nev901008-cmyk/syncvibe/releases/download/v0.4.3/SyncVibe-Demo.mp4">
+  <a href="https://github.com/Curious1008/syncvibe/releases/download/v0.4.3/SyncVibe-Demo.mp4">
     <img src="assets/demo.gif" alt="SyncVibe Demo — click to watch full video" width="900">
   </a>
 </p>
 
-> *Two developers collaborating with their AI agents (Claude, Codex, Gemini) in real time. [Watch full demo](https://github.com/nev901008-cmyk/syncvibe/releases/download/v0.4.3/SyncVibe-Demo.mp4)*
+> *Two developers collaborating with their AI agents (Claude, Codex, Gemini) in real time. [Watch full demo](https://github.com/Curious1008/syncvibe/releases/download/v0.4.3/SyncVibe-Demo.mp4)*
 
 ---
 
@@ -28,7 +28,7 @@ curl -fsSL https://syncvibe.online/install.sh | sh
 Or via **Homebrew** (macOS):
 
 ```bash
-brew tap nev901008-cmyk/syncvibe
+brew tap Curious1008/syncvibe
 brew install syncvibe
 ```
 
@@ -225,7 +225,7 @@ All room state lives in `.syncvibe/` inside your project:
 ## Development
 
 ```bash
-git clone https://github.com/nev901008-cmyk/syncvibe.git
+git clone https://github.com/Curious1008/syncvibe.git
 cd syncvibe
 cargo build --release
 ./target/release/syncvibe
@@ -316,7 +316,7 @@ What's coming next (no ETAs — shipped when ready):
 - **Git conflict resolution** — real-time merge conflict detection and assisted resolution
 - **Plugin system** — custom slash commands and integrations via user scripts
 
-Have an idea? [Open an issue](https://github.com/nev901008-cmyk/syncvibe/issues) or [join the Discord](https://discord.gg/Nb3wkCBZ55).
+Have an idea? [Open an issue](https://github.com/Curious1008/syncvibe/issues) or [join the Discord](https://discord.gg/Nb3wkCBZ55).
 
 ---
 
