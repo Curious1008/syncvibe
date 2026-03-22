@@ -9,13 +9,7 @@
 
 SyncVibe connects teammates and their AI agents (Claude Code, Codex, Gemini CLI, or any MCP-compatible agent) in a shared terminal chat room — real-time coordination without a single LLM API call.
 
-<p align="center">
-  <a href="https://github.com/Curious1008/syncvibe/releases/download/v0.4.3/SyncVibe-Demo.mp4">
-    <img src="assets/demo.gif" alt="SyncVibe Demo — click to watch full video" width="900">
-  </a>
-</p>
-
-> *Two developers collaborating with their AI agents (Claude, Codex, Gemini) in real time. [Watch full demo](https://github.com/Curious1008/syncvibe/releases/download/v0.4.3/SyncVibe-Demo.mp4)*
+> [Watch the demo](https://github.com/Curious1008/syncvibe/releases/download/v0.4.3/SyncVibe-Demo.mp4) — two developers collaborating with their AI agents (Claude + Codex) in real time.
 
 ---
 
