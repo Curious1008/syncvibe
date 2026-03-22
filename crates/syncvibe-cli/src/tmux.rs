@@ -218,6 +218,7 @@ fn cleanup_orphaned_sessions() {
                     let _ = std::process::Command::new("tmux")
                         .args(["kill-session", "-t", name])
                         .env_remove("TMUX")
+                        .stderr(std::process::Stdio::null())
                         .status();
                 }
             }
@@ -288,6 +289,7 @@ fn launch_or_attach_with_agent(
                 let _ = std::process::Command::new("tmux")
                     .args(["kill-session", "-t", &session_name])
                     .env_remove("TMUX")
+                    .stderr(std::process::Stdio::null())
                     .status();
                 create_session(
                     &session_name,
@@ -323,6 +325,12 @@ fn launch_or_attach_with_agent(
         let _ = std::process::Command::new("tmux")
             .args(["switch-client", "-t", &session_name])
             .status();
+        // Set destroy-unattached AFTER switching (session now has a client)
+        let _ = std::process::Command::new("tmux")
+            .args(["set-option", "-t", &session_name, "destroy-unattached", "on"])
+            .env_remove("TMUX")
+            .stderr(std::process::Stdio::null())
+            .status();
     } else {
         // attach-session blocks until the user detaches
         let _ = std::process::Command::new("tmux")
@@ -332,6 +340,7 @@ fn launch_or_attach_with_agent(
         let _ = std::process::Command::new("tmux")
             .args(["kill-session", "-t", &session_name])
             .env_remove("TMUX")
+            .stderr(std::process::Stdio::null())
             .status();
     }
 
@@ -375,6 +384,7 @@ fn create_session(
             &dashboard_cmd,
         ])
         .env_remove("TMUX")
+        .stderr(std::process::Stdio::null())
         .status()?;
 
     if !status.success() {
@@ -414,6 +424,7 @@ exec $SHELL; fi",
             &agent_shell_cmd,
         ])
         .env_remove("TMUX")
+        .stderr(std::process::Stdio::null())
         .status();
 
     match split_status {
@@ -429,17 +440,14 @@ exec $SHELL; fi",
         _ => {}
     }
 
-    // Auto-destroy session when no clients are attached.
-    // Prevents orphaned dashboard/agent processes if the terminal window is force-closed.
-    let _ = std::process::Command::new("tmux")
-        .args(["set-option", "-t", session_name, "destroy-unattached", "on"])
-        .env_remove("TMUX")
-        .status();
+    // NOTE: destroy-unattached is set AFTER attach/switch-client, not here.
+    // Setting it before attach would kill the detached session immediately.
 
     // Focus the agent pane (right, pane 1)
     let _ = std::process::Command::new("tmux")
         .args(["select-pane", "-t", &format!("{}:0.1", session_name)])
         .env_remove("TMUX")
+        .stderr(std::process::Stdio::null())
         .status();
 
     apply_tmux_config(session_name, agent_name, agent_color)
@@ -478,6 +486,7 @@ fn ensure_split(
             &format!("{} dashboard", escaped_bin),
         ])
         .env_remove("TMUX")
+        .stderr(std::process::Stdio::null())
         .status();
 
     match split_status {
@@ -503,6 +512,7 @@ fn apply_tmux_config(session_name: &str, agent_name: &str, agent_color: &str) ->
         let _ = std::process::Command::new("tmux")
             .args(parts)
             .env_remove("TMUX")
+            .stderr(std::process::Stdio::null())
             .status();
     }
 
@@ -532,6 +542,7 @@ fn apply_tmux_config(session_name: &str, agent_name: &str, agent_color: &str) ->
         let _ = std::process::Command::new("tmux")
             .args(["set-option", "-t", session_name, key, val])
             .env_remove("TMUX")
+            .stderr(std::process::Stdio::null())
             .status();
     }
     // Set border format separately (dynamic string, not &str)
@@ -544,6 +555,7 @@ fn apply_tmux_config(session_name: &str, agent_name: &str, agent_color: &str) ->
             &border_fmt,
         ])
         .env_remove("TMUX")
+        .stderr(std::process::Stdio::null())
         .status();
 
     // Mouse drag-select → copy to system clipboard
@@ -586,6 +598,7 @@ fn apply_tmux_config(session_name: &str, agent_name: &str, agent_color: &str) ->
         let _ = std::process::Command::new("tmux")
             .args(cmd)
             .env_remove("TMUX")
+            .stderr(std::process::Stdio::null())
             .status();
     }
 
@@ -620,6 +633,7 @@ fn apply_tmux_config(session_name: &str, agent_name: &str, agent_color: &str) ->
             let _ = std::process::Command::new("tmux")
                 .args(["kill-pane", "-t", &target])
                 .env_remove("TMUX")
+                .stderr(std::process::Stdio::null())
                 .status();
         }
     }
@@ -632,16 +646,19 @@ fn apply_tmux_config(session_name: &str, agent_name: &str, agent_color: &str) ->
         let _ = std::process::Command::new("tmux")
             .args(["resize-pane", "-t", &left, "-x", "30%"])
             .env_remove("TMUX")
+            .stderr(std::process::Stdio::null())
             .status();
 
         // Pane titles
         let _ = std::process::Command::new("tmux")
             .args(["select-pane", "-t", &left, "-T", "SyncVibe Chat"])
             .env_remove("TMUX")
+            .stderr(std::process::Stdio::null())
             .status();
         let _ = std::process::Command::new("tmux")
             .args(["select-pane", "-t", &right, "-T", agent_name])
             .env_remove("TMUX")
+            .stderr(std::process::Stdio::null())
             .status();
     }
 
