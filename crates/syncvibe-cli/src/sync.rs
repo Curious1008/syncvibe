@@ -6,8 +6,8 @@ use syncvibe_core::models::AccountConfig;
 use crate::config;
 
 // Public fallback values (same as web app's env — these are designed to be public)
-const DEFAULT_API_URL: &str = "https://womtlfcohbrkpdvcibyl.supabase.co";
-const DEFAULT_API_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvbXRsZmNvaGJya3BkdmNpYnlsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMwODUwNzgsImV4cCI6MjA4ODY2MTA3OH0.FdO_yCKsOgo8NBLWfciKYtXy5I_2NhliDSwHP7nHKF4";
+const DEFAULT_API_URL: &str = "https://hmpuwbcvlejauusmvywv.supabase.co";
+const DEFAULT_API_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhtcHV3YmN2bGVqYXV1c212eXd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEzMjc2NDQsImV4cCI6MjA4NjkwMzY0NH0.wVdlZHCI2C1jALvjOtTS0JPORL9tPxMqa5YwOAEcqIM";
 
 /// Supabase REST RPC endpoint URL.
 fn rpc_url(account: &AccountConfig, function: &str) -> String {
