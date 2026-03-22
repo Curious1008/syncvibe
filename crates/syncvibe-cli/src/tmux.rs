@@ -327,7 +327,13 @@ fn launch_or_attach_with_agent(
             .status();
         // Set destroy-unattached AFTER switching (session now has a client)
         let _ = std::process::Command::new("tmux")
-            .args(["set-option", "-t", &session_name, "destroy-unattached", "on"])
+            .args([
+                "set-option",
+                "-t",
+                &session_name,
+                "destroy-unattached",
+                "on",
+            ])
             .env_remove("TMUX")
             .stderr(std::process::Stdio::null())
             .status();
