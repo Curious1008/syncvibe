@@ -381,7 +381,26 @@ fn create_session(
         anyhow::bail!("Failed to create tmux session");
     }
 
-    // Split right pane for agent (70%)
+    // Split right pane for agent (70%) — with install hint if command not found
+    let agent_shell_cmd = format!(
+        "if command -v {cmd} >/dev/null 2>&1; then {cmd}; else \
+echo ''; \
+echo '  {name} is not installed.'; \
+echo ''; \
+echo '  Install it and restart SyncVibe:'; \
+echo ''; \
+{install_hint} \
+echo ''; \
+exec $SHELL; fi",
+        cmd = agent_cmd,
+        name = agent_name,
+        install_hint = match agent_cmd {
+            "claude" => "echo '    npm install -g @anthropic-ai/claude-code';",
+            "codex" => "echo '    npm install -g @openai/codex';",
+            "gemini" => "echo '    npm install -g @google/gemini-cli';",
+            _ => "echo '    (see agent docs for install instructions)';",
+        },
+    );
     let split_status = std::process::Command::new("tmux")
         .args([
             "split-window",
@@ -392,7 +411,7 @@ fn create_session(
             "70%",
             "-c",
             project_path,
-            agent_cmd,
+            &agent_shell_cmd,
         ])
         .env_remove("TMUX")
         .status();
