@@ -1,270 +1,267 @@
 # SyncVibe Architecture
 
-Terminal-native collaboration tool for multi-person vibe coding.
+Add multiplayer to your AI coding agent. Zero AI costs.
 
 ## Design Philosophy
 
-SyncVibe is a **coordination layer, not an AI layer**. Zero LLM API calls, zero token costs. It leverages existing AI agent capabilities (Claude Code's native file reading and hooks) rather than duplicating them.
+SyncVibe is a **coordination layer, not an AI layer**. Zero LLM API calls, zero token costs. It gives AI agents (Claude Code, Codex, Gemini CLI) two MCP tools (`read_chat`, `send_chat`) so they can participate in a shared chat room alongside humans.
 
-**Key principle**: Only build MCP tools for capabilities that agents can't do natively. Everything else uses direct file access guided by CLAUDE.md instructions.
+**Key principles:**
+1. **MCP-first**: The MCP server is the primary interface. Everything else (TUI, tmux, invite codes) exists to support it.
+2. **Agents as participants**: AI agents are equal members of the chat room, not tools you invoke. They read messages, respond to @mentions, and coordinate with each other.
+3. **Local-first**: All state lives in `.syncvibe/` inside the project. The relay handles real-time sync only, stores nothing.
+4. **Zero config for agents**: `syncvibe init` auto-generates MCP configs for whichever agent the user picks (Claude, Codex, or Gemini).
 
-## Crate Structure
+## System Overview
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  User A's Machine                                              │
+│                                                                │
+│  ┌──────────────┐     ┌──────────────────────────────────────┐ │
+│  │ SyncVibe TUI │     │ Claude Code                          │ │
+│  │  (chat +     │     │                                      │ │
+│  │   presence)  │     │  MCP: syncvibe mcp-server            │ │
+│  │              │     │    ├── read_chat → .syncvibe/        │ │
+│  │              │     │    └── send_chat → .syncvibe/ + relay│ │
+│  └──────┬───────┘     └──────────────────────────────────────┘ │
+│         │                                                      │
+│         └──── .syncvibe/chat-log.jsonl (shared local state) ───┘
+│                           │
+│                    WebSocket (WSS)
+│                           │
+│              ┌────────────┴────────────┐
+│              │   Relay (CF Workers)    │
+│              │   relay.syncvibe.online │
+│              │                         │
+│              │   - Message forwarding  │
+│              │   - Presence tracking   │
+│              │   - Invite codes (KV)   │
+│              │   - Auth token exchange │
+│              └────────────┬────────────┘
+│                           │
+│                    WebSocket (WSS)
+│                           │
+┌────────────────────────────────────────────────────────────────┐
+│  User B's Machine                                              │
+│                                                                │
+│  ┌──────────────┐     ┌──────────────────────────────────────┐ │
+│  │ SyncVibe TUI │     │ Codex CLI                            │ │
+│  │              │     │                                      │ │
+│  │              │     │  MCP: syncvibe mcp-server            │ │
+│  │              │     │    ├── read_chat                     │ │
+│  │              │     │    └── send_chat                     │ │
+│  └──────────────┘     └──────────────────────────────────────┘ │
+└────────────────────────────────────────────────────────────────┘
+```
+
+## Three Repositories
+
+| Repo | Stack | Deployed to | Purpose |
+|------|-------|-------------|---------|
+| **syncvibe** (CLI) | Rust, rmcp, ratatui, tokio | Homebrew, install script | MCP server + TUI + tmux integration |
+| **syncvibe-relay** | TypeScript, Cloudflare Workers + Durable Objects | relay.syncvibe.online | WebSocket message forwarding, invite codes, auth exchange |
+| **syncvibe-web** | React 19, Vite, Tailwind, Supabase | syncvibe.online (Vercel) | Landing page, auth, dashboard |
+
+## Crate Structure (CLI)
 
 ```
 syncvibe/
-├── Cargo.toml                     # Workspace root
+├── Cargo.toml                     # Workspace root (v0.4.5)
 ├── crates/
 │   ├── syncvibe-cli/              # Main binary
 │   │   └── src/
-│   │       ├── main.rs            # Entry point, clap CLI dispatch, simple commands
-│   │       ├── init.rs            # Room init (.syncvibe/, .mcp.json, .codex/, .gemini/, CLAUDE.md)
+│   │       ├── main.rs            # Entry point, clap dispatch
+│   │       ├── mcp/server.rs      # MCP server: read_chat, send_chat (440+ lines)
+│   │       ├── init.rs            # Room init (.mcp.json, .codex/, .gemini/, CLAUDE.md)
 │   │       ├── session.rs         # Interactive onboarding + project launch
-│   │       ├── tmux.rs            # tmux session management, layout, keybindings
-│   │       ├── app.rs             # TUI app state + async event loop
-│   │       ├── picker.rs          # Project switcher (ratatui)
-│   │       ├── cli.rs             # Clap command definitions
-│   │       ├── config.rs          # ~/.syncvibe/ config + project registry
-│   │       ├── onboarding.rs      # Interactive prompts + input validation
-│   │       ├── auth.rs            # Web account linking via relay-mediated token exchange
-│   │       ├── invite.rs          # Invite code create/resolve via relay API
-│   │       ├── agents.rs          # AI agent configuration (Claude, Codex, Gemini)
+│   │       ├── tmux.rs            # tmux session management, split layout
+│   │       ├── app.rs             # TUI event loop + slash commands
+│   │       ├── auth.rs            # Web account linking via relay token exchange
 │   │       ├── sync.rs            # Room metadata sync to Supabase
-│   │       ├── tui.rs             # Terminal setup/teardown (crossterm)
+│   │       ├── invite.rs          # Invite code create/resolve via relay API
+│   │       ├── agents.rs          # Agent definitions (Claude, Codex, Gemini)
+│   │       ├── network/ws_client.rs  # WebSocket client (tokio-tungstenite)
 │   │       ├── components/        # TUI rendering (ratatui)
-│   │       │   ├── status_bar.rs  # Top bar: project name + presence
-│   │       │   ├── chat.rs        # Chat message display
-│   │       │   ├── input.rs       # Input bar with cursor
-│   │       │   └── util.rs        # Color parsing helpers
-│   │       ├── network/
-│   │       │   └── ws_client.rs   # WebSocket client (tokio-tungstenite)
-│   │       ├── mcp/
-│   │       │   └── server.rs      # MCP server: read_chat, send_chat
-│   │       └── git/
-│   │           └── ops.rs         # Git operations: remote detect, clone, remote set
+│   │       └── git/ops.rs         # Git remote detect, clone, remote set
 │   │
 │   └── syncvibe-core/             # Shared library
 │       └── src/
-│           ├── lib.rs
-│           ├── error.rs           # SyncVibeError enum
-│           ├── models/            # Data types (chat, room, user)
+│           ├── models/            # ChatMessage, Room, User types
 │           ├── protocol.rs        # WsMessage enum (WebSocket types)
 │           └── storage.rs         # .syncvibe/ file I/O (atomic writes, file locking)
-│
-└── worker/                        # Cloudflare Worker (TypeScript)
-    └── src/
-        ├── index.ts               # HTTP routing → Durable Object
-        ├── room.ts                # Durable Object: WS relay + presence
-        └── types.ts
 ```
 
-## Features
+## MCP Server (Primary Interface)
 
-### Interactive Onboarding
-- `syncvibe` with no args: profile setup, project list, create/join room
-- `syncvibe://` invite codes: base64-encoded room_id + room_secret
-- Auto-detects git user.name for profile defaults
+The MCP server is how AI agents interact with SyncVibe. It runs as `syncvibe mcp-server` and provides two tools:
 
-### TUI Chat
-- Real-time chat with presence indicators
-- Slash commands: `/help` (`/?`), `/invite` (`/i`), `/new` (`/n`), `/join` (`/j`), `/name`, `/color`, `/mute` (`/m`), `/remote`, `/collab`, `/clear`, `/rc`, `/quit` (`/q`)
-- **@mentions**: `@name` highlights + bell notification; `@agent` / `@claude` / `@codex` / `@gemini` prompts agent to read chat for new tasks (only the room's configured agent responds — mentioning a different agent is ignored). Remote @mentions also trigger the local agent (30s debounce) — teammates can assign tasks to each other's agents across machines
-- Image sharing (drag path into input)
-- Horizontal scrolling for long input lines
-- **Mouse scroll** + PageUp/PageDown for chat navigation (mouse events scoped to chat panel)
-- **Unread indicator**: "↓ N new messages" banner when scrolled up and new messages arrive; auto-resets on return to bottom
-- **Message selection**: Up/Down arrows select messages for quoting or opening images; Esc deselects
-- Message grouping by user, bell only on @mention (with debounce)
-- Chat truncation for performance (>5000 msgs → keep last 2000 in memory, msg_id_set pruned in sync)
+### read_chat
 
-### Status Bar & Presence
-- **Version display**: shows current version (e.g. `v0.3.9`) in status bar
-- **Fixed positions**: current user (rightmost, bold with color) + agent indicator (`◆ Agent` in teal, when in tmux)
-- **Carousel rotation**: other online users rotate every 3 seconds when they don't all fit
-- **Dynamic width**: calculates available space, shows as many users as fit, `+N` indicator for hidden ones
-- **Online/offline indicator**: green `●` when connected, gray `○ offline` when disconnected
-
-### tmux Integration
-- Auto-creates split layout: SyncVibe Dashboard (30%, left) | AI Agent (70%, right)
-- Dashboard is the long-lived process; agent pane is split after session creation
-- Session cleanup: `kill-session` on detach (outside tmux) or `destroy-unattached` (inside tmux) prevents orphaned agent processes
-- Ctrl+G to switch panes, styled pane borders
-- Project switching between tmux sessions
-
-### Screen Sharing
-- `/share` — toggle sharing your agent pane with teammates
-- `/watch <name>` — view a teammate's agent screen in real time
-- Delta-encoded frames: compares current frame to previous, sends only changed lines
-- Max 500 lines per frame, 1-second capture interval
-- Protocol: `ScreenShareStart` → `ScreenFrame` (delta) → `ScreenShareStop`
-
-### Git Remote Sync
-
-Allows teammates to auto-clone the project repo when joining a room.
-
-**Data flow:**
-1. Room creator: `detect_or_prompt_git_remote()` detects or prompts for git remote URL → stored in `room.json` as `git_remote`
-2. `/invite`: refreshes `git_remote` from actual git remote before creating invite code → relay stores it in KV alongside room credentials
-3. Joiner: `resolve_short_invite()` receives `git_remote` → `prepare_project_dir_with_remote()` attempts `git clone` → falls back to empty dir on failure
-4. Agents: CLAUDE.md/AGENTS.md instruct commit+push after tasks (applies to Claude, Codex, and Gemini), pull before new work
-
-**Security model:** Zero token storage. `git_remote` is just a URL (public info). Authentication is handled entirely by the user's existing git credential manager — same as running `git push` manually.
-
-**TUI commands:**
-- `/remote` — show current remote or set a new one (`/remote https://github.com/...`)
-- `/collab` — open GitHub collaborator settings page, or `github.com/new` if no remote exists
-
-**Room creation menu** (`detect_or_prompt_git_remote`):
-1. Auto-detect existing git remote → done
-2. If no remote: show 3-option menu — Paste URL / Create new repo (opens browser) / Skip
-
-### MCP Server
-- 2 tools: `read_chat` and `send_chat`, injected via `.mcp.json` at init time
-- **`read_chat`**: smart incremental reads with session scoping, time filtering, byte-offset tracking, and digest file offloading
-- **`send_chat`**: sends a message to the team chat as the AI agent
-- **Context-aware response sizing**: small conversations (< 30 msgs) return inline; large conversations write full content to `.syncvibe/chat-digest.md` and return a brief summary — prevents flooding the agent's context window
-- **Message grouping**: consecutive messages from the same user are collapsed under one header, saving ~20-30% tokens
-
-### Project Registry
-- `~/.syncvibe/projects.json` tracks all initialized projects
-- Canonical paths to avoid duplicates (macOS `/tmp` vs `/private/tmp`)
-
-## AI Agent Integration Strategy
-
-### Agent Auto-Read Flow
-
-The core UX: **users discuss in SyncVibe chat, then assign tasks to their agent — the agent automatically understands the team's context.**
+Smart incremental reads with session scoping and context window protection.
 
 ```
-1. syncvibe init
-   → .mcp.json              (MCP config for Claude Code)
-   → .codex/config.toml     (MCP config for Codex CLI)
-   → .gemini/settings.json  (MCP config for Gemini CLI)
-   → CLAUDE.md              (instructs Claude: "call read_chat before ANY task")
-   → AGENTS.md              (instructs Codex/Gemini: same workflow)
-   → .claude/settings       (hooks for file change notifications)
+Parameters:
+  all: bool     -- return all sessions or just current (default: current)
+  since: string -- ISO 8601 timestamp filter
+  format: string -- "compact" (default, token-efficient) or "json" (structured)
 
-2. User gives agent a task
-   → Agent calls read_chat (MCP) — instructed by CLAUDE.md
-   → Small chat: messages inline
-   → Large chat: full content → .syncvibe/chat-digest.md, agent reads the file
-   → Agent acknowledges: "I've read the team chat — you're working on X..."
-   → Agent proceeds with full context
+Behavior:
+  - Tracks byte offset across calls (incremental reads within one MCP session)
+  - Groups consecutive messages from the same user (saves ~20-30% tokens)
+  - Highlights @agent tasks with lightning bolt icon
+  - Small conversations (< 30 msgs): returns inline
+  - Large conversations (30+ msgs): writes to .syncvibe/chat-digest.md, returns summary
+  - Escapes boundary markers in user content to prevent prompt injection
 ```
 
-Three reinforcement layers ensure the agent always reads chat:
-1. **CLAUDE.md / AGENTS.md** — "Before starting ANY task, call read_chat" + "After completing work, ALWAYS call send_chat"
-2. **MCP server instructions** — "IMPORTANT: call read_chat before starting ANY task"
-3. **Agent behavior** — agent acknowledges the discussion, making it visible to the user
+### send_chat
 
-### What MCP adds
-| MCP Tool | Why it exists |
-|---|---|
-| `read_chat` | **Smart filtering**: session scoping, incremental byte-offset reads, time-based filtering, digest file offloading for large conversations — not possible with raw file read |
-| `send_chat` | **Structured messaging**: creates properly formatted ChatMessage with user metadata, appends to JSONL, and broadcasts via WebSocket relay |
+Sends a message to the team chat as the AI agent.
 
-### What Claude Code provides natively
-| Capability | How SyncVibe leverages it |
-|---|---|
-| CLAUDE.md | `syncvibe init` injects collaboration instructions — agent auto-reads chat |
-| .mcp.json | `syncvibe init` registers MCP server — agent discovers `read_chat` tool |
-| File Read/Write/Edit | Agents read `.syncvibe/chat-digest.md`, write `.syncvibe/chat-log.jsonl` |
-| Hooks | `.claude/settings.json` — PostToolUse hook touches `.syncvibe/.updated` on file changes |
+```
+Parameters:
+  content: string -- message text (truncated to 500 chars)
+
+Behavior:
+  - Creates ChatMessage with agent identity (user_id: "agent-{id}")
+  - Appends to .syncvibe/chat-log.jsonl
+  - Broadcasts via WebSocket relay to all connected peers
+```
+
+### MCP Registration
+
+`syncvibe init` auto-generates per-agent config files:
+
+| Agent | Config File | Format |
+|-------|-------------|--------|
+| Claude Code | `.mcp.json` | `{"mcpServers":{"syncvibe":{"command":"syncvibe","args":["mcp-server"]}}}` |
+| Codex CLI | `.codex/config.toml` | `[mcp_servers.syncvibe]` block |
+| Gemini CLI | `.gemini/settings.json` | Same JSON format as Claude |
+
+Manual registration (Claude Code): `claude mcp add syncvibe -- syncvibe mcp-server`
+
+### Agent Behavior Layer
+
+Three reinforcement layers ensure agents always read chat before working:
+
+1. **CLAUDE.md / AGENTS.md** -- `syncvibe init` injects "Before starting ANY task, call read_chat"
+2. **MCP server instructions** -- tool description includes "IMPORTANT: call read_chat before starting ANY task"
+3. **Claude Code skill** -- `.claude/skills/syncvibe/SKILL.md` provides collaboration instructions
+
+```
+Agent Task Flow:
+  1. User gives agent a task
+  2. Agent calls read_chat (instructed by CLAUDE.md)
+  3. Agent sees team discussions, @mentions, pending tasks
+  4. Agent works with full context
+  5. Agent calls send_chat to report results
+```
 
 ## Data Flow
 
-### Human ↔ Human (TUI)
+### Human to Human (TUI chat)
 ```
-User input → TUI → Storage (.syncvibe/) → WebSocket relay → Other TUI
-                                         → File watcher → Re-render
-```
-
-### Human ↔ AI Agent
-```
-Human (TUI) → Storage (.syncvibe/) → File watcher on agent side
-                                    → Agent reads files / MCP read_chat
-AI Agent → Writes .syncvibe/ files → Hook touches .updated → TUI file watcher → Re-render
+User A types → TUI → .syncvibe/chat-log.jsonl → WebSocket relay → User B's TUI
 ```
 
-### AI Agent ↔ AI Agent
+### Human to Agent (@mention)
 ```
-Agent A → Appends chat-log.jsonl → TUI reload_data() detects agent- prefix
-  → Broadcasts via WebSocket → Relay preserves agent identity → Remote TUI
-  → Writes to remote chat-log.jsonl → Agent B reads via MCP read_chat
+User types "@claude do X" → chat-log.jsonl → Agent's MCP read_chat → Agent sees task
+                                            → Shows as "TASKS FOR YOU (1): ..."
 ```
+
+### Agent to Human (send_chat)
+```
+Agent calls send_chat → chat-log.jsonl → TUI detects agent- prefix → Broadcasts via relay
+                                       → All teammates see agent's response
+```
+
+### Agent to Agent (cross-machine)
+```
+Agent A sends_chat → relay → User B's TUI → chat-log.jsonl → Agent B reads via MCP
+```
+
+### Remote @mentions (cross-machine agent tasks)
+```
+User B types "@claude do X" → relay → User A's TUI → tmux send-keys to agent pane
+                                                    → Agent reads chat, sees task
+                                                    → 30-second debounce prevents spam
+```
+
+## Interactive Features
+
+### TUI Chat
+- Real-time chat with presence indicators (online/offline dots)
+- @mention with tab completion and bell notifications
+- Image sharing, message grouping, scroll-back with PageUp/PageDown
+- Mouse scroll scoped to chat panel
+- Unread indicator: "N new messages" banner when scrolled up
+- Message selection for quoting
+- Chat truncation: >5000 msgs keeps last 2000 in memory
+
+### tmux Integration
+- Auto-creates split layout: SyncVibe Dashboard (30%) | AI Agent (70%)
+- Session naming: `sv-{project}-{path_hash}` (collision-free)
+- Ctrl+G to switch panes
+- Auto-installs tmux if missing (Homebrew/apt/dnf/pacman)
+- Session cleanup prevents orphaned agent processes
 
 ### Screen Sharing
-```
-Sharer's agent pane → tmux capture-pane → Delta encode
-  → ScreenFrame (WSS) → Relay (forward, no storage) → Viewer's TUI overlay
-```
+- `/share` toggles sharing your agent pane
+- `/watch <name>` views a teammate's screen in real time
+- Delta-encoded frames (only changed lines sent)
+- Max 500 lines per frame, 1-second capture interval
 
-## .syncvibe/ Directory
+### Git Remote Sync
+- Room creator: auto-detects git remote or prompts for URL
+- Teammate joins: repo auto-clones on `syncvibe connect`
+- Agents instructed to commit+push after tasks, pull before new work
+- Zero token storage: uses existing git credentials
 
-```
-.syncvibe/
-├── room.json            # Room config (room_id, room_secret, relay_url, git_remote)
-├── chat-log.jsonl       # Append-only, one JSON per line
-├── chat-digest.md       # Auto-generated by MCP read_chat for large conversations
-└── images/              # Shared images (UUID-named)
-```
-
-`.syncvibe/` is gitignored. The WebSocket relay provides real-time sync; local files are the source of truth.
+### Invite Codes
+- Short codes (`HKPT-3NWV`) auto-copied to clipboard
+- 7-day TTL, stored in relay KV
+- Rate limited: 10 requests/minute per IP
 
 ## Server-Side Infrastructure
 
 ### Relay (Cloudflare Workers + Durable Objects)
 
-The relay at `relay.syncvibe.online` handles real-time WebSocket forwarding only.
-
-**What it stores:**
+WebSocket message forwarding at `relay.syncvibe.online`. No message persistence.
 
 | Data | Storage | Duration |
 |------|---------|----------|
 | Room secret (for auth) | Durable Objects | Persistent |
-| Invite codes | KV store | 7-day TTL, auto-deleted |
-| Connected users | In-memory only | Session only |
+| Invite codes | KV store | 7-day TTL |
+| Auth tokens | KV store | 5-min TTL, one-time use |
+| Connected users | In-memory | Session only |
 | Chat messages | Not stored | Forwarded in real time |
-| Screen share frames | Not stored | Forwarded in real time |
 
-**What it does NOT do:** log messages, index content, read source code, run analytics.
-
-All relay traffic uses WSS (TLS). The relay sees message content in memory during forwarding — this is transport encryption, not E2E. E2E encryption is on the roadmap.
+Security:
+- Rate limiting: 20 msgs/sec per client, 10 API requests/min per IP
+- Max message size: 256 KB
+- Identity stamping: relay stamps authenticated identity on messages
+- Agent identity: only connections with matching `agentId` can send as `agent-{id}`
+- Idle cleanup: rooms with no users for 1 hour auto-delete
+- Max 100 WebSocket connections per room
 
 ### Database (Supabase)
 
-When a user links their CLI to a web account (`syncvibe auth`), room metadata is synced via RPC:
+Room metadata sync when users link CLI to web account (`syncvibe auth`).
 
-| Data | Purpose |
-|------|---------|
-| Room ID | Identify the room |
-| Project name | Display name in dashboard |
-| Room secret | Allow re-joining from other devices |
+| Table | Purpose |
+|-------|---------|
+| profiles | User info, CLI tokens (32-byte hex), auto-created on signup |
+| user_projects | Room associations per user (RLS enforced) |
+| feedback | User feedback from web app |
+| collaborator_requests | GitHub collaborator access requests |
 
-**No chat content, messages, or files are ever stored in the database.**
+RPC functions: `sync_room`, `bulk_sync_rooms`, `leave_room`, `regenerate_cli_token`, `approve_collaborator`, `request_collaborator`, `store_github_token`
 
-Three RPC functions:
-- `sync_room` — sync a single room on create/join
-- `bulk_sync_rooms` — sync all local rooms after authentication
-- `leave_room` — remove room association, returns remaining member count
+No chat content, messages, or files are ever stored in the database.
 
-### Invite Code Flow
-
-```
-Creator: POST /invite {room_id, room_secret, room_name, git_remote?}
-  → Relay generates short code (XXXX-XXXX), stores in KV with 7-day TTL
-  → Returns code to creator
-
-Joiner: GET /invite/{code}
-  → Relay looks up KV, returns {room_id, room_secret, relay_url, git_remote?}
-  → If git_remote present: auto-clone repo to project dir
-  → Joiner connects to room with those credentials
-```
-
-Rate limited: 10 requests/minute per IP.
-
-### Auth Token Exchange (CLI ↔ Web via Relay)
-
-Allows users to link their CLI to their web account at syncvibe.online. The token exchange is mediated by the relay to avoid Chrome's Private Network Access restrictions (HTTPS page → HTTP localhost is blocked).
+### Auth Token Exchange (CLI to Web via Relay)
 
 ```
 CLI                          Relay                        Web
@@ -273,49 +270,63 @@ CLI                          Relay                        Web
  ├─ open browser ─────────────┼──────────────────────────► │ /authorize?code=ABC
  │                            │                            │
  │  poll GET /auth/ABC ──────►│ 404 (not yet)              │ user signs in
- │  poll GET /auth/ABC ──────►│ 404                        │ user clicks Authorize
  │                            │◄── POST /auth/ABC ─────────┤ { token, urls }
- │  poll GET /auth/ABC ──────►│ 200 { token, urls }        │ shows "Authenticated!"
- │  ◄─────────────────────────│ (delete from KV)           │
- │  save token                │                            │
+ │  poll GET /auth/ABC ──────►│ 200 { token, urls }        │
+ │  save to ~/.syncvibe/      │ (delete from KV)           │
 ```
 
-**Security:**
-- Auth code is UUID v4 (128-bit random) — guessing is infeasible
-- 5-minute TTL — expired codes auto-deleted from KV
-- One-time use — token deleted from KV after first retrieval
-- One-write-only — relay rejects POST if auth code already has a token (prevents overwrite / session fixation)
-- Explicit user click on "Authorize" prevents login CSRF
-- Token validated as hex on relay, CLI, and web
-- Rate limited: 10 requests/minute per IP
+UUID auth code, 5-min TTL, one-time use, one-write-only.
 
-## Security & Privacy
+## Local State
 
-- **TLS enforced** — all relay connections use WSS; plaintext `ws://` rejected
-- **No message persistence** — relay forwards chat, screen shares, and MCP traffic in memory only; nothing logged or written to disk
-- **Relay visibility** — the relay sees plaintext message content during forwarding (transport encryption, not E2E). E2E is on the roadmap
-- **Room secrets** — 256-bit random (64 hex chars), sent over TLS for auth, stored server-side for reconnection support
-- **File permissions** — `.syncvibe/` dir is 0700, all files (room.json, chat-log.jsonl, config.toml) are 0600
-- **Atomic writes** — write to temp file + rename prevents partial reads
-- **Advisory file locking** — exclusive lock on chat-log.jsonl for concurrent write safety
-- **Message retention** — `retention_days` in `~/.syncvibe/config.toml` (default: 90). Old messages pruned atomically on startup
-- **ANSI stripping** — remote peer content is stripped of CSI, OSC, DCS, APC, PM, SOS escape sequences and control chars to prevent terminal injection
-- **Identity stamping** — relay stamps user identity server-side on messages to prevent spoofing. Agent messages (`agent-{id}` prefix) are verified against the connection's `agentId` claim — only a peer that authenticated with `agentId: "claude"` can send as `agent-claude`; human messages are always overwritten with the authenticated identity
-- **Invite code expiry** — KV-stored codes auto-delete after 7 days
-- **Auth token exchange** — relay-mediated, UUID auth codes with 5-min TTL, one-time use, one-write-only (see Auth Token Exchange section)
+```
+.syncvibe/                        # Per-project, gitignored
+├── room.json                     # Room identity (room_id, secret, relay_url, git_remote)
+├── chat-log.jsonl                # Append-only chat, one JSON per line
+├── chat-digest.md                # Auto-generated by MCP for large conversations
+└── images/                       # Shared images (UUID-named)
 
-For full details, see [Data & Privacy](https://syncvibe.online/docs/data-privacy).
+~/.syncvibe/                      # Global config
+├── config.toml                   # User profile, account credentials, preferences
+└── projects.json                 # Registry of all initialized projects
+```
+
+## Security
+
+- **TLS enforced**: all relay connections use WSS, plaintext rejected
+- **No message persistence**: relay forwards in memory only, nothing logged
+- **Transport encryption (not E2E)**: relay sees plaintext during forwarding. E2E encryption is on the roadmap
+- **Room secrets**: 256-bit random (64 hex chars), constant-time comparison
+- **File permissions**: `.syncvibe/` dir is 0700, all files are 0600
+- **Atomic writes**: write to temp file + rename prevents partial reads
+- **Advisory file locking**: exclusive lock on chat-log.jsonl for concurrent write safety
+- **ANSI stripping**: remote content stripped of terminal escape sequences
+- **Identity stamping**: relay stamps authenticated identity, prevents spoofing
+- **Prompt injection prevention**: MCP `read_chat` escapes boundary markers (`[USER:`, `[END MESSAGE]`) in user content using zero-width spaces
+- **Invite code expiry**: 7-day TTL, auto-deleted from KV
+- **Message retention**: configurable `retention_days` (default 90), pruned atomically on startup
+
+## Distribution
+
+| Channel | Command | Audience |
+|---------|---------|----------|
+| Homebrew | `brew tap Curious1008/syncvibe && brew install syncvibe` | macOS users |
+| Install script | `curl -fsSL https://syncvibe.online/install.sh \| sh` | macOS + Linux |
+| MCP registration | `claude mcp add syncvibe -- syncvibe mcp-server` | Claude Code users |
+| Claude Code skill | `.claude/skills/syncvibe/SKILL.md` | Claude Code sessions |
+| Skill install script | `curl -fsSL https://syncvibe.online/skill-install.sh \| sh` | One-command setup |
+
+Supported platforms: macOS (Apple Silicon + Intel), Linux (x86_64, aarch64).
 
 ## Key Design Decisions
 
-1. **Local-first**: All state in `.syncvibe/`, gitignored. WebSocket relay is ephemeral for real-time sync.
-2. **JSONL for chat**: Append-only, no merge conflicts, advisory file locking for concurrent writes.
-3. **Atomic file writes**: Write to `.tmp`, then rename. Prevents partial reads.
-4. **2 MCP tools**: `read_chat` (smart filtering, digest offloading) and `send_chat` (structured messaging with relay broadcast).
-5. **Session auto-segmentation**: 30min silence → new session ID. MCP `read_chat` defaults to current session.
-6. **Offline-first**: TUI works fully with local files. WebSocket is optional.
-7. **Hooks integration**: `PostToolUse` hook signals TUI when agents modify `.syncvibe/` files.
-8. **Security**: All local files use 0600 permissions, TLS enforced on relay, identity stamped server-side. See Security & Privacy section above.
-9. **Context window protection**: MCP `read_chat` offloads large conversations to `.syncvibe/chat-digest.md` instead of returning them inline. Tool response stays bounded (~3 lines for large chats), agent reads the file at its own discretion.
-10. **Message retention**: Configurable `retention_days` (default 90). Old messages pruned atomically on startup — temp file + rename to prevent data loss.
-11. **Git remote sync**: Zero token storage. The `git_remote` URL is passed via invite codes; cloning/pushing uses the user's existing git credentials. No PATs, no OAuth for repo access.
+1. **MCP-first distribution**: the MCP server is the primary interface. TUI and tmux are the experience layer, but the value is in `read_chat` and `send_chat`.
+2. **Local-first state**: all state in `.syncvibe/`, gitignored. Relay is ephemeral.
+3. **JSONL for chat**: append-only, no merge conflicts, advisory file locking.
+4. **Atomic file writes**: write to `.tmp`, then rename. Prevents partial reads.
+5. **Context window protection**: large conversations offloaded to digest file, not returned inline.
+6. **Session auto-segmentation**: 30min silence starts a new session ID. MCP defaults to current session.
+7. **Per-agent config generation**: `syncvibe init` writes the right config file format for each agent.
+8. **Zero AI costs**: pure coordination. Each user pays for their own agent, SyncVibe adds no token costs.
+9. **Prompt injection defense**: boundary markers in user content are escaped with zero-width spaces before being returned via MCP.
+10. **Git remote sync**: URLs only, zero token storage. Auth uses existing git credentials.
