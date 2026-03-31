@@ -1,48 +1,56 @@
 # SyncVibe
 
-**Add multiplayer to your AI coding agent. Zero AI costs.**
+**Terminal-native collaboration for vibe coding teams. Zero AI costs.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux-lightgrey.svg)]()
 [![Website](https://img.shields.io/badge/Web-syncvibe.online-teal.svg)](https://syncvibe.online)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2.svg?logo=discord&logoColor=white)](https://discord.gg/Nb3wkCBZ55)
 
-SyncVibe puts you, your teammates, and all your AI agents (Claude Code, Codex, Gemini CLI) in the same chat room. Real-time collaboration without a single LLM API call.
+SyncVibe connects teammates and their AI agents (Claude Code, Codex, Gemini CLI, or any MCP-compatible agent) in a shared terminal chat room — real-time coordination without a single LLM API call.
 
-> [Watch the demo](https://github.com/Curious1008/syncvibe/releases/download/v0.4.3/SyncVibe-Demo.mp4) -- two developers collaborating with their AI agents (Claude + Codex) in real time.
+> [Watch the demo](https://github.com/Curious1008/syncvibe/releases/download/v0.4.3/SyncVibe-Demo.mp4) — two developers collaborating with their AI agents (Claude + Codex) in real time.
 
 ---
 
-## 30-Second Setup
-
-**1. Install**
+## Install
 
 ```bash
-brew tap Curious1008/syncvibe && brew install syncvibe
+curl -fsSL https://syncvibe.online/install.sh | sh
 ```
 
-Or without Homebrew: `curl -fsSL https://syncvibe.online/install.sh | sh`
-
-**2. Register MCP server** (so your agent can read/send chat)
+Or via **Homebrew** (macOS):
 
 ```bash
-# Claude Code
-claude mcp add syncvibe -- syncvibe mcp-server
-
-# Codex -- add to .codex/config.toml:
-# [mcp_servers.syncvibe]
-# command = "syncvibe"
-# args = ["mcp-server"]
+brew tap Curious1008/syncvibe
+brew install syncvibe
 ```
 
-**3. Create a room and invite someone**
+Supports **macOS** (Apple Silicon + Intel) and **Linux** (x86_64, aarch64).
+
+---
+
+## Quick Start
+
+**1. Create a room**
 
 ```bash
-syncvibe                        # create room, pick your agent
-syncvibe connect HKPT-3NWV     # or join a friend's room
+syncvibe
 ```
 
-That's it. Your AI agent now has `read_chat` and `send_chat` tools. Say "@claude build the landing page" and your friend says "@codex write the API" -- both agents work in the same context.
+Interactive onboarding — pick your name, choose an AI agent (Claude, Codex, or Gemini), and create a room.
+
+**2. Invite your team**
+
+Type `/invite` in the TUI — a short code like `HKPT-3NWV` is copied to your clipboard. Send it to teammates.
+
+**3. Teammate joins**
+
+```bash
+syncvibe connect HKPT-3NWV
+```
+
+Chat syncs in real time. If the room has a linked repo, the code auto-clones on connect. The AI agent auto-configures via MCP — no manual setup needed.
 
 ---
 
