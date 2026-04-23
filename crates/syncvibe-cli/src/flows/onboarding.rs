@@ -105,3 +105,48 @@ pub fn detect_clipboard_invite() -> Result<Option<()>> {
     tmux::launch_project(&path)?;
     Ok(Some(()))
 }
+
+/// Interactive "Join with invite code" menu branch: prompt repeatedly until
+/// the user supplies a valid short code (or types empty to cancel), then
+/// join + launch the corresponding room.
+///
+/// Pure move from `session::cmd_session` per R4c. Byte-identical behavior.
+pub fn run_join_code_flow() -> Result<()> {
+    println!();
+    let mut room = loop {
+        let code = onboarding::prompt(&format!("  {TEAL}Invite code:{R} "))?;
+        if code.is_empty() {
+            anyhow::bail!("Cancelled.");
+        }
+        match crate::invite::resolve_short_invite(&code) {
+            Ok(r) => break r,
+            Err(e) => {
+                println!("  {RED}✗{R} Invalid invite code: {e}");
+                println!("  {DIM}Press Enter with no input to go back.{R}\n");
+                continue;
+            }
+        }
+    };
+    let raw_name = room
+        .room_name
+        .clone()
+        .unwrap_or_else(|| "syncvibe-room".to_string());
+    let name = onboarding::sanitize_name(&raw_name);
+    let name = if name.is_empty() {
+        "syncvibe-room".to_string()
+    } else {
+        name
+    };
+    println!("  {GREEN}✓{R} Code accepted — {B}{name}{R}\n");
+    let proj = init::projects_dir().join(&name);
+    // Already joined — just launch
+    if proj.join(".syncvibe").is_dir() {
+        println!("  {DIM}→ {} (already set up){R}\n", proj.display());
+        return tmux::launch_project(&proj);
+    }
+    let agent_id = crate::agents::select_agent()?;
+    room.agent = Some(agent_id);
+    let path = init::prepare_project_dir_with_remote(&name, room.git_remote.as_deref())?;
+    init::perform_init(&path, Some(room))?;
+    tmux::launch_project(&path)
+}
