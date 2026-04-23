@@ -671,6 +671,145 @@ fn apply_tmux_config(session_name: &str, agent_name: &str, agent_color: &str) ->
     Ok(())
 }
 
+/// Return the current pane id (e.g. `%3`) when running inside tmux,
+/// or `None` otherwise. Used by `/watch` to stamp broadcasts.
+pub fn current_pane_id() -> Option<String> {
+    let output = std::process::Command::new("tmux")
+        .args(["display-message", "-p", "#{pane_id}"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if id.is_empty() {
+            None
+        } else {
+            Some(id)
+        }
+    } else {
+        None
+    }
+}
+
+/// Discover the agent pane target (session:window.pane_index).
+/// Returns `None` when not inside a syncvibe-managed tmux session or
+/// when the right (agent) pane doesn't exist yet.
+pub fn discover_agent_pane() -> Option<String> {
+    use std::process::{Command, Stdio};
+
+    let session = Command::new("tmux")
+        .args(["display-message", "-p", "#{session_name}"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !session.status.success() {
+        return None;
+    }
+    let session_name = String::from_utf8_lossy(&session.stdout).trim().to_string();
+    if session_name.is_empty() {
+        return None;
+    }
+
+    let pane_output = Command::new("tmux")
+        .args([
+            "list-panes",
+            "-t",
+            &format!("{}:0", session_name),
+            "-F",
+            "#{pane_left}:#{pane_index}",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .env_remove("TMUX")
+        .output()
+        .ok()?;
+    if !pane_output.status.success() {
+        return None;
+    }
+    let pane_str = String::from_utf8_lossy(&pane_output.stdout);
+    let mut panes: Vec<(u32, String)> = pane_str
+        .lines()
+        .filter_map(|line| {
+            let (left, idx) = line.split_once(':')?;
+            Some((left.parse().ok()?, idx.to_string()))
+        })
+        .collect();
+    panes.sort_by_key(|(x, _)| *x);
+    if panes.len() < 2 {
+        return None;
+    }
+    Some(format!("{}:0.{}", session_name, panes[1].1))
+}
+
+/// Kill the right (agent) pane in the current tmux session, leaving the
+/// dashboard pane alive. No-op when not inside tmux.
+pub fn kill_agent_pane(in_tmux: bool) {
+    if !in_tmux {
+        return;
+    }
+    if let Ok(output) = std::process::Command::new("tmux")
+        .args(["display-message", "-p", "#{session_name}"])
+        .output()
+    {
+        let session = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if session.is_empty() {
+            return;
+        }
+        // Find panes sorted by horizontal position (left = dashboard, right = agent)
+        let pane_output = std::process::Command::new("tmux")
+            .args([
+                "list-panes",
+                "-t",
+                &format!("{}:0", session),
+                "-F",
+                "#{pane_left}:#{pane_index}",
+            ])
+            .env_remove("TMUX")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .unwrap_or_default();
+        let mut panes: Vec<(u32, String)> = pane_output
+            .lines()
+            .filter_map(|line| {
+                let (left, idx) = line.split_once(':')?;
+                Some((left.parse().ok()?, idx.to_string()))
+            })
+            .collect();
+        panes.sort_by_key(|(x, _)| *x);
+        // Kill the right pane (agent) if we have at least 2 panes
+        if panes.len() >= 2 {
+            let agent_pane = format!("{}:0.{}", session, panes[1].1);
+            let _ = std::process::Command::new("tmux")
+                .args(["kill-pane", "-t", &agent_pane])
+                .env_remove("TMUX")
+                .status();
+        }
+    }
+}
+
+/// Kill the current tmux session (both panes) to avoid stale processes.
+pub fn kill_current_tmux_session(in_tmux: bool) {
+    if !in_tmux {
+        return;
+    }
+    if let Ok(output) = std::process::Command::new("tmux")
+        .args(["display-message", "-p", "#{session_name}"])
+        .output()
+    {
+        let session = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !session.is_empty() {
+            let _ = std::process::Command::new("tmux")
+                .args(["kill-session", "-t", &session])
+                .status();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

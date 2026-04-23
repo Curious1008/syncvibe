@@ -743,9 +743,9 @@ impl AppState {
             // Text is sent with -l (literal), then C-m submits it. Plain
             // "Enter" doesn't work for Claude Code (Kitty keyboard protocol
             // treats it as newline), but C-m works universally.
-            if let Some(pane) = discover_agent_pane() {
+            if let Some(pane) = crate::tmux::discover_agent_pane() {
                 let pane = pane.clone();
-                let chat_pane = current_pane_id();
+                let chat_pane = crate::tmux::current_pane_id();
                 let task_text = "You have a new task in chat, read chat to see it".to_string();
                 std::thread::spawn(move || {
                     let send = |args: &[&str]| -> bool {
@@ -870,78 +870,6 @@ pub(crate) fn shell_escape(s: &str) -> String {
 /// Max lines allowed in a screen frame (prevents OOM from malicious frames).
 pub(crate) const MAX_SCREEN_LINES: usize = 500;
 
-/// Get the current tmux pane ID (e.g. "%0") so we can re-select it after send-keys.
-fn current_pane_id() -> Option<String> {
-    let output = std::process::Command::new("tmux")
-        .args(["display-message", "-p", "#{pane_id}"])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-    if output.status.success() {
-        let id = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if id.is_empty() {
-            None
-        } else {
-            Some(id)
-        }
-    } else {
-        None
-    }
-}
-
-/// Discover the agent pane target (session:window.pane_index).
-pub(crate) fn discover_agent_pane() -> Option<String> {
-    use std::process::{Command, Stdio};
-
-    let session = Command::new("tmux")
-        .args(["display-message", "-p", "#{session_name}"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    if !session.status.success() {
-        return None;
-    }
-    let session_name = String::from_utf8_lossy(&session.stdout).trim().to_string();
-    if session_name.is_empty() {
-        return None;
-    }
-
-    let pane_output = Command::new("tmux")
-        .args([
-            "list-panes",
-            "-t",
-            &format!("{}:0", session_name),
-            "-F",
-            "#{pane_left}:#{pane_index}",
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .env_remove("TMUX")
-        .output()
-        .ok()?;
-    if !pane_output.status.success() {
-        return None;
-    }
-    let pane_str = String::from_utf8_lossy(&pane_output.stdout);
-    let mut panes: Vec<(u32, String)> = pane_str
-        .lines()
-        .filter_map(|line| {
-            let (left, idx) = line.split_once(':')?;
-            Some((left.parse().ok()?, idx.to_string()))
-        })
-        .collect();
-    panes.sort_by_key(|(x, _)| *x);
-    if panes.len() < 2 {
-        return None;
-    }
-    Some(format!("{}:0.{}", session_name, panes[1].1))
-}
-
 /// Capture the agent pane (right-side pane) content and produce a delta frame.
 fn capture_agent_pane(state: &mut AppState) -> Option<WsMessage> {
     use std::process::{Command, Stdio};
@@ -950,7 +878,7 @@ fn capture_agent_pane(state: &mut AppState) -> Option<WsMessage> {
     let agent_pane = match &state.cached_agent_pane {
         Some(p) => p.clone(),
         None => {
-            let pane = discover_agent_pane()?;
+            let pane = crate::tmux::discover_agent_pane()?;
             state.cached_agent_pane = Some(pane.clone());
             pane
         }
@@ -1471,7 +1399,7 @@ pub async fn run() -> Result<()> {
             let left = crate::flows::project::handle_leave_room(&state.storage);
             if left {
                 // Kill only the agent pane (right side), keep dashboard alive
-                kill_agent_pane(state.in_tmux);
+                crate::tmux::kill_agent_pane(state.in_tmux);
 
                 // Show the session menu (choose room / create / join).
                 // Loop so user can retry if auth or input fails.
@@ -1480,14 +1408,14 @@ pub async fn run() -> Result<()> {
                         Ok(()) => {
                             // cmd_session launched a new tmux session and switched to it.
                             // The old session now only has this pane — kill it after switch.
-                            kill_current_tmux_session(state.in_tmux);
+                            crate::tmux::kill_current_tmux_session(state.in_tmux);
                             return Ok(());
                         }
                         Err(e) => {
                             let msg = e.to_string();
                             // User intentionally cancelled — exit cleanly
                             if msg.contains("Cancelled") {
-                                kill_current_tmux_session(state.in_tmux);
+                                crate::tmux::kill_current_tmux_session(state.in_tmux);
                                 return Ok(());
                             }
                             // Recoverable error — show message and retry the menu
@@ -1563,75 +1491,11 @@ pub async fn run() -> Result<()> {
     tui::teardown(&mut terminal)?;
 
     // Kill the entire tmux session (dashboard + agent panes) on /quit
-    kill_current_tmux_session(state.in_tmux);
+    crate::tmux::kill_current_tmux_session(state.in_tmux);
 
     Ok(())
 }
 
-/// Kill only the agent pane (right side) so the dashboard stays alive for room selection.
-fn kill_agent_pane(in_tmux: bool) {
-    if !in_tmux {
-        return;
-    }
-    if let Ok(output) = std::process::Command::new("tmux")
-        .args(["display-message", "-p", "#{session_name}"])
-        .output()
-    {
-        let session = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if session.is_empty() {
-            return;
-        }
-        // Find panes sorted by horizontal position (left = dashboard, right = agent)
-        let pane_output = std::process::Command::new("tmux")
-            .args([
-                "list-panes",
-                "-t",
-                &format!("{}:0", session),
-                "-F",
-                "#{pane_left}:#{pane_index}",
-            ])
-            .env_remove("TMUX")
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-            .unwrap_or_default();
-        let mut panes: Vec<(u32, String)> = pane_output
-            .lines()
-            .filter_map(|line| {
-                let (left, idx) = line.split_once(':')?;
-                Some((left.parse().ok()?, idx.to_string()))
-            })
-            .collect();
-        panes.sort_by_key(|(x, _)| *x);
-        // Kill the right pane (agent) if we have at least 2 panes
-        if panes.len() >= 2 {
-            let agent_pane = format!("{}:0.{}", session, panes[1].1);
-            let _ = std::process::Command::new("tmux")
-                .args(["kill-pane", "-t", &agent_pane])
-                .env_remove("TMUX")
-                .status();
-        }
-    }
-}
-
-/// Kill the current tmux session (both panes) to avoid stale processes.
-fn kill_current_tmux_session(in_tmux: bool) {
-    if !in_tmux {
-        return;
-    }
-    if let Ok(output) = std::process::Command::new("tmux")
-        .args(["display-message", "-p", "#{session_name}"])
-        .output()
-    {
-        let session = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !session.is_empty() {
-            let _ = std::process::Command::new("tmux")
-                .args(["kill-session", "-t", &session])
-                .status();
-        }
-    }
-}
-
-/// Show community links once — on the user's 2nd+ room creation/join.
 fn draw_ui(frame: &mut ratatui::Frame, state: &mut AppState) {
     let area = frame.area();
 

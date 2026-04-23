@@ -68,7 +68,7 @@ impl Command for Watch {
         }
         let safe_name: String = name.chars().filter(|c| !c.is_control()).take(32).collect();
 
-        let Some(agent_pane) = crate::app::discover_agent_pane() else {
+        let Some(agent_pane) = crate::tmux::discover_agent_pane() else {
             return Ok(());
         };
 

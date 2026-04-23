@@ -10,9 +10,8 @@ use std::time::Duration;
 use syncvibe_core::models::MessageType;
 use syncvibe_core::protocol::{PresenceInfo, WsMessage};
 
-use crate::app::{
-    discover_agent_pane, AppState, ScreenFrameState, MAX_DISPLAY_MESSAGES, MAX_SCREEN_LINES,
-};
+use crate::app::{AppState, ScreenFrameState, MAX_DISPLAY_MESSAGES, MAX_SCREEN_LINES};
+use crate::tmux::discover_agent_pane;
 
 pub fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
     match msg {
