@@ -13,11 +13,23 @@ use crate::app::{AppState, Panel};
 use crate::components;
 
 pub fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
-    // Ctrl+C to quit
+    // Ctrl+C: require two presses within 2s to quit (prevents accidental exits).
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-        state.should_quit = true;
+        let window = std::time::Duration::from_secs(2);
+        let now = std::time::Instant::now();
+        let armed = state
+            .ctrl_c_armed_at
+            .map(|t| now.duration_since(t) <= window)
+            .unwrap_or(false);
+        if armed {
+            state.should_quit = true;
+        } else {
+            state.ctrl_c_armed_at = Some(now);
+        }
         return Ok(());
     }
+    // Any non-Ctrl+C keypress disarms the exit window.
+    state.ctrl_c_armed_at = None;
 
     match state.focus {
         Panel::Chat => match key.code {

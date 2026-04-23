@@ -24,22 +24,24 @@ pub fn handle_new_project() -> bool {
     println!();
     onboarding::print_section("New Room");
     println!();
+    println!("  {DIM}Press Esc or leave blank + Enter to cancel.{R}");
+    println!();
     maybe_show_community();
     let name = loop {
-        match onboarding::prompt(&format!("  {TEAL}Room name:{R} ")) {
-            Ok(n) => {
+        match onboarding::prompt_cancellable(&format!("  {TEAL}Room name:{R} ")) {
+            Ok(Some(n)) => {
                 let clean = onboarding::sanitize_name(&n);
-                if n.is_empty() {
-                    println!("  {DIM}Cancelled.{R}");
-                    return false;
-                }
                 if clean.is_empty() {
                     println!("  {RED}✗{R} Invalid name — please use normal characters.");
                     continue;
                 }
                 break clean;
             }
-            _ => {
+            Ok(None) => {
+                println!("  {DIM}Cancelled.{R}");
+                return false;
+            }
+            Err(_) => {
                 println!("  {DIM}Cancelled.{R}");
                 return false;
             }
@@ -86,10 +88,12 @@ pub fn handle_join_project() -> bool {
     println!();
     onboarding::print_section("Join Room");
     println!();
+    println!("  {DIM}Press Esc or leave blank + Enter to cancel.{R}");
+    println!();
     maybe_show_community();
     let mut room = loop {
-        let code = match onboarding::prompt(&format!("  {TEAL}Invite code:{R} ")) {
-            Ok(c) if !c.is_empty() => c,
+        let code = match onboarding::prompt_cancellable(&format!("  {TEAL}Invite code:{R} ")) {
+            Ok(Some(c)) => c,
             _ => {
                 println!("  {DIM}Cancelled.{R}");
                 return false;
@@ -99,7 +103,7 @@ pub fn handle_join_project() -> bool {
             Ok(r) => break r,
             Err(e) => {
                 println!("  {RED}✗{R} Invalid invite code: {e}");
-                println!("  {DIM}Press Enter with no input to go back.{R}\n");
+                println!("  {DIM}Press Esc to cancel, or try a different code.{R}\n");
                 continue;
             }
         }

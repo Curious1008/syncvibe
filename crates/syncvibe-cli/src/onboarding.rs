@@ -1,7 +1,7 @@
 use std::io::{self, BufRead, Write};
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal;
 
 const MAX_NAME_LEN: usize = 32;
@@ -110,6 +110,69 @@ pub fn prompt(msg: &str) -> io::Result<String> {
     let mut buf = String::new();
     io::stdin().lock().read_line(&mut buf)?;
     Ok(buf.trim().to_string())
+}
+
+/// Raw-mode prompt with a safe cancel exit.
+///
+/// Returns:
+/// - `Ok(Some(input))` on Enter with non-empty trimmed content.
+/// - `Ok(None)` on Esc or Enter with empty input — caller should restore the TUI.
+///
+/// Ctrl+C is left to normal process-exit semantics (raw-mode guard drops cleanly,
+/// then the process terminates); global TUI exit handling lives elsewhere.
+/// Supports Backspace and printable chars.
+pub fn prompt_cancellable(msg: &str) -> io::Result<Option<String>> {
+    print!("{}", msg);
+    io::stdout().flush()?;
+
+    let _guard = RawModeGuard::enable()?;
+    let mut buf = String::new();
+
+    let result = (|| -> io::Result<Option<String>> {
+        loop {
+            if let Event::Key(key) = event::read()? {
+                if key.kind != KeyEventKind::Press {
+                    continue;
+                }
+                let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+                match key.code {
+                    KeyCode::Enter => {
+                        let trimmed = buf.trim().to_string();
+                        return Ok(if trimmed.is_empty() {
+                            None
+                        } else {
+                            Some(trimmed)
+                        });
+                    }
+                    KeyCode::Esc => return Ok(None),
+                    KeyCode::Char('c') if ctrl => {
+                        // Restore terminal explicitly (process::exit skips Drop),
+                        // then terminate like cooked-mode Ctrl+C used to.
+                        let _ = terminal::disable_raw_mode();
+                        print!("\r\n");
+                        let _ = io::stdout().flush();
+                        std::process::exit(130);
+                    }
+                    KeyCode::Backspace => {
+                        if buf.pop().is_some() {
+                            print!("\x08 \x08");
+                            io::stdout().flush()?;
+                        }
+                    }
+                    KeyCode::Char(c) if !ctrl => {
+                        buf.push(c);
+                        print!("{}", c);
+                        io::stdout().flush()?;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    })();
+    drop(_guard);
+    print!("\r\n");
+    io::stdout().flush()?;
+    result
 }
 
 /// Prompt with a default value shown in brackets. Empty input returns the default.

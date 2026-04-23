@@ -12,6 +12,9 @@ use crate::components::util::{parse_hex_color, truncate_str};
 use crate::theme::{SV_ELEVATED, SV_FG_DIM, SV_FG_MUTED, SV_SURFACE};
 
 /// Parse message content into spans, highlighting @mentions.
+///
+/// Recognizes both bare `@claude` and the owner-qualified form
+/// `@claude(Alice)` — the whole token is highlighted as one unit.
 fn parse_mentions(content: &str, default_style: Style) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     let mut remaining = content;
@@ -24,26 +27,37 @@ fn parse_mentions(content: &str, default_style: Style) -> Vec<Span<'static>> {
 
         // Extract the @mention (letters, digits, hyphens, underscores)
         let after_at = &remaining[at_pos + 1..];
-        let mention_byte_len: usize = after_at
+        let word_byte_len: usize = after_at
             .chars()
             .take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
             .map(|c| c.len_utf8())
             .sum();
 
-        if mention_byte_len == 0 {
+        if word_byte_len == 0 {
             // Bare @ with no name
             spans.push(Span::styled("@".to_string(), default_style));
             remaining = &remaining[at_pos + 1..];
-        } else {
-            let mention = &remaining[at_pos..at_pos + 1 + mention_byte_len];
-            spans.push(Span::styled(
-                mention.to_string(),
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ));
-            remaining = &remaining[at_pos + 1 + mention_byte_len..];
+            continue;
         }
+
+        // Optional owner qualifier: `(name)` must follow the word with no
+        // whitespace in between.
+        let mut token_byte_len = 1 + word_byte_len; // '@' + word
+        let tail = &remaining[at_pos + token_byte_len..];
+        if tail.starts_with('(') {
+            if let Some(close_off) = tail.find(')') {
+                token_byte_len += close_off + 1; // include '(' … ')'
+            }
+        }
+
+        let mention = &remaining[at_pos..at_pos + token_byte_len];
+        spans.push(Span::styled(
+            mention.to_string(),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+        remaining = &remaining[at_pos + token_byte_len..];
     }
 
     // Add remaining text
