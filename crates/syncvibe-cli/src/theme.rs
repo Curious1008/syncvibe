@@ -88,4 +88,68 @@ mod tests {
     fn palette_length_is_stable() {
         assert_eq!(USER_PALETTE.len(), 5, "changing palette size shifts every user's color");
     }
+
+    /// W3.4a guard: DESIGN.md forbids raw `Color::Rgb(...)` at call sites.
+    /// Only two files are allowed to mention it:
+    ///   - `theme.rs` itself (this file — the token definitions live here).
+    ///   - `components/util.rs` (`parse_hex_color` — the user-hex → Color
+    ///     boundary; it has to build a `Color::Rgb` from parsed bytes).
+    ///
+    /// Any other occurrence means a call site is encoding a color inline
+    /// instead of going through a `SV_*` token, which is exactly the drift
+    /// the design system is meant to prevent.
+    #[test]
+    fn no_raw_color_at_call_sites() {
+        use std::fs;
+        use std::path::Path;
+
+        fn walk(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in fs::read_dir(dir).unwrap().flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().and_then(|e| e.to_str()) == Some("rs") {
+                    out.push(p);
+                }
+            }
+        }
+
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        walk(&root, &mut files);
+
+        // Allowlist: absolute paths are noisy across machines, so compare on
+        // the "src/…" suffix.
+        let allowed = ["src/theme.rs", "src/components/util.rs"];
+
+        let mut violations = Vec::new();
+        for path in &files {
+            let suffix = path
+                .strip_prefix(Path::new(env!("CARGO_MANIFEST_DIR")))
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            if allowed.iter().any(|a| suffix == *a) {
+                continue;
+            }
+            let contents = fs::read_to_string(path).unwrap();
+            for (lineno, line) in contents.lines().enumerate() {
+                // Ignore comments and doc-comments; they can reference the
+                // forbidden string without being a real call site.
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("//") {
+                    continue;
+                }
+                if line.contains("Color::Rgb(") || line.contains("Color::Indexed(") {
+                    violations.push(format!("{}:{}  {}", suffix, lineno + 1, line.trim()));
+                }
+            }
+        }
+
+        assert!(
+            violations.is_empty(),
+            "raw Color::Rgb/Indexed found at call sites (use SV_* tokens from theme.rs):\n{}",
+            violations.join("\n")
+        );
+    }
 }
