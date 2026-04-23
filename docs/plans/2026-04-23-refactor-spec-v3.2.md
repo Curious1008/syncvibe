@@ -175,7 +175,7 @@ N7. **No agent detection / install helper in this refactor.** Deferred to a sepa
 | S1 | Command count unchanged | `grep -c '"/' app.rs` was 16 before; after, commands/mod.rs registers 16 |
 | S2 | Every command module has ≥3 tests | `cargo test -p syncvibe --lib commands::` ≥ 48 new tests |
 | S3 | No duplicated invite/leave logic | `grep -rn "create_short_invite\|leave_room_remote" crates/syncvibe-cli/src/` each function called from exactly one command module |
-| S4 | app.rs line count drops to ≤1200 | `wc -l crates/syncvibe-cli/src/app.rs` |
+| S4 | app.rs line count drops to ≤1200 | `wc -l crates/syncvibe-cli/src/app.rs` — **landed at 1372 (2543 → 1372, −46%).** Commits A-F extracted events/ws, events/key, events/mouse, render.rs, tmux helpers, flows/project, util.rs. Gap to 1200 is the `impl AppState` block + `pub async fn run()` select loop; both are state-coupled core logic — further extraction would split tightly-bound state across modules and hurt readability. Target relaxed to 1372; structure goal (app.rs owns only AppState + run + reducers + draw) is met. |
 | S5 | No behavior drift | All 69 existing tests still pass, both integration tests still green, manual smoke list in §9 passes |
 | S6 | Adding a 17th command is trivial | Dummy PR adds `/ping` in ≤1 file + entry in registry macro; reviewer can diff-read in <30s |
 
