@@ -574,15 +574,7 @@ impl AppState {
             // `/help` ported to commands::help (W2). See commands/mod.rs registry.
             // `/invite` ported to commands::invite (W2). See commands/mod.rs registry.
             // `/chats` ported to commands::chats (W2). See commands/mod.rs registry.
-            "/new" | "/n" => {
-                self.want_new_project = true;
-            }
-            "/join" | "/j" => {
-                self.want_join_project = true;
-            }
-            "/leave" => {
-                self.want_leave = true;
-            }
+            // `/new`, `/join`, `/leave` ported to commands:: (W2). See commands/mod.rs registry.
             // `/name` ported to commands::name (W1). See commands/mod.rs registry.
             // `/color` ported to commands::color (W2). See commands/mod.rs registry.
             // `/mute` ported to commands::mute (W2). See commands/mod.rs registry.

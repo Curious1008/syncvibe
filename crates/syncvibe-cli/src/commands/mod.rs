@@ -20,8 +20,11 @@ pub mod collab;
 pub mod color;
 pub mod help;
 pub mod invite;
+pub mod join;
+pub mod leave;
 pub mod mute;
 pub mod name;
+pub mod new;
 pub mod quit;
 pub mod rc;
 pub mod remote;
@@ -101,6 +104,9 @@ register_commands! {
     remote::Remote,
     collab::Collab,
     invite::Invite,
+    new::New,
+    join::Join,
+    leave::Leave,
 }
 
 /// Called first by `app.rs::handle_command`. Returns `true` if `cmd_name`
@@ -151,7 +157,7 @@ mod tests {
             names,
             vec![
                 "/name", "/clear", "/share", "/quit", "/mute", "/rc", "/chats", "/help",
-                "/color", "/remote", "/collab", "/invite",
+                "/color", "/remote", "/collab", "/invite", "/new", "/join", "/leave",
             ]
         );
     }
