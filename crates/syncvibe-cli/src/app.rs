@@ -628,9 +628,7 @@ impl AppState {
                     self.system_msg("No room config found.");
                 }
             },
-            "/chats" => {
-                self.show_picker = true;
-            }
+            // `/chats` ported to commands::chats (W2). See commands/mod.rs registry.
             "/new" | "/n" => {
                 self.want_new_project = true;
             }
