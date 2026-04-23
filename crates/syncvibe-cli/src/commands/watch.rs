@@ -151,4 +151,15 @@ mod tests {
         assert!(Watch.aliases().is_empty());
         assert!(!Watch.needs_arg());
     }
+
+    #[test]
+    fn no_sharers_with_named_target_still_no_pane() {
+        // Even with an explicit target name, if nobody's sharing the command
+        // short-circuits on the empty screen_frames check — no tmux spawn,
+        // no pane id set, no crash.
+        let (_tmp, mut state) = mk_app_state();
+        let mut ctx = TuiCtx::new_with_ws(&mut state, Box::new(NoopWs));
+        Watch.run_tui(&mut ctx, "alice").unwrap();
+        assert!(state.watching_pane_id.is_none());
+    }
 }

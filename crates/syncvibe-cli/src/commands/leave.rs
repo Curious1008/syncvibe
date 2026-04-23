@@ -117,4 +117,18 @@ mod tests {
         assert!(Leave.aliases().is_empty());
         assert!(!Leave.needs_arg());
     }
+
+    #[test]
+    fn slash_leave_does_not_touch_storage() {
+        // The slash command is a pure flag-flip — destructive cleanup runs
+        // in `leave_current_room` AFTER the TUI tears down. Calling /leave
+        // must NOT delete .syncvibe/ or confirm-prompt inside the TUI loop.
+        let (tmp, mut state) = mk_app_state();
+        let syncvibe_dir = tmp.path().join(".syncvibe");
+        assert!(syncvibe_dir.is_dir());
+        let mut ctx = TuiCtx::new_with_ws(&mut state, Box::new(NoopWs));
+        Leave.run_tui(&mut ctx, "").unwrap();
+        assert!(state.want_leave);
+        assert!(syncvibe_dir.is_dir(), "slash /leave must not delete storage");
+    }
 }

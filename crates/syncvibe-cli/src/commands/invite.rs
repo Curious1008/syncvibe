@@ -124,4 +124,15 @@ mod tests {
         assert_eq!(Invite.aliases(), &["/i"]);
         assert!(!Invite.needs_arg());
     }
+
+    #[test]
+    fn no_room_writes_no_invite_txt_fallback() {
+        // When no room config exists, the command reports "No room config
+        // found" and must NOT create a stale invite.txt fallback on disk.
+        let (tmp, mut state) = mk_app_state();
+        let fallback = tmp.path().join(".syncvibe").join("invite.txt");
+        let mut ctx = TuiCtx::new_with_ws(&mut state, Box::new(NoopWs));
+        Invite.run_tui(&mut ctx, "").unwrap();
+        assert!(!fallback.exists(), "unexpected invite.txt at {fallback:?}");
+    }
 }

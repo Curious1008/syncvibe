@@ -74,4 +74,17 @@ mod tests {
         assert!(!Collab.needs_arg());
         assert!(Collab.aliases().is_empty());
     }
+
+    #[test]
+    fn no_repo_emits_two_distinct_hints() {
+        // The no-repo branch should tell the user both *that* nothing is
+        // linked AND *how* to link one. Collapsing these into one msg would
+        // swallow the actionable step.
+        let (_tmp, mut state) = mk_app_state();
+        let before = state.chat_messages.len();
+        let mut ctx = TuiCtx::new_with_ws(&mut state, Box::new(NoopWs));
+        Collab.run_tui(&mut ctx, "").unwrap();
+        let added = state.chat_messages.len() - before;
+        assert_eq!(added, 2, "expected 2 system messages, got {added}");
+    }
 }

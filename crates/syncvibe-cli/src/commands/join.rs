@@ -64,4 +64,16 @@ mod tests {
         assert_eq!(Join.aliases(), &["/j"]);
         assert!(!Join.needs_arg());
     }
+
+    #[test]
+    fn arg_is_ignored_flag_still_set() {
+        // /join opens the interactive menu regardless of trailing text. The
+        // arg must be swallowed silently — no system msg, no error.
+        let (_tmp, mut state) = mk_app_state();
+        let before = state.chat_messages.len();
+        let mut ctx = TuiCtx::new_with_ws(&mut state, Box::new(NoopWs));
+        Join.run_tui(&mut ctx, "HKPT-3NWV").unwrap();
+        assert!(state.want_join_project);
+        assert_eq!(state.chat_messages.len(), before, "no chat side effects");
+    }
 }

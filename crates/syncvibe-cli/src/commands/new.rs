@@ -38,4 +38,16 @@ mod tests {
         assert_eq!(New.aliases(), &["/n"]);
         assert!(!New.needs_arg());
     }
+
+    #[test]
+    fn arg_is_ignored_flag_still_set() {
+        // /new launches the interactive room-create menu regardless of
+        // trailing text; arg must be swallowed silently with no chat output.
+        let (_tmp, mut state) = mk_app_state();
+        let before = state.chat_messages.len();
+        let mut ctx = TuiCtx::new_with_ws(&mut state, Box::new(NoopWs));
+        New.run_tui(&mut ctx, "my-room-name").unwrap();
+        assert!(state.want_new_project);
+        assert_eq!(state.chat_messages.len(), before, "no chat side effects");
+    }
 }

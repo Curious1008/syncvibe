@@ -36,4 +36,13 @@ mod tests {
         assert!(!Chats.needs_arg());
         assert!(Chats.aliases().is_empty());
     }
+
+    #[test]
+    fn trailing_arg_is_ignored() {
+        // /chats takes no args; any trailing text is discarded without error.
+        let (_tmp, mut state) = mk_app_state();
+        let mut ctx = TuiCtx::new_with_ws(&mut state, Box::new(NoopWs));
+        Chats.run_tui(&mut ctx, "junk and more junk").unwrap();
+        assert!(state.show_picker);
+    }
 }
