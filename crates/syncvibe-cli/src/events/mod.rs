@@ -9,4 +9,6 @@
 //! select-dispatch, and puts the event-specific behavior under per-module
 //! unit tests.
 
+pub mod key;
+pub mod mouse;
 pub mod ws;

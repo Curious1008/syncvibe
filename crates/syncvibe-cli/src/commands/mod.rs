@@ -232,21 +232,23 @@ mod tests {
     }
 
     /// W3.2 global guard: autocomplete's `needs_arg` decision must flow through
-    /// `Command::needs_arg()`, never a hardcoded string match in `app.rs`.
+    /// `Command::needs_arg()`, never a hardcoded string match in the key
+    /// event handler.
     ///
-    /// Source-level check: `app.rs` must reference `c.needs_arg()` (the trait
-    /// call) and must NOT contain legacy patterns like `matches!(cmd, "/name"
-    /// | "/color")` or `["/name", "/color"].contains(&cmd)`. If someone
-    /// reintroduces a hardcoded list, this test fails before the divergence
-    /// can ship.
+    /// Source-level check: `events/key.rs` must reference `c.needs_arg()`
+    /// (the trait call) and neither it nor `app.rs` may contain legacy
+    /// patterns like `matches!(cmd, "/name" | "/color")` or
+    /// `["/name", "/color"].contains(&cmd)`. Guards both files so a move
+    /// back into `app.rs` would still fail the check.
     #[test]
     fn needs_arg_autocomplete_parity() {
+        let key_rs = include_str!("../events/key.rs");
         let app_rs = include_str!("../app.rs");
 
         assert!(
-            app_rs.contains("c.needs_arg()"),
-            "app.rs no longer delegates to Command::needs_arg() — autocomplete \
-             regressed to a hardcoded list"
+            key_rs.contains("c.needs_arg()"),
+            "events/key.rs no longer delegates to Command::needs_arg() — \
+             autocomplete regressed to a hardcoded list"
         );
 
         // Patterns that would indicate a hardcoded list snuck back in.
@@ -258,6 +260,11 @@ mod tests {
             (r#"["/color", "/name"]"#, "literal array (reversed)"),
         ];
         for (needle, reason) in forbidden {
+            assert!(
+                !key_rs.contains(needle),
+                "events/key.rs contains forbidden pattern ({reason}): `{needle}` — \
+                 drive from Command::needs_arg() instead"
+            );
             assert!(
                 !app_rs.contains(needle),
                 "app.rs contains forbidden pattern ({reason}): `{needle}` — \
