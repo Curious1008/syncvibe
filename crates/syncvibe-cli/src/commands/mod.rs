@@ -16,6 +16,7 @@ pub mod tui_ctx;
 // First wave of ported commands. One module per command file.
 pub mod chats;
 pub mod clear;
+pub mod help;
 pub mod mute;
 pub mod name;
 pub mod quit;
@@ -91,6 +92,7 @@ register_commands! {
     mute::Mute,
     rc::Rc,
     chats::Chats,
+    help::Help,
 }
 
 /// Called first by `app.rs::handle_command`. Returns `true` if `cmd_name`
@@ -139,7 +141,9 @@ mod tests {
         let names: Vec<&'static str> = all().iter().map(|c| c.name()).collect();
         assert_eq!(
             names,
-            vec!["/name", "/clear", "/share", "/quit", "/mute", "/rc", "/chats"]
+            vec![
+                "/name", "/clear", "/share", "/quit", "/mute", "/rc", "/chats", "/help",
+            ]
         );
     }
 

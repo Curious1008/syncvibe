@@ -571,26 +571,7 @@ impl AppState {
         }
 
         match cmd {
-            "/help" | "/h" | "/?" => {
-                self.system_msg("/invite   — show room invite code  (/i)");
-                self.system_msg("/new      — create a new room      (/n)");
-                self.system_msg("/join     — join with invite code   (/j)");
-                self.system_msg("/chats    — switch between rooms");
-                self.system_msg("/name <n> — change display name     e.g. /name Alice");
-                self.system_msg("/color <#hex> — change your color  e.g. #4ECDC4");
-                self.system_msg("/mute     — toggle @mention bell     (/m)");
-                self.system_msg("/remote   — link a GitHub repo for code sync  (/remote <url>)");
-                self.system_msg("/collab   — manage repo collaborators");
-                self.system_msg("/share    — toggle agent screen sharing");
-                self.system_msg("/watch    — view a teammate's shared screen");
-                self.system_msg("/clear    — clear chat view");
-                self.system_msg("/rc       — reconnect to chat");
-                self.system_msg("/leave    — leave current room");
-                self.system_msg("/quit     — exit SyncVibe  (/q)");
-                self.system_msg("");
-                self.system_msg("@name     — mention a teammate (highlights + bell)");
-                self.system_msg("@claude/@codex/@gemini — send task to your AI agent");
-            }
+            // `/help` ported to commands::help (W2). See commands/mod.rs registry.
             "/invite" | "/i" => match self.storage.read_room_config() {
                 Ok(mut room) => {
                     // Refresh git_remote — user may have added a remote after room creation
