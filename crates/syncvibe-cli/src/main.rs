@@ -14,6 +14,7 @@ mod mcp;
 mod network;
 mod onboarding;
 mod picker;
+mod render;
 mod session;
 mod sync;
 mod theme;
