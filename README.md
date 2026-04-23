@@ -1,15 +1,39 @@
 # SyncVibe
 
-**Terminal-native collaboration for vibe coding teams. Zero AI costs.**
+**Teach someone how to use Claude Code over the shoulder, from the other side of the world — without touching their keyboard.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux-lightgrey.svg)]()
 [![Website](https://img.shields.io/badge/Web-syncvibe.online-teal.svg)](https://syncvibe.online)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2.svg?logo=discord&logoColor=white)](https://discord.gg/Nb3wkCBZ55)
 
-SyncVibe connects teammates and their AI agents (Claude Code, Codex, Gemini CLI, or any MCP-compatible agent) in a shared terminal chat room — real-time coordination without a single LLM API call.
+SyncVibe is a remote pair-teaching tool for terminal-based AI coding agents — Claude Code, Codex CLI, Gemini CLI, or anything MCP-compatible. The teacher stays on their own machine. The learner stays on theirs. Both join a room. The teacher drives the **learner's own agent** through chat, and that agent runs locally on the learner's machine, with the learner's auth, against the learner's repo.
 
 > [Watch the demo](https://github.com/Curious1008/syncvibe/releases/download/v0.4.3/SyncVibe-Demo.mp4) — two developers collaborating with their AI agents (Claude + Codex) in real time.
+
+---
+
+## Why SyncVibe exists
+
+Teaching someone to use Claude Code / Codex / Gemini CLI today means one of:
+
+1. **Zoom screen share.** You see the teacher's screen. You type from memory. You make mistakes. Nothing sticks.
+2. **Zoom remote control.** Teacher drives your machine. Security prompt every time. You watch passively — the prompts never ran on your machine, so you never internalized them.
+3. **tmate / shared tmux.** No chat layer, no per-user scoping, no agent awareness.
+4. **Type-it-yourself coaching.** "Now type: `claude 'refactor auth.ts to…'`" — slow, error-prone, context dies on copy-paste.
+
+SyncVibe collapses this into one room: chat, terminal view, and agent trigger, all co-located. The teacher types `@alice-claude refactor the auth token check` in chat. Alice's Claude runs locally, on Alice's keyboard, against Alice's repo. Alice watches the **prompt → agent behavior → code change** loop in her own environment. That's what makes it stick.
+
+---
+
+## What SyncVibe is *not*
+
+Hard lines — if a feature request crosses one of these, it belongs in a different product:
+
+- **Not IRC / a chat tool.** Chat is the substrate, not the product. The product is the agent-trigger loop riding on top.
+- **Not Cursor multiplayer / Live Share.** Each participant's workspace stays local. No shared filesystem, no shared git state, no file stomping.
+- **Not remote desktop / TeamViewer.** The teacher never touches the learner's keyboard. Every action is mediated by the learner's agent, which the learner can pause or Ctrl-C at any moment.
+- **Not a Slack / Discord replacement.** Keep using those for general team chat. Open SyncVibe for teaching sessions.
 
 ---
 
@@ -38,19 +62,25 @@ Supports **macOS** (Apple Silicon + Intel) and **Linux** (x86_64, aarch64).
 syncvibe
 ```
 
-Interactive onboarding — pick your name, choose an AI agent (Claude, Codex, or Gemini), and create a room.
+Interactive onboarding — pick your name, choose your agent (Claude, Codex, or Gemini), create a room.
 
-**2. Invite your team**
+**2. Invite your learner**
 
-Type `/invite` in the TUI — a short code like `HKPT-3NWV` is copied to your clipboard. Send it to teammates.
+Type `/invite` — a short code like `HKPT-3NWV` is copied to your clipboard. Send it to them.
 
-**3. Teammate joins**
+**3. Learner joins**
 
 ```bash
 syncvibe connect HKPT-3NWV
 ```
 
-Chat syncs in real time. If the room has a linked repo, the code auto-clones on connect. The AI agent auto-configures via MCP — no manual setup needed.
+Chat syncs in real time. If the room has a linked repo, it auto-clones on connect. The learner's agent auto-configures via MCP — no manual setup.
+
+**4. Teach**
+
+- `/watch alice` — watch Alice's agent pane live.
+- `@alice-claude refactor auth.rs to use JWT` — trigger Alice's agent with a concrete prompt. Alice sees her Claude run locally.
+- When names collide, the TUI auto-appends a short suffix: `@claude(Alice#7af)` vs `@claude(Alice#b2c)`.
 
 ---
 
@@ -62,10 +92,10 @@ Chat syncs in real time. If the room has a linked repo, the code auto-clones on 
 │  ┌─────────────────────┐    ┌────────────────────────────────┐  │
 │  │  SyncVibe Chat (30%)│    │  AI Agent — Claude/Codex/Gemini│  │
 │  │                     │    │                                │  │
-│  │  Alice: red theme?  │    │  Reading team chat via MCP...  │  │
-│  │  Harry: @codex make │───►│  ⚡ Task: make a calculator    │  │
-│  │    a calculator     │    │  Creating index.html...        │  │
-│  │  Codex: Done ✓      │◄───│  Done — reporting to chat      │  │
+│  │  Harry: @alice-     │    │  Reading team chat via MCP...  │  │
+│  │    claude refactor  │───►│  ⚡ Task: refactor auth.rs      │  │
+│  │    auth.rs          │    │  Editing src/auth.rs...        │  │
+│  │  Alice's-Claude: ✓  │◄───│  Done — reporting to chat      │  │
 │  └─────────────────────┘    └────────────────────────────────┘  │
 │                    Ctrl+G to switch                             │
 └─────────────────────────────────────────────────────────────────┘
@@ -73,8 +103,8 @@ Chat syncs in real time. If the room has a linked repo, the code auto-clones on 
 
 **Data flow:**
 - **Human ↔ Human:** TUI → WebSocket relay → other TUI
-- **Human → Agent:** `@codex` message → agent reads via MCP `read_chat`
-- **Agent → Human:** agent calls MCP `send_chat` → appears in chat → broadcasts to all teammates
+- **Teacher → Learner's agent:** `@alice-claude` message → Alice's local Claude reads via MCP `read_chat` and executes on Alice's machine
+- **Agent → Everyone:** agent calls MCP `send_chat` → broadcasts to all teammates
 
 All state lives locally in `.syncvibe/`. The relay only handles real-time sync — no messages are stored server-side.
 
@@ -82,48 +112,53 @@ All state lives locally in `.syncvibe/`. The relay only handles real-time sync �
 
 ## Features
 
-### Real-time Chat
-- Live presence indicators — see who's online
-- @mention with tab completion and bell notifications
-- Image sharing (drag file paths into chat)
-- Message grouping, chat history with scroll-back
-- Mouse scroll, PageUp/PageDown, and "↓ N new messages" unread indicator
+### Chat, tuned for teaching
 
-### AI Agent Integration
-- **Pick Claude Code, Codex, or Gemini** from a menu — SyncVibe auto-configures `.mcp.json` (Claude), `.codex/config.toml` (Codex), and `.gemini/settings.json` (Gemini)
-- **MCP tools** — `read_chat` with smart incremental filtering, session scoping, and digest offloading; `send_chat` for agent-to-human messages
-- **@agent** — mention your AI in chat to assign tasks; agent auto-reads chat for full context
-- **Cross-machine agent tasks** — `@claude` from a remote teammate triggers your local agent automatically (30s debounce)
-- **Agent messages broadcast** — AI agent responses sync to all teammates in real time via WebSocket
-- Each teammate picks their own agent; all agents share the same chat context
+- Real-time presence, @mention with tab completion, bell notifications
+- Message grouping, scroll-back, drag-to-paste images
+- Two-row status bar: brand/version/online on top, agents/users/me on the bottom. Collapses gracefully on narrow terminals.
+- tmux pane titles carry the **room name**, so the brand is stamped once not twice.
 
-### Screen Sharing
-- `/share` — toggle sharing your agent pane with teammates
-- `/watch <name>` — view a teammate's agent screen in real time
+### Agent triggering
+
+- **Pick Claude Code, Codex, or Gemini** from a menu — SyncVibe auto-configures `.mcp.json`, `.codex/config.toml`, and `.gemini/settings.json`.
+- **MCP tools** — `read_chat` with incremental reads, session scoping, and digest offloading; `send_chat` for agent-to-human messages.
+- **`@agent`** — mention your own AI to assign tasks. Agent auto-reads chat for full context.
+- **Cross-machine triggering** — `@alice-claude` from a teammate triggers Alice's local Claude via tmux `send-keys` (30s debounce to prevent loops).
+- **Disambiguation** — ambiguous mentions require an owner: `@claude(Alice)`. Username collisions get an auto-suffix: `@claude(Alice#7af)` vs `@claude(Alice#b2c)`. Tab-completion shows the right form.
+- **Broadcast** — agent responses sync to all teammates in real time.
+
+### Screen sharing
+
+- `/share` — toggle sharing your agent pane
+- `/watch <name>` — view a teammate's agent screen live
 - Delta-encoded frames for efficient bandwidth
 
-### Git Remote Sync
-- **Create a room** — SyncVibe auto-detects your git remote, or prompts you to paste/create one (optional, can skip)
-- **Teammate joins** — repo auto-clones on `syncvibe connect`. One step: join room + get code
-- **Agents auto-push** — CLAUDE.md/AGENTS.md instruct agents to commit & push after completing tasks
-- `/remote` — set or show git remote URL at any time
-- `/collab` — open GitHub collaborator settings to add teammates
-- No tokens or PATs needed — authentication uses your existing git credentials
+### Git integration
 
-### Invite Codes
+- Auto-detects your git remote on room creation, or prompts for one (optional).
+- Learner joins → repo auto-clones. One step.
+- `CLAUDE.md` / `AGENTS.md` instruct agents to commit & push after tasks.
+- `/remote` — set or show git remote
+- `/collab` — open GitHub collaborator settings
+
+### Invite codes
+
 - Short codes (`HKPT-3NWV`) auto-copied to clipboard
-- Paste to join — one step, no URLs or config files
+- Paste to join — one step, no URLs, no config files
 - Clipboard auto-detection on launch
 
-### Split Terminal
-- Auto-creates side-by-side layout: Chat (30%) | AI Agent (70%)
-- `Ctrl+G` to switch between panes
-- Version display and styled status bar
-- `/chats` to switch between room sessions
+### Split terminal
 
-### Zero AI Costs
-- Pure coordination layer — no LLM API calls, no token costs
-- All AI costs stay with whatever agent each person already uses
+- Auto-creates side-by-side layout: Chat (30%) | Agent (70%)
+- `Ctrl+G` to switch panes
+- `/chats` to switch between room sessions
+- **Ctrl+C twice** to exit (first press shows a banner; two presses within 2s quits)
+
+### Zero AI costs
+
+- SyncVibe is a coordination layer, not an AI provider. No LLM API calls, no token costs.
+- All AI costs stay with whatever agent each person already pays for.
 
 ---
 
@@ -144,7 +179,7 @@ All state lives locally in `.syncvibe/`. The relay only handles real-time sync �
 | `syncvibe leave` | Leave current room |
 | `syncvibe completions` | Generate shell completions (bash/zsh/fish) |
 
-### TUI Slash Commands
+### TUI slash commands
 
 | Command | Alias | Description |
 |---------|-------|-------------|
@@ -165,17 +200,18 @@ All state lives locally in `.syncvibe/`. The relay only handles real-time sync �
 | `/leave` | | Leave room |
 | `/quit` | `/q` | Exit |
 
-### Keyboard Shortcuts
+### Keyboard shortcuts
 
 | Key | Action |
 |-----|--------|
 | `Ctrl+G` | Switch Chat ↔ Agent pane |
+| `Ctrl+C` | First press: "press again to exit" banner · Second press within 2s: quit |
 | `Tab` | Autocomplete @mentions and commands |
 | `↑` / `↓` | Select messages (quote, open images) |
 | `Enter` | Send message / quote selected / open image |
 | `PageUp` / `PageDown` | Scroll chat history |
 | `Mouse scroll` | Scroll chat panel |
-| `Esc` | Deselect message, return to bottom |
+| `Esc` | Deselect message, cancel prompt, return to bottom |
 
 ---
 
@@ -214,6 +250,8 @@ All room state lives in `.syncvibe/` inside your project:
 
 `.syncvibe/` is gitignored. The WebSocket relay provides real-time sync only — no messages stored server-side.
 
+For full architectural detail, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ---
 
 ## Development
@@ -233,11 +271,11 @@ cargo build --release
 ### Tests
 
 ```bash
-cargo test                    # Unit + integration tests (88 tests)
+cargo test                    # Unit + integration tests (115 CLI, 13 audit, 6 relay)
 cargo test -- --ignored       # Include relay deployment tests
 ```
 
-### Shell Completions
+### Shell completions
 
 ```bash
 syncvibe completions bash > ~/.local/share/bash-completion/completions/syncvibe
@@ -255,24 +293,26 @@ syncvibe/
 │   ├── syncvibe-cli/              # TUI binary
 │   │   └── src/
 │   │       ├── cli.rs             # Command definitions (Clap)
+│   │       ├── app.rs             # Event loop, dispatches to commands::
+│   │       ├── render.rs          # Top-level TUI rendering
+│   │       ├── theme.rs           # Single source of truth for colors
+│   │       ├── tui.rs             # Terminal UI bootstrap
 │   │       ├── onboarding.rs      # Interactive setup wizard
 │   │       ├── auth.rs            # Web account linking
 │   │       ├── config.rs          # Configuration management
 │   │       ├── invite.rs          # Invite code logic
-│   │       ├── agents.rs          # AI agent configuration
+│   │       ├── agents.rs          # Agent config + @mention parsing
 │   │       ├── sync.rs            # Chat sync engine
-│   │       ├── app.rs             # Event loop, dispatches to commands::
+│   │       ├── picker.rs          # Room picker
+│   │       ├── init.rs            # Room init (MCP, CLAUDE.md, agent configs)
+│   │       ├── tmux.rs            # tmux session management + pane titles
 │   │       ├── commands/          # Slash-command registry (one file per /cmd)
 │   │       ├── flows/             # Onboarding + room-join flows
-│   │       ├── theme.rs           # Single source of truth for colors/styles
-│   │       ├── tui.rs             # Terminal UI bootstrap
-│   │       ├── picker.rs          # Room picker
-│   │       ├── init.rs            # Room init (MCP, CLAUDE.md, .codex/, .gemini/)
-│   │       ├── tmux.rs            # tmux session management
+│   │       ├── events/            # Key, mouse, and WebSocket message handlers
 │   │       ├── git/               # Git integration
 │   │       ├── mcp/               # MCP server: read_chat, send_chat
 │   │       ├── network/           # WebSocket client
-│   │       └── components/        # TUI rendering (ratatui)
+│   │       └── components/        # TUI widgets (chat, status bar, autocomplete, …)
 │   │
 │   └── syncvibe-core/             # Shared library
 │       └── src/
@@ -302,16 +342,14 @@ For full details, see [Data & Privacy](https://syncvibe.online/docs/data-privacy
 
 ## Roadmap
 
-What's coming next (no ETAs — shipped when ready):
+What's coming — every item passes the teaching-loop test (does this make teaching faster, terminal-first, workspace-local, inside the chat + agent-trigger model?):
 
-- **End-to-end encryption** — message content encrypted client-side so the relay can't read it
-- **Windows support** — native binary + PowerShell/Windows Terminal integration
-- **Voice chat** — spatial audio channels inside the terminal session
-- **Managed relay for teams** — dedicated relay instances with custom domains and SLA
-- **File sharing** — send code snippets, patches, and files through chat
-- **Persistent rooms** — rejoin rooms across machines with cloud-synced state
-- **Git conflict resolution** — real-time merge conflict detection and assisted resolution
-- **Plugin system** — custom slash commands and integrations via user scripts
+- **Session recording + replay** — play back a teaching session: chat, agent prompts, and agent output as a single artifact.
+- **tmate substrate integration** — adopt tmate's battle-tested multi-user tmux pairing under the hood; keep SyncVibe's chat + agent-trigger overlay.
+- **IRC gateway** — power users connect via weechat / irssi / HexChat. SyncVibe speaks IRCv3 natively.
+- **End-to-end encryption** — message content encrypted client-side so the relay can't read it.
+- **Windows support** — native binary + PowerShell / Windows Terminal integration.
+- **Managed relay for teams** — dedicated relay instances with custom domains and SLA.
 
 Have an idea? [Open an issue](https://github.com/Curious1008/syncvibe/issues) or [join the Discord](https://discord.gg/Nb3wkCBZ55).
 

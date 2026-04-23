@@ -1,12 +1,15 @@
 # SyncVibe Architecture
 
-Terminal-native collaboration tool for multi-person vibe coding.
+Remote pair-teaching tool for terminal-based AI coding agents. See `POSITIONING.md` (local-only, not in repo) for the product framing that justifies every decision on this page.
 
 ## Design Philosophy
 
-SyncVibe is a **coordination layer, not an AI layer**. Zero LLM API calls, zero token costs. It leverages existing AI agent capabilities (Claude Code's native file reading and hooks) rather than duplicating them.
+SyncVibe is a **coordination layer, not an AI layer**. Zero LLM API calls, zero token costs. The unique surface area is deliberately thin: chat + agent trigger + terminal sharing, co-located and tuned for teaching. Chat protocol and terminal multiplexing are commodities we ride, not rebuild.
 
-**Key principle**: Only build MCP tools for capabilities that agents can't do natively. Everything else uses direct file access guided by CLAUDE.md instructions.
+**Key principles:**
+- Only build MCP tools for capabilities that agents can't do natively. Everything else uses direct file access guided by `CLAUDE.md` / `AGENTS.md` instructions.
+- Each participant's workspace stays local. No shared filesystem, no shared git state.
+- The teacher never touches the learner's keyboard. Every teacher action is mediated by the learner's agent, running locally under the learner's control.
 
 ## Crate Structure
 
@@ -38,10 +41,16 @@ syncvibe/
 │   │       │   ├── adapters.rs    # Re-exports wiring commands into app.rs
 │   │       │   └── <cmd>.rs       # One file per command (/invite, /join, /leave, …)
 │   │       ├── flows/             # Multi-screen flows (onboarding, room join)
-│   │       ├── components/        # TUI rendering (ratatui)
-│   │       │   ├── status_bar.rs  # Top bar: project name + presence
-│   │       │   ├── chat.rs        # Chat message display
+│   │       ├── events/            # Input + WebSocket event handlers (split out of app.rs)
+│   │       │   ├── key.rs         # Key event dispatch (incl. Ctrl+C-twice exit)
+│   │       │   ├── mouse.rs       # Mouse event handling (chat-pane scoped)
+│   │       │   └── ws.rs          # WebSocket message dispatch + mention routing
+│   │       ├── render.rs          # Top-level TUI render loop
+│   │       ├── components/        # TUI widgets (ratatui)
+│   │       │   ├── status_bar.rs  # Two rows: Row 0 = brand/version/online/toast, Row 1 = agents / other users / me
+│   │       │   ├── chat.rs        # Chat message display + full-width banner slot (Ctrl+C exit warning)
 │   │       │   ├── input.rs       # Input bar with cursor
+│   │       │   ├── autocomplete.rs # @mention and slash-command autocomplete (registry-driven)
 │   │       │   └── util.rs        # Color parsing helpers
 │   │       ├── network/
 │   │       │   └── ws_client.rs   # WebSocket client (tokio-tungstenite)
@@ -91,6 +100,17 @@ CLI subcommands that overlap with slash commands (`syncvibe invite`,
 the respective command modules — the TUI and CLI paths are byte-identical
 after the common entry point.
 
+## Event Loop Split
+
+`app.rs` no longer owns every event handler. As of v0.5.0:
+
+- `events/key.rs` — key event dispatch, including the Ctrl+C-twice exit sequence and cancellable prompts
+- `events/mouse.rs` — mouse events (scroll scoped to the chat pane only)
+- `events/ws.rs` — WebSocket message handling, including remote `@mention` routing that navigates `MentionOwner { name, suffix }` before triggering the local agent via tmux `send-keys`
+- `render.rs` — top-level ratatui render loop, orchestrating the status bar, chat, input bar, and any overlays (banner, toast, watch viewer)
+
+`app.rs` retains state ownership, command dispatch (delegating to `commands::`), and cross-cutting coordinators. This split is a prerequisite for the eventual event-bus refactor tracked separately.
+
 ## Features
 
 ### Interactive Onboarding
@@ -100,26 +120,39 @@ after the common entry point.
 
 ### TUI Chat
 - Real-time chat with presence indicators
-- Slash commands: `/help` (`/?`), `/invite` (`/i`), `/new` (`/n`), `/join` (`/j`), `/name`, `/color`, `/mute` (`/m`), `/remote`, `/collab`, `/clear`, `/rc`, `/quit` (`/q`)
-- **@mentions**: `@name` highlights + bell notification; `@agent` / `@claude` / `@codex` / `@gemini` prompts agent to read chat for new tasks (only the room's configured agent responds — mentioning a different agent is ignored). Remote @mentions also trigger the local agent (30s debounce) — teammates can assign tasks to each other's agents across machines
+- Slash commands: `/help` (`/?`), `/invite` (`/i`), `/new` (`/n`), `/join` (`/j`), `/chats`, `/share`, `/watch`, `/name`, `/color`, `/mute` (`/m`), `/remote`, `/collab`, `/clear`, `/rc`, `/leave`, `/quit` (`/q`)
+- **@mentions**: `@name` highlights + bell notification; `@agent` / `@claude` / `@codex` / `@gemini` prompts the room's agent to read chat for new tasks. Remote @mentions also trigger the local agent (30s debounce) — teammates can assign tasks to each other's agents across machines.
+- **Mention disambiguation**: when multiple teammates run the same agent, use `@claude(Alice)` to name the owner. If two teammates share a display name, the TUI auto-appends a 4-hex-char suffix derived from the user id: `@claude(Alice#7af)` vs `@claude(Alice#b2c)`. Tab-completion always offers the canonical form. Parsing produces `MentionOwner { name, suffix }`; both the local handler (`app.rs::handle_agent_mention`) and the remote trigger (`events/ws.rs`) navigate the same struct.
 - Image sharing (drag path into input)
 - Horizontal scrolling for long input lines
 - **Mouse scroll** + PageUp/PageDown for chat navigation (mouse events scoped to chat panel)
 - **Unread indicator**: "↓ N new messages" banner when scrolled up and new messages arrive; auto-resets on return to bottom
 - **Message selection**: Up/Down arrows select messages for quoting or opening images; Esc deselects
+- **Ctrl+C-twice exit**: first press raises a full-width red banner in the chat surface; a second press within 2s quits. Prevents accidental session kills.
+- **Cancellable prompts**: onboarding prompts accept Esc to cancel cleanly.
 - Message grouping by user, bell only on @mention (with debounce)
 - Chat truncation for performance (>5000 msgs → keep last 2000 in memory, msg_id_set pruned in sync)
 
-### Status Bar & Presence
-- **Version display**: shows current version (e.g. `v0.3.9`) in status bar
-- **Fixed positions**: current user (rightmost, bold with color) + agent indicator (`◆ Agent` in teal, when in tmux)
-- **Carousel rotation**: other online users rotate every 3 seconds when they don't all fit
-- **Dynamic width**: calculates available space, shows as many users as fit, `+N` indicator for hidden ones
-- **Online/offline indicator**: green `●` when connected, gray `○ offline` when disconnected
+### Status Bar & Presence (two rows)
+
+Row 0 — **global**:
+- Brand pill (`SyncVibe`) in cyan, always present
+- Version (`v0.5.0`) in dark gray; auto-collapses on terminals narrower than 50 cols
+- Online / offline dot: green `●` when connected, gray `○ offline` otherwise
+- Live-share marker: `◉ SHARING` (red pill) when you share, or `◉ Alice LIVE` when watching
+- Remaining space fills with a faint dash line, replaced by a centered toast (`─── action copied ───`) when a toast is active
+
+Row 1 — **presence**:
+- Left: unique agents in the room (`◆ Claude`, `◆ Codex`, `◆ Gemini`) in their brand colors
+- Middle: spacer, then a carousel of other online users (rotates every 3s if they don't all fit; a `+N` indicator shows the hidden count)
+- Right: the current user pill (`● Harry (you)`), bold in their chosen color
+
+The room name is **not** in the status bar. It lives in the tmux pane title so the brand is stamped exactly once.
 
 ### tmux Integration
-- Auto-creates split layout: SyncVibe Dashboard (30%, left) | AI Agent (70%, right)
-- Dashboard is the long-lived process; agent pane is split after session creation
+- Auto-creates split layout: **Chat (30%, left) | AI Agent (70%, right)**
+- The left pane's tmux title is set to the **room name** via `select-pane -T <room_name>` (so the brand does not appear twice — the `SyncVibe` pill in the status bar is the only brand stamp)
+- Chat pane is the long-lived process; agent pane is split after session creation
 - Session cleanup: `kill-session` on detach (outside tmux) or `destroy-unattached` (inside tmux) prevents orphaned agent processes
 - Ctrl+G to switch panes, styled pane borders
 - Project switching between tmux sessions
