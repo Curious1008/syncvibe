@@ -625,41 +625,7 @@ impl AppState {
             // `/clear` ported to commands::clear (W1). See commands/mod.rs registry.
             // `/rc` ported to commands::rc (W2). See commands/mod.rs registry.
             // `/remote` ported to commands::remote (W2). See commands/mod.rs registry.
-            "/collab" => {
-                let remote = self
-                    .storage
-                    .read_room_config()
-                    .ok()
-                    .and_then(|r| r.git_remote)
-                    .or_else(|| crate::git::ops::get_git_remote_in(self.storage.project_root()));
-                match remote.and_then(|u| crate::git::ops::parse_github_repo(&u)) {
-                    Some((owner, repo)) => {
-                        let url = format!("https://github.com/{}/{}/settings/access", owner, repo);
-                        self.system_msg(&format!("Opening {} ...", url));
-                        #[cfg(target_os = "macos")]
-                        {
-                            let _ = std::process::Command::new("open").arg(&url).spawn();
-                        }
-                        #[cfg(target_os = "linux")]
-                        {
-                            let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
-                        }
-                    }
-                    None => {
-                        self.system_msg("No GitHub repo linked. Opening GitHub to create one...");
-                        self.system_msg("After creating, use /remote <url> to link it.");
-                        let url = "https://github.com/new";
-                        #[cfg(target_os = "macos")]
-                        {
-                            let _ = std::process::Command::new("open").arg(url).spawn();
-                        }
-                        #[cfg(target_os = "linux")]
-                        {
-                            let _ = std::process::Command::new("xdg-open").arg(url).spawn();
-                        }
-                    }
-                }
-            }
+            // `/collab` ported to commands::collab (W2). See commands/mod.rs registry.
             // `/share` ported to commands::share (W1). See commands/mod.rs registry.
             "/watch" => {
                 // Toggle off — if already watching, kill the watch pane
