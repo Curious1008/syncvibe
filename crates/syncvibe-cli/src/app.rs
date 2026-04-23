@@ -388,7 +388,7 @@ impl AppState {
     }
 
     /// Push a system message (ephemeral — not persisted to disk, not selectable)
-    fn system_msg(&mut self, text: &str) {
+    pub(crate) fn system_msg(&mut self, text: &str) {
         let msg = ChatMessage::new_system_message(text.to_string(), self.session_id.clone());
         // Ephemeral — not persisted to disk, agents can't read, not selectable
         self.chat_messages.push(msg);
@@ -410,12 +410,12 @@ impl AppState {
     }
 
     /// Queue an info toast (shown via tmux display-message after event processing)
-    fn toast(&mut self, text: &str) {
+    pub(crate) fn toast(&mut self, text: &str) {
         self.toast_queue.push((text.to_string(), false));
     }
 
     /// Queue an error toast (shown with red highlight)
-    fn toast_err(&mut self, text: &str) {
+    pub(crate) fn toast_err(&mut self, text: &str) {
         self.toast_queue.push((text.to_string(), true));
     }
 
@@ -474,6 +474,17 @@ impl AppState {
         let cmd = parts[0];
 
         let arg = parts.get(1).map(|s| s.trim()).unwrap_or("");
+
+        // Strangler Fig: try the new dispatch tree first. Empty in W0, so
+        // this short-circuits zero commands and every input falls through to
+        // the legacy match below. W1-W2 port commands in; W3 deletes the
+        // legacy arms as they're covered.
+        {
+            let mut tui_ctx = crate::commands::TuiCtx::new(self);
+            if crate::commands::dispatch_tui(&mut tui_ctx, cmd, arg) {
+                return true;
+            }
+        }
 
         match cmd {
             "/help" | "/h" | "/?" => {

@@ -2,6 +2,7 @@ mod agents;
 mod app;
 mod auth;
 mod cli;
+mod commands;
 mod components;
 mod config;
 mod git;
@@ -31,6 +32,16 @@ use syncvibe_core::storage::Storage;
 use onboarding::{confirm_destructive, print_section, B, DIM, GREEN, R, RED, TEAL, YELLOW};
 
 fn main() -> Result<()> {
+    // Env-gated tracing subscriber (task 0.8). Dormant by default — no output
+    // unless SYNCVIBE_LOG is set. Example: SYNCVIBE_LOG=syncvibe::commands=debug
+    if let Ok(filter) = std::env::var("SYNCVIBE_LOG") {
+        use tracing_subscriber::{fmt, EnvFilter};
+        let _ = fmt()
+            .with_env_filter(EnvFilter::new(filter))
+            .with_writer(std::io::stderr)
+            .try_init();
+    }
+
     let cli = Cli::parse();
 
     // Treat user-initiated cancels as a clean exit, not a red error.
