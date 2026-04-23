@@ -5,6 +5,7 @@ mod cli;
 mod commands;
 mod components;
 mod config;
+mod events;
 mod flows;
 mod git;
 mod init;
