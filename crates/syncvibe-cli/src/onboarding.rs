@@ -153,11 +153,9 @@ pub fn prompt_cancellable(msg: &str) -> io::Result<Option<String>> {
                         let _ = io::stdout().flush();
                         std::process::exit(130);
                     }
-                    KeyCode::Backspace => {
-                        if buf.pop().is_some() {
-                            print!("\x08 \x08");
-                            io::stdout().flush()?;
-                        }
+                    KeyCode::Backspace if buf.pop().is_some() => {
+                        print!("\x08 \x08");
+                        io::stdout().flush()?;
                     }
                     KeyCode::Char(c) if !ctrl => {
                         buf.push(c);
@@ -405,10 +403,8 @@ fn run_menu(items: &[MenuItem]) -> io::Result<Option<usize>> {
                 KeyCode::Up => {
                     cursor = cursor.saturating_sub(1);
                 }
-                KeyCode::Down => {
-                    if cursor + 1 < items.len() {
-                        cursor += 1;
-                    }
+                KeyCode::Down if cursor + 1 < items.len() => {
+                    cursor += 1;
                 }
                 KeyCode::Enter => {
                     clear_from_row(start_row)?;
@@ -516,17 +512,13 @@ fn run_checklist(items: &mut [SetupItem], actionable: &[usize]) -> io::Result<bo
                 KeyCode::Up => {
                     cursor = cursor.saturating_sub(1);
                 }
-                KeyCode::Down => {
-                    if cursor < confirm_idx {
-                        cursor += 1;
-                    }
+                KeyCode::Down if cursor < confirm_idx => {
+                    cursor += 1;
                 }
-                KeyCode::Char(' ') => {
-                    if cursor < confirm_idx {
-                        let idx = actionable[cursor];
-                        if !items[idx].required {
-                            items[idx].checked = !items[idx].checked;
-                        }
+                KeyCode::Char(' ') if cursor < confirm_idx => {
+                    let idx = actionable[cursor];
+                    if !items[idx].required {
+                        items[idx].checked = !items[idx].checked;
                     }
                 }
                 KeyCode::Enter => {

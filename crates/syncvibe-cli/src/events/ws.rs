@@ -118,7 +118,7 @@ pub fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
                     let parsed = crate::agents::extract_mentions(&remote_content);
                     let my_suffix = crate::agents::owner_suffix(&state.user.profile.user_id);
                     let matched = parsed.iter().any(|m| {
-                        agent.mentions.iter().any(|kw| *kw == m.keyword.as_str())
+                        agent.mentions.contains(&m.keyword.as_str())
                             && match &m.owner {
                                 None => true,
                                 Some(o) => {

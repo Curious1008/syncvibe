@@ -723,7 +723,7 @@ impl AppState {
         let agent_name = match local_agent {
             Some(a)
                 if parsed.iter().any(|m| {
-                    a.mentions.iter().any(|kw| *kw == m.keyword.as_str())
+                    a.mentions.contains(&m.keyword.as_str())
                         && match &m.owner {
                             None => true,
                             Some(o) => {

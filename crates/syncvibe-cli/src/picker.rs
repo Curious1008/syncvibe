@@ -25,7 +25,7 @@ pub fn pick_project(current_path: Option<&str>) -> anyhow::Result<Option<Project
     }
 
     // Sort by last_opened (most recent first)
-    projects.sort_by(|a, b| b.last_opened.cmp(&a.last_opened));
+    projects.sort_by_key(|p| std::cmp::Reverse(p.last_opened));
 
     // Check which rooms have active tmux sessions
     let session_status: Vec<bool> = projects.iter().map(|p| has_tmux_session(&p.path)).collect();
@@ -51,10 +51,8 @@ pub fn pick_project(current_path: Option<&str>) -> anyhow::Result<Option<Project
                 KeyCode::Up | KeyCode::Char('k') => {
                     selected = selected.saturating_sub(1);
                 }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    if selected + 1 < projects.len() {
-                        selected += 1;
-                    }
+                KeyCode::Down | KeyCode::Char('j') if selected + 1 < projects.len() => {
+                    selected += 1;
                 }
                 KeyCode::Enter => {
                     result = Some(projects[selected].clone());

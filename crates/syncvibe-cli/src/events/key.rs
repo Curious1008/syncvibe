@@ -220,18 +220,16 @@ pub fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
                     state.input_cursor += 1;
                     state.autocomplete_idx = 0;
                 }
-                KeyCode::Backspace => {
-                    if state.input_cursor > 0 {
-                        state.input_cursor -= 1;
-                        let byte_idx = state
-                            .input_buffer
-                            .char_indices()
-                            .nth(state.input_cursor)
-                            .map(|(i, _)| i)
-                            .unwrap_or(state.input_buffer.len());
-                        state.input_buffer.remove(byte_idx);
-                        state.autocomplete_idx = 0;
-                    }
+                KeyCode::Backspace if state.input_cursor > 0 => {
+                    state.input_cursor -= 1;
+                    let byte_idx = state
+                        .input_buffer
+                        .char_indices()
+                        .nth(state.input_cursor)
+                        .map(|(i, _)| i)
+                        .unwrap_or(state.input_buffer.len());
+                    state.input_buffer.remove(byte_idx);
+                    state.autocomplete_idx = 0;
                 }
                 KeyCode::Delete => {
                     let char_count = state.input_buffer.chars().count();

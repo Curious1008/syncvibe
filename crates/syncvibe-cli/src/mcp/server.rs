@@ -269,7 +269,7 @@ fn participant_stats(msgs: &[&ChatMessage]) -> Vec<(String, usize)> {
         .into_iter()
         .map(|(name, count)| (name.to_string(), count))
         .collect();
-    stats.sort_by(|a, b| b.1.cmp(&a.1));
+    stats.sort_by_key(|a| std::cmp::Reverse(a.1));
     stats
 }
 

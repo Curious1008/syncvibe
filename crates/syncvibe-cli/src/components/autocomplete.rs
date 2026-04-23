@@ -340,10 +340,7 @@ mod tests {
 
     #[test]
     fn single_owner_keeps_bare_mention() {
-        let presence = vec![
-            pres("u1", "Alice", Some("claude")),
-            pres("u2", "Bob", None),
-        ];
+        let presence = vec![pres("u1", "Alice", Some("claude")), pres("u2", "Bob", None)];
         let items = build_mentions(&presence, "u2");
         let agent_items: Vec<_> = items.iter().filter(|m| m.hint != "online").collect();
         assert_eq!(agent_items.len(), 1);

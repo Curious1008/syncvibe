@@ -94,8 +94,7 @@ pub fn extract_mentions(content: &str) -> Vec<Mention> {
         }
         let start = i;
         i += 1;
-        while i < chars.len()
-            && (chars[i].is_alphanumeric() || chars[i] == '-' || chars[i] == '_')
+        while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '-' || chars[i] == '_')
         {
             i += 1;
         }

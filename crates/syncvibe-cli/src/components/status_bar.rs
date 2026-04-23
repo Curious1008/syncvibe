@@ -207,7 +207,9 @@ pub fn draw_presence(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
     let spacer_style = Style::default().fg(SV_FG_FAINT);
 
     let right_block_len = others_used + indicator_len + me_len;
-    let spacer = width.saturating_sub(agent_len).saturating_sub(right_block_len);
+    let spacer = width
+        .saturating_sub(agent_len)
+        .saturating_sub(right_block_len);
     spans.push(Span::styled("─".repeat(spacer), spacer_style));
 
     for (name, color) in &visible_others {
