@@ -266,7 +266,7 @@ fn launch_or_attach_with_agent(
 
         if pane_count >= 2 {
             // Session is healthy — just enforce config
-            apply_tmux_config(&session_name, agent_name, agent_color)?;
+            apply_tmux_config(&session_name, &project_name, agent_name, agent_color)?;
         } else {
             // Stale session (1 pane after /quit). Check if we're inside it.
             let in_this_session = inside_tmux && {
@@ -281,6 +281,7 @@ fn launch_or_attach_with_agent(
                 // Can't kill our own session — add split dynamically
                 ensure_split(
                     &session_name,
+                    &project_name,
                     project_path,
                     &bin_str,
                     agent_name,
@@ -295,6 +296,7 @@ fn launch_or_attach_with_agent(
                     .status();
                 create_session(
                     &session_name,
+                    &project_name,
                     project_path,
                     &bin_str,
                     agent_cmd,
@@ -305,6 +307,7 @@ fn launch_or_attach_with_agent(
         }
     } else if let Err(e) = create_session(
         &session_name,
+        &project_name,
         project_path,
         &bin_str,
         agent_cmd,
@@ -370,6 +373,7 @@ pub fn shell_escape(s: &str) -> String {
 
 fn create_session(
     session_name: &str,
+    project_name: &str,
     project_path: &str,
     bin_str: &str,
     agent_cmd: &str,
@@ -458,11 +462,12 @@ exec $SHELL; fi",
         .stderr(std::process::Stdio::null())
         .status();
 
-    apply_tmux_config(session_name, agent_name, agent_color)
+    apply_tmux_config(session_name, project_name, agent_name, agent_color)
 }
 
 fn ensure_split(
     session_name: &str,
+    project_name: &str,
     project_path: &str,
     bin_str: &str,
     agent_name: &str,
@@ -477,7 +482,7 @@ fn ensure_split(
 
     if pane_count >= 2 {
         // Both panes exist — just enforce ratio and config
-        return apply_tmux_config(session_name, agent_name, agent_color);
+        return apply_tmux_config(session_name, project_name, agent_name, agent_color);
     }
 
     let escaped_bin = shell_escape(bin_str);
@@ -510,10 +515,15 @@ fn ensure_split(
         _ => {}
     }
 
-    apply_tmux_config(session_name, agent_name, agent_color)
+    apply_tmux_config(session_name, project_name, agent_name, agent_color)
 }
 
-fn apply_tmux_config(session_name: &str, agent_name: &str, agent_color: &str) -> Result<()> {
+fn apply_tmux_config(
+    session_name: &str,
+    project_name: &str,
+    agent_name: &str,
+    agent_color: &str,
+) -> Result<()> {
     // Keybindings
     for cmd in &["bind -n C-g select-pane -t :.+", "bind z resize-pane -Z"] {
         let parts: Vec<&str> = cmd.split_whitespace().collect();
@@ -657,9 +667,11 @@ fn apply_tmux_config(session_name: &str, agent_name: &str, agent_color: &str) ->
             .stderr(std::process::Stdio::null())
             .status();
 
-        // Pane titles
+        // Pane titles: left pane is the room, right pane is the agent.
+        // Using the room name (project_name) here avoids duplicating the
+        // "SyncVibe" brand, which is already stamped in the status bar.
         let _ = std::process::Command::new("tmux")
-            .args(["select-pane", "-t", &left, "-T", "SyncVibe Chat"])
+            .args(["select-pane", "-t", &left, "-T", project_name])
             .env_remove("TMUX")
             .stderr(std::process::Stdio::null())
             .status();

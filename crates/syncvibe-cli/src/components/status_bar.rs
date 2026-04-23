@@ -11,29 +11,31 @@ use crate::app::AppState;
 use crate::components::util::parse_hex_color;
 use crate::theme::{SV_ACCENT, SV_ELEVATED, SV_FG_FAINT};
 
-pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
+/// Row 0 — brand, version, project, online/sharing, toast.
+/// Version auto-collapses when the terminal is narrow.
+pub fn draw_global(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
     let width = area.width as usize;
-
-    // Fixed left: brand + version + project + status
     let version = env!("CARGO_PKG_VERSION");
-    let mut spans = vec![
-        Span::styled(
-            " SyncVibe ",
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
+
+    // Collapse threshold: hide the version number on narrow terminals so the
+    // project name + online dot always fit.
+    let show_version = width >= 50;
+
+    let mut spans = vec![Span::styled(
+        " SyncVibe ",
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )];
+    if show_version {
+        spans.push(Span::styled(
             format!("v{} ", version),
             Style::default().fg(Color::DarkGray),
-        ),
-        Span::styled(
-            format!("│ {} ", state.project_name),
-            Style::default().fg(Color::White),
-        ),
-    ];
-
+        ));
+    }
+    // Room name is shown in the tmux pane title above — no need to repeat it
+    // here. Status bar carries the dynamic bits only (online state, toast).
     if state.is_online {
         spans.push(Span::styled("● ", Style::default().fg(Color::Green)));
     } else {
@@ -43,7 +45,6 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
         ));
     }
 
-    // Screen sharing indicators
     let mut live_width: usize = 0;
     if state.sharing_screen {
         spans.push(Span::styled(
@@ -55,7 +56,6 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
         ));
         live_width = 10;
     } else if !state.screen_frames.is_empty() {
-        // Viewer: show who is sharing
         let names: Vec<&str> = state
             .screen_frames
             .values()
@@ -69,54 +69,109 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
         ));
     }
 
-    // Build presence entries (right-aligned)
-    let mut presence_spans: Vec<Span> = Vec::new();
-    let mut presence_len: usize = 0;
+    // Space used so far on the left.
+    let version_width = if show_version { version.width() + 2 } else { 0 };
+    let left_used = 10 // " SyncVibe "
+        + version_width
+        + if state.is_online { 2 } else { 10 }
+        + live_width;
 
-    // 1. Always show current user
-    let me_text = format!(" ● {} ", state.user.profile.name);
-    let you_text = "(you) ";
-    presence_len += me_text.width() + you_text.width();
-    let me_color = parse_hex_color(&state.user.profile.color);
+    let remaining = width.saturating_sub(left_used);
+    let spacer_style = Style::default().fg(SV_FG_FAINT);
 
-    // 2. Collect unique agents from presence (only agents brought by users in the room)
-    let mut agent_entries: Vec<(&str, Color)> = Vec::new();
+    // Toast takes the remaining space; otherwise a faint dash fills it.
+    let active_toast = state
+        .active_toast
+        .as_ref()
+        .and_then(|(text, is_err, expire)| {
+            if *expire > std::time::Instant::now() {
+                Some((text.as_str(), *is_err))
+            } else {
+                None
+            }
+        });
+
+    if let Some((toast_text, is_err)) = active_toast {
+        let toast_style = if is_err {
+            Style::default()
+                .fg(Color::White)
+                .bg(Color::Red)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(SV_ACCENT).add_modifier(Modifier::BOLD)
+        };
+        let toast_len = toast_text.width() + 2;
+        if toast_len < remaining {
+            let pad = remaining - toast_len;
+            let pad_left = pad / 2;
+            let pad_right = pad - pad_left;
+            spans.push(Span::styled("─".repeat(pad_left), spacer_style));
+            spans.push(Span::styled(format!(" {} ", toast_text), toast_style));
+            spans.push(Span::styled("─".repeat(pad_right), spacer_style));
+        } else {
+            let available = remaining.saturating_sub(2);
+            let truncated: String = if available > 3 {
+                toast_text
+                    .chars()
+                    .take(available - 3)
+                    .chain("...".chars())
+                    .collect()
+            } else {
+                toast_text.chars().take(available).collect()
+            };
+            spans.push(Span::styled(format!(" {} ", truncated), toast_style));
+        }
+    } else {
+        spans.push(Span::styled("─".repeat(remaining), spacer_style));
+    }
+
+    let bar = Paragraph::new(Line::from(spans)).style(Style::default().bg(SV_ELEVATED));
+    frame.render_widget(bar, area);
+}
+
+/// Row 1 — agents (left) + spacer + other users (carousel) + me (right).
+pub fn draw_presence(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
+    let width = area.width as usize;
+
+    // Left: unique agents brought into the room
+    let mut agent_spans: Vec<Span> = Vec::new();
+    let mut agent_len: usize = 0;
     let mut seen_agents = HashSet::new();
     for p in &state.presence {
         if let Some(ref aid) = p.agent_id {
             if seen_agents.insert(aid.clone()) {
                 if let Some(agent) = agents::find(aid) {
                     let text = format!(" ◆ {} ", agent.name);
-                    presence_len += text.width();
-                    agent_entries.push((agent.name, parse_hex_color(agent.color)));
+                    agent_len += text.width();
+                    agent_spans.push(Span::styled(
+                        text,
+                        Style::default().fg(parse_hex_color(agent.color)),
+                    ));
                 }
             }
         }
     }
 
-    // 3. Other users — carousel
+    // Right cluster: me + (you)
+    let me_text = format!(" ● {} ", state.user.profile.name);
+    let you_text = "(you) ";
+    let me_len = me_text.width() + you_text.width();
+    let me_color = parse_hex_color(&state.user.profile.color);
+
+    // Other users carousel
     let others: Vec<_> = state
         .presence
         .iter()
         .filter(|p| p.user_id != state.user.profile.user_id)
         .collect();
 
-    // Calculate how much space is left for other users
-    let version_width = version.width() + 2; // "vX.Y.Z "
-    let left_used = 12
-        + version_width
-        + state.project_name.width()
-        + 2
-        + if state.is_online { 2 } else { 10 }
-        + live_width;
-    let spacer_min = 2; // at least some separator
+    let spacer_min = 2;
     let available_for_others = width
-        .saturating_sub(left_used)
-        .saturating_sub(presence_len)
+        .saturating_sub(agent_len)
+        .saturating_sub(me_len)
         .saturating_sub(spacer_min);
 
-    // Determine how many others fit
-    let mut visible_others: Vec<(&str, &str)> = Vec::new(); // (name, color)
+    let mut visible_others: Vec<(&str, &str)> = Vec::new();
     let mut others_used: usize = 0;
 
     if !others.is_empty() {
@@ -127,7 +182,6 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
             let entry_text = format!(" ● {} ", p.user_name);
             let entry_len = entry_text.width();
 
-            // Reserve space for "+N" indicator if there are more
             let remaining_after = available_for_others.saturating_sub(others_used + entry_len);
             let remaining_count = count - visible_others.len() - 1;
             let need_indicator = remaining_count > 0 && remaining_after < 6;
@@ -142,104 +196,42 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
     }
 
     let hidden_count = others.len().saturating_sub(visible_others.len());
-    if hidden_count > 0 {
-        let indicator = format!("+{} ", hidden_count);
-        others_used += indicator.width();
-    }
-
-    // Spacer — or toast notification if active
-    let total_right = presence_len + others_used;
-    let remaining = width.saturating_sub(left_used).saturating_sub(total_right);
-    let spacer_style = Style::default().fg(SV_FG_FAINT);
-
-    let active_toast = state
-        .active_toast
-        .as_ref()
-        .and_then(|(text, is_err, expire)| {
-            if *expire > std::time::Instant::now() {
-                Some((text.as_str(), *is_err))
-            } else {
-                None
-            }
-        });
-
-    if let Some((toast_text, is_err)) = active_toast {
-        let toast_len = toast_text.width() + 2; // " text "
-        if toast_len < remaining {
-            let pad = remaining.saturating_sub(toast_len);
-            let pad_left = pad / 2;
-            let pad_right = pad.saturating_sub(pad_left);
-            spans.push(Span::styled("─".repeat(pad_left), spacer_style));
-            let toast_style = if is_err {
-                Style::default()
-                    .fg(Color::White)
-                    .bg(Color::Red)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(SV_ACCENT).add_modifier(Modifier::BOLD)
-            };
-            spans.push(Span::styled(format!(" {} ", toast_text), toast_style));
-            spans.push(Span::styled("─".repeat(pad_right), spacer_style));
-        } else {
-            // Toast too long — truncate
-            let available = remaining.saturating_sub(2);
-            let truncated: String = if available > 3 {
-                toast_text
-                    .chars()
-                    .take(available - 3)
-                    .chain("...".chars())
-                    .collect()
-            } else {
-                toast_text.chars().take(available).collect()
-            };
-            let toast_style = if is_err {
-                Style::default()
-                    .fg(Color::White)
-                    .bg(Color::Red)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(SV_ACCENT).add_modifier(Modifier::BOLD)
-            };
-            spans.push(Span::styled(format!(" {} ", truncated), toast_style));
-        }
+    let indicator_len = if hidden_count > 0 {
+        format!("+{} ", hidden_count).width()
     } else {
-        spans.push(Span::styled("─".repeat(remaining), spacer_style));
+        0
     };
 
-    // Render: agents → others → hidden indicator → current user
-    for (name, color) in &agent_entries {
-        presence_spans.push(Span::styled(
-            format!(" ◆ {} ", name),
-            Style::default().fg(*color),
-        ));
-    }
+    // Build the line: agents | spacer | others | +N | me
+    let mut spans = agent_spans;
+    let spacer_style = Style::default().fg(SV_FG_FAINT);
+
+    let right_block_len = others_used + indicator_len + me_len;
+    let spacer = width.saturating_sub(agent_len).saturating_sub(right_block_len);
+    spans.push(Span::styled("─".repeat(spacer), spacer_style));
 
     for (name, color) in &visible_others {
         let c = parse_hex_color(color);
-        presence_spans.push(Span::styled(
+        spans.push(Span::styled(
             format!(" ● {} ", name),
             Style::default().fg(c),
         ));
     }
-
     if hidden_count > 0 {
-        presence_spans.push(Span::styled(
+        spans.push(Span::styled(
             format!("+{} ", hidden_count),
             Style::default().fg(Color::DarkGray),
         ));
     }
 
-    // Current user always last (rightmost)
-    presence_spans.push(Span::styled(
+    spans.push(Span::styled(
         me_text,
         Style::default().fg(me_color).add_modifier(Modifier::BOLD),
     ));
-    presence_spans.push(Span::styled(
+    spans.push(Span::styled(
         you_text.to_string(),
         Style::default().fg(Color::DarkGray),
     ));
-
-    spans.extend(presence_spans);
 
     let bar = Paragraph::new(Line::from(spans)).style(Style::default().bg(SV_ELEVATED));
     frame.render_widget(bar, area);
