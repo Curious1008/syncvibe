@@ -32,6 +32,23 @@ use onboarding::{confirm_destructive, print_section, B, DIM, GREEN, R, RED, TEAL
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Treat user-initiated cancels as a clean exit, not a red error.
+    // Convention: any bail!("Cancelled.") / bail!("Setup cancelled.") surfaces here.
+    match run_cli(cli) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("Cancelled") || msg.contains("cancelled") {
+                println!("  {DIM}Cancelled.{R}");
+                Ok(())
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
+fn run_cli(cli: Cli) -> Result<()> {
     match cli.command {
         Some(Command::Init) => cmd_init()?,
         Some(Command::Join { name, color }) => cmd_join(name, color)?,
@@ -66,37 +83,8 @@ fn main() -> Result<()> {
 // --- Simple command handlers ---
 
 fn cmd_init() -> Result<()> {
-    config::require_auth("Creating a room")?;
-
     let cwd = env::current_dir()?;
-
-    if !cwd.join(".git").exists() {
-        anyhow::bail!("Not in a git repository. Run `git init` first.");
-    }
-
-    // If room already exists, just update git_remote and launch — skip agent selection
-    if cwd.join(".syncvibe").join("room.json").exists() {
-        let storage = Storage::find(&cwd)?;
-        let mut room = storage.read_room_config()?;
-        if let Some(detected) = crate::git::ops::get_git_remote_in(&cwd) {
-            if room.git_remote.as_deref() != Some(&detected) {
-                room.git_remote = Some(detected.clone());
-                storage.write_room_config(&room)?;
-                println!("  {GREEN}✓{R} Remote updated: {detected}");
-            }
-        }
-        println!("  {DIM}Room already set up — launching...{R}\n");
-        let _user = session::ensure_user_profile()?;
-        return tmux::launch_project(&cwd);
-    }
-
-    let agent_id = agents::select_agent()?;
-    let mut room = syncvibe_core::models::RoomConfig::new();
-    room.agent = Some(agent_id);
-    room.git_remote = crate::git::ops::detect_or_prompt_git_remote(&cwd);
-    init::perform_init(&cwd, Some(room))?;
-    let _user = session::ensure_user_profile()?;
-    tmux::launch_project(&cwd)
+    init::setup_and_launch(&cwd)
 }
 
 fn cmd_join(name: Option<String>, color: Option<String>) -> Result<()> {

@@ -13,6 +13,52 @@ pub fn projects_dir() -> PathBuf {
     home.join("SyncVibe")
 }
 
+/// Set up an existing directory as a SyncVibe room and launch the TUI.
+/// Used by `syncvibe init` and the "Set up this directory" menu item.
+/// Auto-inits git if missing; if the room is already configured, just launches.
+pub fn setup_and_launch(cwd: &Path) -> Result<()> {
+    crate::config::require_auth("Creating a room")?;
+
+    // Auto-init git if missing — SyncVibe uses git for code sync between teammates.
+    if !cwd.join(".git").exists() {
+        println!("  {DIM}No git repo here — initializing one for you...{R}");
+        let status = std::process::Command::new("git")
+            .arg("init")
+            .current_dir(cwd)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()?;
+        if !status.success() {
+            anyhow::bail!("git init failed. Make sure `git` is installed and try again.");
+        }
+        println!("  {GREEN}✓{R} Git initialized\n");
+    }
+
+    // If room already exists, just refresh remote and launch — skip agent selection.
+    if cwd.join(".syncvibe").join("room.json").exists() {
+        let storage = Storage::find(cwd)?;
+        let mut room = storage.read_room_config()?;
+        if let Some(detected) = crate::git::ops::get_git_remote_in(cwd) {
+            if room.git_remote.as_deref() != Some(&detected) {
+                room.git_remote = Some(detected.clone());
+                storage.write_room_config(&room)?;
+                println!("  {GREEN}✓{R} Remote updated: {detected}");
+            }
+        }
+        println!("  {DIM}Room already set up — launching...{R}\n");
+        let _user = crate::session::ensure_user_profile()?;
+        return crate::tmux::launch_project(cwd);
+    }
+
+    let agent_id = crate::agents::select_agent()?;
+    let mut room = RoomConfig::new();
+    room.agent = Some(agent_id);
+    room.git_remote = crate::git::ops::detect_or_prompt_git_remote(cwd);
+    perform_init(cwd, Some(room))?;
+    let _user = crate::session::ensure_user_profile()?;
+    crate::tmux::launch_project(cwd)
+}
+
 /// Validate that a room name is safe for use as a directory name.
 fn validate_room_name(name: &str) -> Result<()> {
     if name.is_empty() {
@@ -90,9 +136,9 @@ pub fn prepare_project_dir_with_remote(name: &str, git_remote: Option<&str>) -> 
                 }
                 Err(_) => {
                     println!("\n  {RED}✗{R} Clone failed — you may need repo access.");
-                    println!("    {DIM}Ask the room owner to add you on GitHub.");
-                    println!("    Once you have access, use /remote <url> to link the repo.");
-                    println!("    Starting in chat-only mode...{R}\n");
+                    println!("    {DIM}Ask the room owner to add you on GitHub, then run");
+                    println!("    {TEAL}/remote <url>{DIM} in chat to link the repo.");
+                    println!("    Starting in chat-only mode for now...{R}\n");
                 }
             }
         }
@@ -313,6 +359,7 @@ pub fn perform_init(cwd: &std::path::Path, room: Option<RoomConfig>) -> Result<R
             room.room_name = cwd.file_name().map(|n| n.to_string_lossy().to_string());
         }
         storage.write_room_config(&room)?;
+        println!("  {GREEN}✓{R} Room already configured — launching\n");
         return Ok(room);
     }
 

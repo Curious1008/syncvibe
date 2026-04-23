@@ -99,10 +99,13 @@ pub fn resolve_short_invite(code: &str) -> Result<RoomConfig> {
 /// Used for clipboard copy — includes user name, room name, code, and install hint.
 pub fn share_message(code: &str, user_name: &str, room_name: Option<&str>) -> String {
     let header = match room_name {
-        Some(name) => format!("{} invited you to \"{}\"", user_name, name),
+        Some(name) => format!("{} invited you to \"{}\" on SyncVibe", user_name, name),
         None => format!("{} invited you to collaborate on SyncVibe", user_name),
     };
-    format!("{}\nJoin: {}\nsyncvibe connect {}", header, code, code)
+    format!(
+        "{}\n\n1. Install:  curl -fsSL https://syncvibe.online/install.sh | sh\n2. Connect:  syncvibe connect {}",
+        header, code
+    )
 }
 
 /// Check if a string looks like a short invite code (8 chars from safe alphabet, optional dash).
@@ -135,9 +138,10 @@ pub fn read_clipboard() -> Option<String> {
             })?
     };
     #[cfg(target_os = "windows")]
-    {
-        return None; // TODO: powershell Get-Clipboard
-    }
+    let output = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", "Get-Clipboard"])
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }

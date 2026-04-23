@@ -484,7 +484,7 @@ impl AppState {
                 self.system_msg("/name <n> — change display name     e.g. /name Alice");
                 self.system_msg("/color <#hex> — change your color  e.g. #4ECDC4");
                 self.system_msg("/mute     — toggle @mention bell     (/m)");
-                self.system_msg("/remote   — set or show git remote  e.g. /remote https://...");
+                self.system_msg("/remote   — link a GitHub repo for code sync  (/remote <url>)");
                 self.system_msg("/collab   — manage repo collaborators");
                 self.system_msg("/share    — toggle agent screen sharing");
                 self.system_msg("/watch    — view a teammate's shared screen");

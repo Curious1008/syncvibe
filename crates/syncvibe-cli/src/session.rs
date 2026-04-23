@@ -82,7 +82,8 @@ pub fn cmd_session() -> Result<()> {
         let mut room = match crate::invite::resolve_short_invite(trimmed) {
             Ok(r) => r,
             Err(e) => {
-                println!("  {RED}✗{R} Invalid invite code in clipboard: {e}\n");
+                println!("  {RED}✗{R} Invalid invite code in clipboard: {e}");
+                println!("  {DIM}→ Opening room menu...{R}\n");
                 // Fall through to normal menu instead of recursing
                 break 'clipboard;
             }
@@ -113,12 +114,31 @@ pub fn cmd_session() -> Result<()> {
         .filter(|p| std::path::Path::new(&p.path).join(".syncvibe").is_dir())
         .collect();
 
+    // Offer "Set up this directory" when cwd looks like a real project folder —
+    // not home, not the SyncVibe projects root, has a usable name, and not already a room.
+    let home = dirs::home_dir().unwrap_or_default();
+    let projects_root = init::projects_dir();
+    let cwd_name = cwd
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let offer_cwd = !cwd_name.is_empty()
+        && cwd != home
+        && cwd != projects_root
+        && !cwd.join(".syncvibe").exists();
+
     // Build menu items
     let mut menu_items = Vec::new();
     for p in &valid_projects {
         menu_items.push(onboarding::MenuItem {
             label: p.name.clone(),
             hint: format!("({})", p.path),
+        });
+    }
+    if offer_cwd {
+        menu_items.push(onboarding::MenuItem {
+            label: format!("Set up this directory ({})", cwd_name),
+            hint: cwd.display().to_string(),
         });
     }
     menu_items.push(onboarding::MenuItem {
@@ -130,19 +150,23 @@ pub fn cmd_session() -> Result<()> {
         hint: String::new(),
     });
 
+    let projects_count = valid_projects.len();
+    let cwd_action_idx = if offer_cwd { Some(projects_count) } else { None };
+    let create_action_idx = projects_count + if offer_cwd { 1 } else { 0 };
+
     onboarding::print_section("Choose a Room");
     println!();
     let choice = onboarding::select_menu(&menu_items)?;
 
     match choice {
         None => anyhow::bail!("Cancelled."),
-        Some(idx) if idx < valid_projects.len() => {
+        Some(idx) if idx < projects_count => {
             let path = valid_projects[idx].path.clone();
             tmux::launch_project(std::path::Path::new(&path))
         }
+        Some(idx) if Some(idx) == cwd_action_idx => init::setup_and_launch(&cwd),
         Some(idx) => {
-            let action = idx - valid_projects.len();
-            if action == 0 {
+            if idx == create_action_idx {
                 // Create new room — requires auth
                 crate::config::require_auth("Creating a room")?;
                 println!();
