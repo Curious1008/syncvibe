@@ -261,7 +261,10 @@ syncvibe/
 │   │       ├── invite.rs          # Invite code logic
 │   │       ├── agents.rs          # AI agent configuration
 │   │       ├── sync.rs            # Chat sync engine
-│   │       ├── app.rs             # Event loop + slash commands
+│   │       ├── app.rs             # Event loop, dispatches to commands::
+│   │       ├── commands/          # Slash-command registry (one file per /cmd)
+│   │       ├── flows/             # Onboarding + room-join flows
+│   │       ├── theme.rs           # Single source of truth for colors/styles
 │   │       ├── tui.rs             # Terminal UI bootstrap
 │   │       ├── picker.rs          # Room picker
 │   │       ├── init.rs            # Room init (MCP, CLAUDE.md, .codex/, .gemini/)

@@ -16,11 +16,11 @@ syncvibe/
 ├── crates/
 │   ├── syncvibe-cli/              # Main binary
 │   │   └── src/
-│   │       ├── main.rs            # Entry point, clap CLI dispatch, simple commands
+│   │       ├── main.rs            # Entry point, clap CLI dispatch (delegates to commands::*)
 │   │       ├── init.rs            # Room init (.syncvibe/, .mcp.json, .codex/, .gemini/, CLAUDE.md)
 │   │       ├── session.rs         # Interactive onboarding + project launch
 │   │       ├── tmux.rs            # tmux session management, layout, keybindings
-│   │       ├── app.rs             # TUI app state + async event loop
+│   │       ├── app.rs             # TUI app state + async event loop (dispatches to commands::)
 │   │       ├── picker.rs          # Project switcher (ratatui)
 │   │       ├── cli.rs             # Clap command definitions
 │   │       ├── config.rs          # ~/.syncvibe/ config + project registry
@@ -30,6 +30,14 @@ syncvibe/
 │   │       ├── agents.rs          # AI agent configuration (Claude, Codex, Gemini)
 │   │       ├── sync.rs            # Room metadata sync to Supabase
 │   │       ├── tui.rs             # Terminal setup/teardown (crossterm)
+│   │       ├── theme.rs           # Single source of truth for colors/styles (SV_* tokens)
+│   │       ├── commands/          # Slash-command registry (one file per /cmd)
+│   │       │   ├── mod.rs         # Command trait + register_commands! + dispatch_tui
+│   │       │   ├── ctx.rs         # CmdCtx (pure-logic surface for run_core)
+│   │       │   ├── tui_ctx.rs     # TuiCtx (TUI surface for run_tui)
+│   │       │   ├── adapters.rs    # Re-exports wiring commands into app.rs
+│   │       │   └── <cmd>.rs       # One file per command (/invite, /join, /leave, …)
+│   │       ├── flows/             # Multi-screen flows (onboarding, room join)
 │   │       ├── components/        # TUI rendering (ratatui)
 │   │       │   ├── status_bar.rs  # Top bar: project name + presence
 │   │       │   ├── chat.rs        # Chat message display
@@ -56,6 +64,32 @@ syncvibe/
         ├── room.ts                # Durable Object: WS relay + presence
         └── types.ts
 ```
+
+## Command Registry (Wave 3)
+
+Every `/slash` command lives in its own file under `commands/`. A `Command`
+trait declares `name`, `aliases`, `description`, `needs_arg`, and the two
+entry points (`run_tui`, `run_core`). The `register_commands!` macro in
+`commands/mod.rs` produces a static `&[&dyn Command]` — accessed via
+`commands::all()` — which is the single source of truth for:
+
+- **TUI dispatch** (`dispatch_tui` → iterates `all()` and matches name/alias)
+- **Autocomplete suggestions** (`components/autocomplete.rs::filter` reads `all()`)
+- **Trailing-space-after-expansion** behavior (driven by `Command::needs_arg()`)
+- **CLI ↔ TUI parity** (tests assert every overlap has matching metadata)
+
+Adding a new command is a 3-line change: create the file, add `pub mod`,
+add the pair inside `register_commands!`. No other hardcoded list exists.
+
+Colors flow the same way: every `ratatui::style::Color::Rgb(...)` must live
+in `theme.rs` (see `DESIGN.md §Theme module`). A compile-time guard test
+(`theme::tests::no_raw_color_at_call_sites`) walks every `*.rs` under
+`src/` and fails the build on raw RGB outside the allowlisted files.
+
+CLI subcommands that overlap with slash commands (`syncvibe invite`,
+`syncvibe leave`, `syncvibe connect <code>`) delegate to shared helpers in
+the respective command modules — the TUI and CLI paths are byte-identical
+after the common entry point.
 
 ## Features
 
