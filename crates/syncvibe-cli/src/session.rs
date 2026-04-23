@@ -2,9 +2,7 @@ use std::env;
 
 use anyhow::Result;
 
-use syncvibe_core::models::RoomConfig;
-
-use crate::onboarding::{self, B, DIM, GREEN, R, RED, TEAL};
+use crate::onboarding;
 use crate::{config, init, tmux};
 
 // R4a: `ensure_user_profile` lives in `flows::onboarding`. Re-export so the
@@ -91,31 +89,8 @@ pub fn cmd_session() -> Result<()> {
         Some(idx) if Some(idx) == cwd_action_idx => init::setup_and_launch(&cwd),
         Some(idx) => {
             if idx == create_action_idx {
-                // Create new room — requires auth
-                crate::config::require_auth("Creating a room")?;
-                println!();
-                let name = loop {
-                    let raw = onboarding::prompt(&format!("  {TEAL}Room name:{R} "))?;
-                    if raw.is_empty() {
-                        anyhow::bail!("Cancelled.");
-                    }
-                    let clean = onboarding::sanitize_name(&raw);
-                    if clean.is_empty() {
-                        println!("  {RED}✗{R} Invalid name — please use normal characters.");
-                        continue;
-                    }
-                    break clean;
-                };
-                let agent_id = crate::agents::select_agent()?;
-                let path = init::prepare_project_dir(&name)?;
-                let mut room = RoomConfig::new();
-                room.room_name = Some(name);
-                room.agent = Some(agent_id);
-                room.git_remote = crate::git::ops::detect_or_prompt_git_remote(&path);
-                init::perform_init(&path, Some(room))?;
-                tmux::launch_project(&path)
+                crate::flows::onboarding::run_create_room_flow()
             } else {
-                // Join with invite code — delegated to flows::onboarding
                 crate::flows::onboarding::run_join_code_flow()
             }
         }

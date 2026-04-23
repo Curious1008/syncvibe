@@ -6,7 +6,7 @@
 
 use anyhow::Result;
 
-use syncvibe_core::models::UserConfig;
+use syncvibe_core::models::{RoomConfig, UserConfig};
 
 use crate::onboarding::{self, B, DIM, GREEN, R, RED, TEAL};
 use crate::{config, init, theme, tmux};
@@ -147,6 +147,37 @@ pub fn run_join_code_flow() -> Result<()> {
     let agent_id = crate::agents::select_agent()?;
     room.agent = Some(agent_id);
     let path = init::prepare_project_dir_with_remote(&name, room.git_remote.as_deref())?;
+    init::perform_init(&path, Some(room))?;
+    tmux::launch_project(&path)
+}
+
+/// Interactive "Create a new room" menu branch: gate on auth, prompt for
+/// name (repeating on invalid), pick an agent, init the project dir, and
+/// launch tmux.
+///
+/// Pure move from `session::cmd_session` per R4d. Byte-identical behavior.
+pub fn run_create_room_flow() -> Result<()> {
+    // Create new room — requires auth
+    crate::config::require_auth("Creating a room")?;
+    println!();
+    let name = loop {
+        let raw = onboarding::prompt(&format!("  {TEAL}Room name:{R} "))?;
+        if raw.is_empty() {
+            anyhow::bail!("Cancelled.");
+        }
+        let clean = onboarding::sanitize_name(&raw);
+        if clean.is_empty() {
+            println!("  {RED}✗{R} Invalid name — please use normal characters.");
+            continue;
+        }
+        break clean;
+    };
+    let agent_id = crate::agents::select_agent()?;
+    let path = init::prepare_project_dir(&name)?;
+    let mut room = RoomConfig::new();
+    room.room_name = Some(name);
+    room.agent = Some(agent_id);
+    room.git_remote = crate::git::ops::detect_or_prompt_git_remote(&path);
     init::perform_init(&path, Some(room))?;
     tmux::launch_project(&path)
 }
