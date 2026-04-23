@@ -8,3 +8,4 @@
 //! other way around. Commands stay headless (no stdin/stdout prompts).
 
 pub mod onboarding;
+pub mod project;
