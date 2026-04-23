@@ -180,4 +180,54 @@ mod tests {
     // real command lands in W1 (needs a real TuiCtx → AppState). A pure-unit
     // test without TuiCtx would require a second trait, which is out of
     // scope for W0. Flagged in §7 open items.
+
+    /// W3.3 global test: CLI↔TUI parity.
+    ///
+    /// For every slash command that overlaps with a `syncvibe <subcommand>`,
+    /// assert:
+    ///  1. the slash name is present in `all()` (registry has it),
+    ///  2. the registry's `needs_arg()` matches the TUI expectation,
+    ///  3. the paired `cli::Command` variant still exists (compile-time check
+    ///     — the parity table constructs each variant by name, so removing
+    ///     or renaming a CLI subcommand breaks `cargo test`).
+    ///
+    /// If either side changes (slash ↔ CLI) without the other, this fails
+    /// loudly — which is exactly the guard spec §7.2 asks for.
+    #[test]
+    fn cli_tui_parity() {
+        use crate::cli::Command as CliCmd;
+        use std::collections::HashMap;
+
+        let registry: HashMap<&'static str, &'static dyn Command> =
+            all().iter().map(|c| (c.name(), *c)).collect();
+
+        // (slash_name, needs_arg, cli_variant_constructor).
+        // Closures embed the CLI variant name — compile breaks if a variant
+        // is renamed or removed upstream, forcing this table (and the
+        // matching slash command) to be updated in lockstep.
+        let checks: &[(&'static str, bool, fn() -> CliCmd)] = &[
+            ("/new",    false, || CliCmd::Init),
+            ("/invite", false, || CliCmd::Invite),
+            ("/leave",  false, || CliCmd::Leave),
+            ("/chats",  false, || CliCmd::Switch),
+            ("/join",   false, || CliCmd::Connect { code: String::new() }),
+        ];
+
+        for (slash, expect_needs_arg, cli_ctor) in checks {
+            let cmd = registry.get(slash).unwrap_or_else(|| {
+                panic!("slash '{slash}' missing from registry — CLI↔TUI parity broken")
+            });
+            assert_eq!(
+                cmd.needs_arg(),
+                *expect_needs_arg,
+                "needs_arg mismatch for '{slash}': registry={}, parity table={}",
+                cmd.needs_arg(),
+                *expect_needs_arg,
+            );
+            // Call the constructor so Rust actually monomorphises it and any
+            // rename in cli::Command surfaces as a compile error, not dead
+            // code that gets optimised away.
+            let _ = cli_ctor();
+        }
+    }
 }
