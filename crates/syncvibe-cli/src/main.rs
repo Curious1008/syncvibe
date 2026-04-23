@@ -13,6 +13,7 @@ mod onboarding;
 mod picker;
 mod session;
 mod sync;
+mod theme;
 mod tmux;
 mod tui;
 mod updates;
