@@ -354,7 +354,7 @@ fn launch_or_attach_with_agent(
 }
 
 /// Shell-escape a string by wrapping in single quotes and escaping embedded single quotes.
-fn shell_escape(s: &str) -> String {
+pub fn shell_escape(s: &str) -> String {
     if s.is_empty() {
         return "''".to_string();
     }
@@ -844,5 +844,48 @@ mod tests {
         let a = session_name_for("proj", "/home/user/a/proj");
         let b = session_name_for("proj", "/home/user/b/proj");
         assert_ne!(a, b, "Same name, different paths → different session names");
+    }
+
+    // ── shell_escape ──
+
+    #[test]
+    fn shell_escape_safe_path() {
+        assert_eq!(
+            shell_escape("/usr/local/bin/syncvibe"),
+            "/usr/local/bin/syncvibe"
+        );
+    }
+
+    #[test]
+    fn shell_escape_empty() {
+        assert_eq!(shell_escape(""), "''");
+    }
+
+    #[test]
+    fn shell_escape_spaces() {
+        assert_eq!(
+            shell_escape("/path with spaces/bin"),
+            "'/path with spaces/bin'"
+        );
+    }
+
+    #[test]
+    fn shell_escape_single_quotes() {
+        assert_eq!(shell_escape("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn shell_escape_injection_attempt() {
+        let malicious = "$(rm -rf /)";
+        let escaped = shell_escape(malicious);
+        assert!(escaped.starts_with('\''), "Should be single-quoted");
+        assert!(escaped.ends_with('\''), "Should be single-quoted");
+        assert_eq!(escaped, "'$(rm -rf /)'");
+    }
+
+    #[test]
+    fn shell_escape_backtick_injection() {
+        let escaped = shell_escape("`whoami`");
+        assert!(escaped.starts_with('\''));
     }
 }

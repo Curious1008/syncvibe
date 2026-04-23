@@ -77,8 +77,8 @@ impl Command for Watch {
             .unwrap_or_else(|_| "syncvibe".to_string());
         let shell_cmd = format!(
             "{} watch-render {}",
-            crate::app::shell_escape(&bin),
-            crate::app::shell_escape(&uid)
+            crate::tmux::shell_escape(&bin),
+            crate::tmux::shell_escape(&uid)
         );
 
         // Split agent pane — watch overlay. When watch-render exits, pane closes.

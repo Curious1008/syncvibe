@@ -852,21 +852,6 @@ pub(crate) fn copy_to_clipboard(text: &str) -> bool {
     child.wait().map(|s| s.success()).unwrap_or(false)
 }
 
-/// Shell-escape a string for safe use in tmux shell commands.
-pub(crate) fn shell_escape(s: &str) -> String {
-    if s.is_empty() {
-        return "''".to_string();
-    }
-    // If the string only contains safe chars, return as-is
-    if s.chars()
-        .all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '+' | ',' | '@'))
-    {
-        return s.to_string();
-    }
-    // Wrap in single quotes, escaping any embedded single quotes
-    format!("'{}'", s.replace('\'', "'\\''"))
-}
-
 /// Max lines allowed in a screen frame (prevents OOM from malicious frames).
 pub(crate) const MAX_SCREEN_LINES: usize = 500;
 
@@ -1546,50 +1531,6 @@ fn draw_ui(frame: &mut ratatui::Frame, state: &mut AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── shell_escape (C3) ──
-
-    #[test]
-    fn shell_escape_safe_path() {
-        assert_eq!(
-            shell_escape("/usr/local/bin/syncvibe"),
-            "/usr/local/bin/syncvibe"
-        );
-    }
-
-    #[test]
-    fn shell_escape_empty() {
-        assert_eq!(shell_escape(""), "''");
-    }
-
-    #[test]
-    fn shell_escape_spaces() {
-        assert_eq!(
-            shell_escape("/path with spaces/bin"),
-            "'/path with spaces/bin'"
-        );
-    }
-
-    #[test]
-    fn shell_escape_single_quotes() {
-        assert_eq!(shell_escape("it's"), "'it'\\''s'");
-    }
-
-    #[test]
-    fn shell_escape_injection_attempt() {
-        let malicious = "$(rm -rf /)";
-        let escaped = shell_escape(malicious);
-        // Should be wrapped in single quotes — shell won't interpret $() inside ''
-        assert!(escaped.starts_with('\''), "Should be single-quoted");
-        assert!(escaped.ends_with('\''), "Should be single-quoted");
-        assert_eq!(escaped, "'$(rm -rf /)'");
-    }
-
-    #[test]
-    fn shell_escape_backtick_injection() {
-        let escaped = shell_escape("`whoami`");
-        assert!(escaped.starts_with('\''));
-    }
 
     // ── UUID validation for /watch (C1) ──
 
