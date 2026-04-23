@@ -6,40 +6,26 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use syncvibe_core::protocol::PresenceInfo;
 
 use crate::agents;
+use crate::commands;
 use crate::components::util::parse_hex_color;
 use crate::theme::{SV_BORDER, SV_ELEVATED, SV_FG_DIM, SV_FG_MUTED};
 
-pub const COMMANDS: &[(&str, &str)] = &[
-    ("/help", "Show all commands"),
-    ("/invite", "Show invite code"),
-    ("/new", "Create a new room"),
-    ("/join", "Join with invite code"),
-    ("/chats", "Switch between rooms"),
-    ("/name", "Change display name (/name Alice)"),
-    ("/color", "Change chat color (#RRGGBB)"),
-    ("/mute", "Toggle notification bell"),
-    ("/share", "Toggle screen sharing"),
-    ("/watch", "Watch a shared screen"),
-    ("/remote", "Set or show git remote"),
-    ("/collab", "Manage repo collaborators"),
-    ("/leave", "Leave current room"),
-    ("/clear", "Clear chat view"),
-    ("/rc", "Reconnect to chat"),
-    ("/quit", "Exit SyncVibe"),
-];
-
 // ── Command autocomplete (/...) ──────────────────────────────────
+//
+// W3.1: the canonical command list is the registry in `commands::all()`.
+// No local const — name/description/needs_arg all come from the registered
+// `Command` trait impls so there is one source of truth.
 
-/// Returns indices into COMMANDS that match the current input.
+/// Returns indices into `commands::all()` that match the current input.
 pub fn filter(input: &str) -> Vec<usize> {
     if input.is_empty() || !input.starts_with('/') || input.contains(' ') {
         return Vec::new();
     }
     let input_lower = input.to_lowercase();
-    COMMANDS
+    commands::all()
         .iter()
         .enumerate()
-        .filter(|(_, (cmd, _))| cmd.starts_with(&input_lower))
+        .filter(|(_, c)| c.name().starts_with(&input_lower))
         .map(|(i, _)| i)
         .collect()
 }
@@ -59,11 +45,13 @@ pub fn draw(frame: &mut ratatui::Frame, anchor: Rect, input: &str, selected: usi
 
     let popup_rect = Rect::new(popup_x, popup_y, popup_width, popup_height);
 
+    let registry = commands::all();
     let lines: Vec<Line> = matches
         .iter()
         .enumerate()
         .map(|(i, &cmd_idx)| {
-            let (cmd, desc) = COMMANDS[cmd_idx];
+            let c = registry[cmd_idx];
+            let (cmd, desc) = (c.name(), c.description());
             let is_selected = i == selected % matches.len();
             let style = if is_selected {
                 Style::default().bg(SV_ELEVATED)
@@ -249,4 +237,53 @@ pub fn draw_mentions(
     let popup = Paragraph::new(lines).block(block);
     frame.render_widget(Clear, popup_rect);
     frame.render_widget(popup, popup_rect);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// W3.1 guard: autocomplete list is derived from `commands::all()`. If a
+    /// hardcoded list sneaks back, this fails because `/` stops matching every
+    /// registered command.
+    #[test]
+    fn filter_matches_every_registered_command_on_slash() {
+        let all = filter("/");
+        assert_eq!(all.len(), commands::all().len());
+        for &i in &all {
+            assert!(i < commands::all().len());
+        }
+    }
+
+    #[test]
+    fn filter_prefix_narrows_to_registry_entry() {
+        let matches = filter("/na");
+        assert_eq!(matches.len(), 1);
+        assert_eq!(commands::all()[matches[0]].name(), "/name");
+    }
+
+    #[test]
+    fn filter_rejects_non_slash_and_whitespace_inputs() {
+        assert!(filter("").is_empty());
+        assert!(filter("hello").is_empty());
+        assert!(filter("/na me").is_empty());
+    }
+
+    /// W3.2 guard: commands that require an argument must declare it in the
+    /// registry. If a registry entry stops reporting `needs_arg = true`, the
+    /// autocomplete UX regresses (Tab fires immediately instead of waiting).
+    #[test]
+    fn needs_arg_commands_are_declared_in_registry() {
+        let need_arg: Vec<&str> = commands::all()
+            .iter()
+            .filter(|c| c.needs_arg())
+            .map(|c| c.name())
+            .collect();
+        // /name and /color take a literal argument after the slash; /join is
+        // a flag-flip and intentionally does NOT need an arg — it launches
+        // the interactive join menu regardless of trailing input.
+        assert!(need_arg.contains(&"/name"));
+        assert!(need_arg.contains(&"/color"));
+        assert!(!need_arg.contains(&"/join"));
+    }
 }

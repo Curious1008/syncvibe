@@ -2287,7 +2287,7 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
                         // else: cursor at @ position, skip completion
                     } else {
                         let idx = state.autocomplete_idx.min(cmd_matches.len() - 1);
-                        let (cmd, _) = components::autocomplete::COMMANDS[cmd_matches[idx]];
+                        let cmd = crate::commands::all()[cmd_matches[idx]].name();
                         state.input_buffer = format!("{} ", cmd);
                         state.input_cursor = state.input_buffer.chars().count();
                     }
@@ -2318,9 +2318,12 @@ fn handle_key_event(state: &mut AppState, key: KeyEvent) -> Result<()> {
                         state.autocomplete_idx = 0;
                     } else if cmd_active {
                         let idx = state.autocomplete_idx.min(cmd_matches.len() - 1);
-                        let (cmd, _) = components::autocomplete::COMMANDS[cmd_matches[idx]];
-                        // Commands that take args: just complete, don't send yet
-                        let needs_arg = matches!(cmd, "/name" | "/color" | "/join");
+                        let c = crate::commands::all()[cmd_matches[idx]];
+                        let cmd = c.name();
+                        // Commands that take args: just complete, don't send yet.
+                        // W3.2: source of truth is `Command::needs_arg()` in the
+                        // registry — no more hardcoded match here.
+                        let needs_arg = c.needs_arg();
                         if needs_arg {
                             state.input_buffer = format!("{} ", cmd);
                             state.input_cursor = state.input_buffer.chars().count();
