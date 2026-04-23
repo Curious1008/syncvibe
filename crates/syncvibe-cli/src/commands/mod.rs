@@ -230,4 +230,39 @@ mod tests {
             let _ = cli_ctor();
         }
     }
+
+    /// W3.2 global guard: autocomplete's `needs_arg` decision must flow through
+    /// `Command::needs_arg()`, never a hardcoded string match in `app.rs`.
+    ///
+    /// Source-level check: `app.rs` must reference `c.needs_arg()` (the trait
+    /// call) and must NOT contain legacy patterns like `matches!(cmd, "/name"
+    /// | "/color")` or `["/name", "/color"].contains(&cmd)`. If someone
+    /// reintroduces a hardcoded list, this test fails before the divergence
+    /// can ship.
+    #[test]
+    fn needs_arg_autocomplete_parity() {
+        let app_rs = include_str!("../app.rs");
+
+        assert!(
+            app_rs.contains("c.needs_arg()"),
+            "app.rs no longer delegates to Command::needs_arg() — autocomplete \
+             regressed to a hardcoded list"
+        );
+
+        // Patterns that would indicate a hardcoded list snuck back in.
+        // Each entry is (substring, reason).
+        let forbidden: &[(&str, &str)] = &[
+            (r#""/name" | "/color""#, "literal match arm for /name|/color"),
+            (r#""/color" | "/name""#, "literal match arm (reversed)"),
+            (r#"["/name", "/color"]"#, "literal array of arg-taking commands"),
+            (r#"["/color", "/name"]"#, "literal array (reversed)"),
+        ];
+        for (needle, reason) in forbidden {
+            assert!(
+                !app_rs.contains(needle),
+                "app.rs contains forbidden pattern ({reason}): `{needle}` — \
+                 drive from Command::needs_arg() instead"
+            );
+        }
+    }
 }
