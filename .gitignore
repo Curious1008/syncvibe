@@ -23,3 +23,7 @@ Thumbs.db
 # Claude Code local state
 .claude/
 CLAUDE.md
+
+# Internal / local-only docs (never pushed to public repo)
+POSITIONING.md
+docs/plans/
