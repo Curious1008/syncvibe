@@ -1818,66 +1818,11 @@ fn handle_join_project() -> bool {
 
 /// Handle /leave command: confirm, remove from registry + Supabase, delete .syncvibe/, exit TUI.
 fn handle_leave_room(storage: &syncvibe_core::storage::Storage) -> bool {
-    use crate::onboarding::{
-        confirm_destructive, print_section, B, DIM, GREEN, R, RED, TEAL, YELLOW,
-    };
-
-    let project_name = crate::git::ops::repo_name().unwrap_or_else(|_| "project".to_string());
-    let room = match storage.read_room_config() {
-        Ok(r) => r,
-        Err(_) => {
-            println!("  {DIM}No room config found.{R}");
-            return false;
-        }
-    };
-
-    println!();
-    print_section("Leave Room");
-    println!();
-    println!("  {YELLOW}!{R} Without an invite code you won't be able to rejoin.");
-    println!("  {YELLOW}!{R} If all members leave, the room will be closed.");
-    println!();
-    println!("  {DIM}Will be removed:{R} room config, chat history, shared images");
-    println!("  {DIM}Will be kept:{R}    your project code files");
-    println!();
-    println!("  {RED}Chat history will be permanently deleted and cannot be recovered.{R}");
-    println!();
-
-    match confirm_destructive(&format!("  {TEAL}◆{R} Leave {B}{project_name}{R}?")) {
-        Ok(true) => {}
-        _ => {
-            println!("  {DIM}Cancelled.{R}");
-            return false;
-        }
-    }
-
-    // Remove from local registry
-    let project_path = storage
-        .project_root()
-        .canonicalize()
-        .unwrap_or_else(|_| storage.project_root().to_path_buf())
-        .to_string_lossy()
-        .to_string();
-    if let Ok(mut registry) = config::load_registry() {
-        registry.projects.retain(|p| p.path != project_path);
-        let _ = config::save_registry(&registry);
-    }
-
-    // Remove from Supabase (synchronous to capture remaining count)
-    let remaining = if config::is_authenticated() {
-        crate::sync::leave_room_remote(&room.room_id)
-    } else {
-        None
-    };
-
-    // Delete .syncvibe/ directory (preserves project code files)
-    let _ = std::fs::remove_dir_all(storage.root());
-
-    println!("  {GREEN}✓{R} Left {B}{project_name}{R}");
-    if remaining == Some(0) {
-        println!("  {DIM}Room closed — no remaining members.{R}");
-    }
-    true
+    // W3.5: delegate to `commands::leave::leave_current_room` so CLI and TUI
+    // share one interactive flow. `Err` here means registry write failed; the
+    // TUI shouldn't crash for that, so we treat any error as "not left" and
+    // keep the dashboard alive.
+    crate::commands::leave::leave_current_room(storage).unwrap_or(false)
 }
 
 fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
