@@ -668,14 +668,7 @@ impl AppState {
             }
             // `/mute` ported to commands::mute (W2). See commands/mod.rs registry.
             // `/clear` ported to commands::clear (W1). See commands/mod.rs registry.
-            "/rc" | "/reconnect" => {
-                if self.is_online {
-                    self.toast("Already connected");
-                } else {
-                    self.toast("Reconnecting...");
-                    self.want_reconnect = true;
-                }
-            }
+            // `/rc` ported to commands::rc (W2). See commands/mod.rs registry.
             "/remote" => {
                 if arg.is_empty() {
                     // Show current git remote info
