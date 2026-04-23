@@ -624,41 +624,7 @@ impl AppState {
             // `/mute` ported to commands::mute (W2). See commands/mod.rs registry.
             // `/clear` ported to commands::clear (W1). See commands/mod.rs registry.
             // `/rc` ported to commands::rc (W2). See commands/mod.rs registry.
-            "/remote" => {
-                if arg.is_empty() {
-                    // Show current git remote info
-                    let room_remote = self
-                        .storage
-                        .read_room_config()
-                        .ok()
-                        .and_then(|r| r.git_remote);
-                    let actual_remote =
-                        crate::git::ops::get_git_remote_in(self.storage.project_root());
-                    match (&room_remote, &actual_remote) {
-                        (Some(r), _) => self.system_msg(&format!("Remote: {}", r)),
-                        (None, Some(a)) => {
-                            self.system_msg(&format!("Git remote: {} (not in room config)", a))
-                        }
-                        (None, None) => self
-                            .system_msg("No git remote configured. Use /remote <url> to set one."),
-                    }
-                } else {
-                    let url = arg.to_string();
-                    if !url.starts_with("https://") && !url.starts_with("git@") {
-                        self.system_msg("URL must start with https:// or git@");
-                        return true;
-                    }
-                    // Set git remote on disk
-                    let project_root = self.storage.project_root().to_path_buf();
-                    let _ = crate::git::ops::set_git_remote(&project_root, &url);
-                    // Update room config
-                    if let Ok(mut room) = self.storage.read_room_config() {
-                        room.git_remote = Some(url.clone());
-                        let _ = self.storage.write_room_config(&room);
-                    }
-                    self.system_msg(&format!("✓ Remote set: {}", url));
-                }
-            }
+            // `/remote` ported to commands::remote (W2). See commands/mod.rs registry.
             "/collab" => {
                 let remote = self
                     .storage

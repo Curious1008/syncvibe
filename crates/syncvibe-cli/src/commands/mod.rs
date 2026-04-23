@@ -22,6 +22,7 @@ pub mod mute;
 pub mod name;
 pub mod quit;
 pub mod rc;
+pub mod remote;
 pub mod share;
 
 #[cfg(test)]
@@ -95,6 +96,7 @@ register_commands! {
     chats::Chats,
     help::Help,
     color::Color,
+    remote::Remote,
 }
 
 /// Called first by `app.rs::handle_command`. Returns `true` if `cmd_name`
@@ -145,7 +147,7 @@ mod tests {
             names,
             vec![
                 "/name", "/clear", "/share", "/quit", "/mute", "/rc", "/chats", "/help",
-                "/color",
+                "/color", "/remote",
             ]
         );
     }
