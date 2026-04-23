@@ -572,43 +572,7 @@ impl AppState {
 
         match cmd {
             // `/help` ported to commands::help (W2). See commands/mod.rs registry.
-            "/invite" | "/i" => match self.storage.read_room_config() {
-                Ok(mut room) => {
-                    // Refresh git_remote — user may have added a remote after room creation
-                    if let Some(detected) =
-                        crate::git::ops::get_git_remote_in(self.storage.project_root())
-                    {
-                        if room.git_remote.as_deref() != Some(&detected) {
-                            room.git_remote = Some(detected);
-                            let _ = self.storage.write_room_config(&room);
-                        }
-                    }
-                    let code = crate::invite::create_short_invite(&room)
-                        .or_else(|_| room.to_invite_code().map_err(|e| anyhow::anyhow!(e)));
-                    match code {
-                        Ok(code) => {
-                            let msg = crate::invite::share_message(
-                                &code,
-                                &self.user.profile.name,
-                                room.room_name.as_deref(),
-                            );
-                            if copy_to_clipboard(&msg) {
-                                self.system_msg(&format!("Invite copied: {}", code));
-                            } else {
-                                let path = self.storage.root().join("invite.txt");
-                                let _ = std::fs::write(&path, &msg);
-                                self.system_msg(&format!("Invite saved to {}", path.display()));
-                            }
-                        }
-                        Err(e) => {
-                            self.system_msg(&format!("Could not generate invite code: {e}"));
-                        }
-                    }
-                }
-                Err(_) => {
-                    self.system_msg("No room config found.");
-                }
-            },
+            // `/invite` ported to commands::invite (W2). See commands/mod.rs registry.
             // `/chats` ported to commands::chats (W2). See commands/mod.rs registry.
             "/new" | "/n" => {
                 self.want_new_project = true;
@@ -965,7 +929,7 @@ fn open_file(path: &std::path::Path) {
 }
 
 /// Copy text to system clipboard. Returns true on success.
-fn copy_to_clipboard(text: &str) -> bool {
+pub(crate) fn copy_to_clipboard(text: &str) -> bool {
     use std::io::Write;
     #[cfg(target_os = "macos")]
     let mut child = match std::process::Command::new("pbcopy")

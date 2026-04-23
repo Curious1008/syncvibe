@@ -19,6 +19,7 @@ pub mod clear;
 pub mod collab;
 pub mod color;
 pub mod help;
+pub mod invite;
 pub mod mute;
 pub mod name;
 pub mod quit;
@@ -99,6 +100,7 @@ register_commands! {
     color::Color,
     remote::Remote,
     collab::Collab,
+    invite::Invite,
 }
 
 /// Called first by `app.rs::handle_command`. Returns `true` if `cmd_name`
@@ -149,7 +151,7 @@ mod tests {
             names,
             vec![
                 "/name", "/clear", "/share", "/quit", "/mute", "/rc", "/chats", "/help",
-                "/color", "/remote", "/collab",
+                "/color", "/remote", "/collab", "/invite",
             ]
         );
     }
