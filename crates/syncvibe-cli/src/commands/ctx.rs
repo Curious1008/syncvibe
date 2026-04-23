@@ -6,6 +6,7 @@
 //! needs it — no speculative growth).
 
 use anyhow::Result;
+use syncvibe_core::protocol::WsMessage;
 
 /// Monotonic clock abstraction. Production: `SystemClock`. Tests: fake clock
 /// via `test_support::with_clock(ms)`.
@@ -49,8 +50,13 @@ pub trait RemoteApi: Send + Sync {
 /// (2026-04-23)".
 ///
 /// Scope guardrail: exactly ONE impl in v3.2. No IRC work in this refactor.
+///
+/// W1 note: `send` takes an owned `WsMessage` to match the existing
+/// `WsClient::send` shape. Production impl fires and forgets via
+/// `tokio::spawn`; test impl captures synchronously into a `Vec<WsMessage>`
+/// for per-variant assertions.
 pub trait WsTransport: Send + Sync {
-    fn send_text(&self, room_code: &str, payload: &str) -> Result<()>;
+    fn send(&self, msg: WsMessage) -> Result<()>;
     fn close(&self) -> Result<()>;
 }
 
@@ -65,6 +71,7 @@ pub struct CmdCtx<'a> {
     pub clock: &'a dyn Clock,
     pub git: &'a dyn GitOps,
     pub remote: &'a dyn RemoteApi,
+    pub ws: &'a dyn WsTransport,
 }
 
 impl<'a> CmdCtx<'a> {

@@ -228,6 +228,76 @@ impl AppState {
         self.unread_below = 0;
     }
 
+    // ------------------------------------------------------------------
+    // W1 command-side mutation helpers.
+    //
+    // These encapsulate the in-place state changes that `commands/` needs
+    // so `TuiCtx` can expose high-level verbs without leaking AppState
+    // internals. Each is a direct lift of the corresponding pre-refactor
+    // match arm; no behavior change. The WsMessage broadcast side lives
+    // in TuiCtx (so it can route through the WsTransport seam for tests).
+    // ------------------------------------------------------------------
+
+    /// Validate + apply a new display name. Returns the sanitized name on
+    /// success, or an `Err` with the human-readable rejection reason
+    /// (caller surfaces via `system_msg`). Also updates the local presence
+    /// entry and persists the user config.
+    ///
+    /// Mirrors the pre-refactor arm at the former location in
+    /// `handle_command("/name", ...)`.
+    pub(crate) fn apply_set_display_name(&mut self, raw: &str) -> anyhow::Result<String> {
+        if raw.is_empty() {
+            anyhow::bail!("Name: {}", self.user.profile.name);
+        }
+        let new_name = crate::onboarding::sanitize_name(raw);
+        if new_name.is_empty() {
+            anyhow::bail!("Name cannot be empty.");
+        }
+        if crate::onboarding::is_reserved_name(&new_name) {
+            anyhow::bail!("That name is reserved for the AI agent.");
+        }
+        self.user.profile.name = new_name.clone();
+        if let Some(p) = self
+            .presence
+            .iter_mut()
+            .find(|p| p.user_id == self.user.profile.user_id)
+        {
+            p.user_name = new_name.clone();
+        }
+        let _ = config::save_user_config(&self.user);
+        Ok(new_name)
+    }
+
+    /// Atomic wipe: chat panes, dedupe set, line-count cache, selection.
+    pub(crate) fn apply_clear_chat_state(&mut self) {
+        self.chat_messages.clear();
+        self.older_messages.clear();
+        self.msg_id_set.clear();
+        self.line_count_cache.clear();
+        self.deselect_chat();
+    }
+
+    /// Flip sharing on. Clears the snapshot + pane cache. Returns
+    /// `(user_id, user_name)` so the caller can emit the ws message.
+    pub(crate) fn apply_start_share(&mut self) -> (String, String) {
+        self.sharing_screen = true;
+        self.last_screen_snapshot.clear();
+        self.cached_agent_pane = None;
+        (
+            self.user.profile.user_id.clone(),
+            self.user.profile.name.clone(),
+        )
+    }
+
+    /// Flip sharing off. Clears the snapshot + pane cache. Returns
+    /// `user_id` so the caller can emit the ws message.
+    pub(crate) fn apply_stop_share(&mut self) -> String {
+        self.sharing_screen = false;
+        self.last_screen_snapshot.clear();
+        self.cached_agent_pane = None;
+        self.user.profile.user_id.clone()
+    }
+
     fn is_selectable(msg: &ChatMessage) -> bool {
         matches!(
             msg.message_type,
@@ -556,31 +626,7 @@ impl AppState {
             "/leave" => {
                 self.want_leave = true;
             }
-            "/name" => {
-                if arg.is_empty() {
-                    self.system_msg(&format!("Name: {}", self.user.profile.name));
-                    return true;
-                }
-                let new_name = crate::onboarding::sanitize_name(arg);
-                if new_name.is_empty() {
-                    self.system_msg("Name cannot be empty.");
-                    return true;
-                }
-                if crate::onboarding::is_reserved_name(&new_name) {
-                    self.system_msg("That name is reserved for the AI agent.");
-                    return true;
-                }
-                self.user.profile.name = new_name.clone();
-                if let Some(p) = self
-                    .presence
-                    .iter_mut()
-                    .find(|p| p.user_id == self.user.profile.user_id)
-                {
-                    p.user_name = new_name.clone();
-                }
-                let _ = config::save_user_config(&self.user);
-                self.system_msg(&format!("Name changed to {}", new_name));
-            }
+            // `/name` ported to commands::name (W1). See commands/mod.rs registry.
             "/color" => {
                 if arg.is_empty() {
                     self.system_msg(&format!("Color: {}", self.user.profile.color));
@@ -614,13 +660,7 @@ impl AppState {
                     self.system_msg("Notifications unmuted");
                 }
             }
-            "/clear" => {
-                self.chat_messages.clear();
-                self.older_messages.clear();
-                self.msg_id_set.clear();
-                self.line_count_cache.clear();
-                self.deselect_chat();
-            }
+            // `/clear` ported to commands::clear (W1). See commands/mod.rs registry.
             "/rc" | "/reconnect" => {
                 if self.is_online {
                     self.toast("Already connected");
@@ -699,39 +739,7 @@ impl AppState {
                     }
                 }
             }
-            "/share" => {
-                if !self.in_tmux {
-                    self.toast_err("Screen sharing requires tmux");
-                    return true;
-                }
-                if self.sharing_screen {
-                    self.sharing_screen = false;
-                    self.last_screen_snapshot.clear();
-                    self.cached_agent_pane = None;
-                    if let Some(ws) = self.ws_client.clone() {
-                        let uid = self.user.profile.user_id.clone();
-                        tokio::spawn(async move {
-                            let _ = ws.send(WsMessage::ScreenShareStop { user_id: uid }).await;
-                        });
-                    }
-                    self.toast("Screen sharing stopped");
-                } else {
-                    self.sharing_screen = true;
-                    if let Some(ws) = self.ws_client.clone() {
-                        let uid = self.user.profile.user_id.clone();
-                        let uname = self.user.profile.name.clone();
-                        tokio::spawn(async move {
-                            let _ = ws
-                                .send(WsMessage::ScreenShareStart {
-                                    user_id: uid,
-                                    user_name: uname,
-                                })
-                                .await;
-                        });
-                    }
-                    self.toast("Screen sharing started — /share to stop");
-                }
-            }
+            // `/share` ported to commands::share (W1). See commands/mod.rs registry.
             "/watch" => {
                 // Toggle off — if already watching, kill the watch pane
                 if let Some(ref pane_id) = self.watching_pane_id {

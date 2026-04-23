@@ -9,8 +9,14 @@
 //! Contract frozen in docs/plans/2026-04-23-refactor-spec-v3.2.md §4. Any
 //! deviation from that spec gets flagged at review.
 
+pub mod adapters;
 pub mod ctx;
 pub mod tui_ctx;
+
+// First wave of ported commands. One module per command file.
+pub mod clear;
+pub mod name;
+pub mod share;
 
 #[cfg(test)]
 pub mod test_support;
@@ -53,16 +59,30 @@ pub trait Command: Sync {
     }
 }
 
-/// The dispatch table. Today empty — W1 adds `/name`, `/clear`, `/share`;
-/// W2 adds the remaining 13. W3 expectation: this replaces the 360-line
-/// inline match in `app.rs::handle_command`.
+/// Declarative registration for the command table. Each `$module::$type`
+/// pair is a unit struct implementing `Command` in `commands/<module>.rs`.
+/// Unit structs are zero-sized, so `&$type` is rvalue-static-promoted into
+/// the returned `'static` slice at compile time — no heap, no init-order
+/// concerns, no global mutable state.
 ///
-/// Returned as a `'static` slice so iteration is zero-alloc and the set is
-/// immutable by construction.
-pub fn all() -> &'static [&'static dyn Command] {
-    // TODO(W1): register_commands! macro expansion lands here alongside the
-    // first real command port (spec §4.4).
-    &[]
+/// Adding a new command is a 3-line change: create the module file, add the
+/// `pub mod` declaration above, add the pair here. Spec §4.4.
+macro_rules! register_commands {
+    ($( $module:ident :: $type:ident ),* $(,)?) => {
+        pub fn all() -> &'static [&'static dyn Command] {
+            static REGISTRY: &[&dyn Command] = &[
+                $( &$module::$type as &dyn Command, )*
+            ];
+            REGISTRY
+        }
+    };
+}
+
+// Wave 1 pilot set: /name, /clear, /share. Wave 2 extends this list.
+register_commands! {
+    name::Name,
+    clear::Clear,
+    share::Share,
 }
 
 /// Called first by `app.rs::handle_command`. Returns `true` if `cmd_name`
@@ -104,11 +124,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registry_is_empty_in_wave_0() {
+    fn registry_matches_wave_1_set() {
         // Guard: if this fails, someone registered a command without also
-        // updating the legacy removal side of the Strangler Fig. Check that
-        // every registered command has its arm deleted from app.rs match.
-        assert_eq!(all().len(), 0);
+        // updating the legacy removal side of the Strangler Fig. Every name
+        // listed here MUST have its arm deleted from `app.rs::handle_command`.
+        let names: Vec<&'static str> = all().iter().map(|c| c.name()).collect();
+        assert_eq!(names, vec!["/name", "/clear", "/share"]);
+    }
+
+    #[test]
+    fn registry_has_no_duplicate_names_or_aliases() {
+        let mut seen: std::collections::HashSet<&'static str> = Default::default();
+        for cmd in all() {
+            assert!(seen.insert(cmd.name()), "duplicate command name: {}", cmd.name());
+            for alias in cmd.aliases() {
+                assert!(seen.insert(alias), "alias collision: {alias}");
+            }
+        }
     }
 
     // Panic / error dispatch are covered in integration form once the first

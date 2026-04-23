@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 use syncvibe_core::models::UserConfig;
 
 fn config_dir() -> Result<PathBuf> {
+    if let Ok(p) = std::env::var("SYNCVIBE_CONFIG_DIR") {
+        return Ok(PathBuf::from(p));
+    }
     Ok(dirs::home_dir()
         .context("Could not find home directory")?
         .join(".syncvibe"))

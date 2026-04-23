@@ -27,6 +27,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
+use syncvibe_core::protocol::WsMessage;
+
 use super::ctx::{Clock, CmdCtx, GitOps, RemoteApi, WsTransport};
 
 // -- fakes -------------------------------------------------------------------
@@ -51,11 +53,11 @@ impl RemoteApi for NoopRemoteApi {
     fn leave_room(&self, _room_code: &str, _user_id: &str) -> Result<()> { Ok(()) }
 }
 
-/// Records every `send_text` call so tests can assert on payloads without
-/// running a real WS loop. Thread-safe via `Arc<Mutex<_>>` is overkill here
-/// (tests are single-threaded); RefCell is enough and cheaper.
+/// Records every `send` call so tests can assert on WsMessage variants
+/// without running a real WS loop. Thread-safe via `Arc<Mutex<_>>` is overkill
+/// here (tests are single-threaded); RefCell is enough and cheaper.
 pub struct CapturingWs {
-    pub sent: RefCell<Vec<(String, String)>>, // (room_code, payload)
+    pub sent: RefCell<Vec<WsMessage>>,
     pub closed: RefCell<bool>,
 }
 
@@ -76,8 +78,8 @@ unsafe impl Send for CapturingWs {}
 unsafe impl Sync for CapturingWs {}
 
 impl WsTransport for CapturingWs {
-    fn send_text(&self, room_code: &str, payload: &str) -> Result<()> {
-        self.sent.borrow_mut().push((room_code.to_string(), payload.to_string()));
+    fn send(&self, msg: WsMessage) -> Result<()> {
+        self.sent.borrow_mut().push(msg);
         Ok(())
     }
     fn close(&self) -> Result<()> {
@@ -88,7 +90,7 @@ impl WsTransport for CapturingWs {
 
 pub struct NoopWs;
 impl WsTransport for NoopWs {
-    fn send_text(&self, _room_code: &str, _payload: &str) -> Result<()> { Ok(()) }
+    fn send(&self, _msg: WsMessage) -> Result<()> { Ok(()) }
     fn close(&self) -> Result<()> { Ok(()) }
 }
 
@@ -121,7 +123,7 @@ impl MockCtxBuilder {
         // the test retains a handle via its own Arc to inspect `sent`.
         struct ArcWs(Arc<CapturingWs>);
         impl WsTransport for ArcWs {
-            fn send_text(&self, r: &str, p: &str) -> Result<()> { self.0.send_text(r, p) }
+            fn send(&self, msg: WsMessage) -> Result<()> { self.0.send(msg) }
             fn close(&self) -> Result<()> { self.0.close() }
         }
         self.ws = Box::new(ArcWs(ws));
@@ -138,7 +140,7 @@ impl MockCtxBuilder {
             clock: self.clock,
             git: self.git,
             remote: self.remote,
-            _ws: self.ws,
+            ws: self.ws,
         }
     }
 }
@@ -149,7 +151,7 @@ pub struct MockCtx {
     clock: Box<dyn Clock>,
     git: Box<dyn GitOps>,
     remote: Box<dyn RemoteApi>,
-    _ws: Box<dyn WsTransport>,
+    ws: Box<dyn WsTransport>,
 }
 
 impl MockCtx {
@@ -158,8 +160,47 @@ impl MockCtx {
             clock: &*self.clock,
             git: &*self.git,
             remote: &*self.remote,
+            ws: &*self.ws,
         }
     }
+}
+
+// -- app state harness -------------------------------------------------------
+
+/// Build a fresh `AppState` backed by a fresh TempDir. Caller must hold onto
+/// the `TempDir` for the lifetime of the `AppState` — `Storage` stores a
+/// `PathBuf` into the temp directory, and dropping the TempDir invalidates it.
+///
+/// Side effects:
+/// - sets `SYNCVIBE_CONFIG_DIR` env var to the TempDir so `config::save_user_config`
+///   writes to an ephemeral location instead of the user's real `~/.syncvibe/`.
+///   (Parallel tests share this env var. Since assertions never read back from
+///   disk, and errors are swallowed by `let _ =` at call sites, races are
+///   tolerable — last writer wins, but no test depends on the write.)
+/// - creates `.syncvibe/` directory layout via `Storage::init`
+///
+/// Returns `(TempDir, AppState)`. Keep the TempDir alive:
+/// ```ignore
+/// let (_tmp, mut state) = mk_app_state();
+/// ```
+pub fn mk_app_state() -> (tempfile::TempDir, crate::app::AppState) {
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    // Isolate config writes to the TempDir.
+    std::env::set_var("SYNCVIBE_CONFIG_DIR", tmp.path());
+    let storage = syncvibe_core::storage::Storage::init(tmp.path())
+        .expect("init .syncvibe/ in temp dir");
+    let user = syncvibe_core::models::UserConfig {
+        profile: syncvibe_core::models::UserProfile {
+            name: "Alice".to_string(),
+            color: "#4ECDC4".to_string(),
+            user_id: "u1".to_string(),
+        },
+        account: None,
+        shown_community: false,
+        retention_days: 90,
+    };
+    let state = crate::app::AppState::new(storage, user).expect("build AppState");
+    (tmp, state)
 }
 
 #[cfg(test)]
@@ -187,10 +228,15 @@ mod tests {
         // The CapturingWs is owned inside `m` via ArcWs wrapper; original
         // Arc is still usable for assertion.
         let _ = m; // keep alive
-        ws.send_text("ABCD-1234", "hello").unwrap();
+        ws.send(WsMessage::ScreenShareStop {
+            user_id: "u1".to_string(),
+        })
+        .unwrap();
         let sent = ws.sent.borrow();
         assert_eq!(sent.len(), 1);
-        assert_eq!(sent[0].0, "ABCD-1234");
-        assert_eq!(sent[0].1, "hello");
+        match &sent[0] {
+            WsMessage::ScreenShareStop { user_id } => assert_eq!(user_id, "u1"),
+            other => panic!("unexpected variant: {other:?}"),
+        }
     }
 }
