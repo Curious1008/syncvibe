@@ -7,6 +7,7 @@ use syncvibe_core::protocol::PresenceInfo;
 
 use crate::agents;
 use crate::components::util::parse_hex_color;
+use crate::theme::{SV_BORDER, SV_ELEVATED, SV_FG_DIM, SV_FG_MUTED};
 
 pub const COMMANDS: &[(&str, &str)] = &[
     ("/help", "Show all commands"),
@@ -65,7 +66,7 @@ pub fn draw(frame: &mut ratatui::Frame, anchor: Rect, input: &str, selected: usi
             let (cmd, desc) = COMMANDS[cmd_idx];
             let is_selected = i == selected % matches.len();
             let style = if is_selected {
-                Style::default().bg(Color::Rgb(50, 55, 70))
+                Style::default().bg(SV_ELEVATED)
             } else {
                 Style::default()
             };
@@ -92,8 +93,8 @@ pub fn draw(frame: &mut ratatui::Frame, anchor: Rect, input: &str, selected: usi
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" Commands ")
-        .border_style(Style::default().fg(Color::Rgb(60, 60, 70)))
-        .style(Style::default().bg(Color::Rgb(30, 30, 40)));
+        .border_style(Style::default().fg(SV_BORDER))
+        .style(Style::default().bg(SV_ELEVATED));
 
     let popup = Paragraph::new(lines).block(block);
     frame.render_widget(Clear, popup_rect);
@@ -212,7 +213,7 @@ pub fn draw_mentions(
             let item = &mentions[idx];
             let is_selected = i == selected % matches.len();
             let bg = if is_selected {
-                Style::default().bg(Color::Rgb(50, 55, 70))
+                Style::default().bg(SV_ELEVATED)
             } else {
                 Style::default()
             };
@@ -223,7 +224,7 @@ pub fn draw_mentions(
                     bg.fg(if is_selected {
                         Color::White
                     } else {
-                        Color::Rgb(200, 200, 210)
+                        SV_FG_MUTED
                     })
                     .add_modifier(if is_selected {
                         Modifier::BOLD
@@ -238,12 +239,12 @@ pub fn draw_mentions(
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Rgb(60, 60, 70)))
+        .border_style(Style::default().fg(SV_BORDER))
         .title(ratatui::text::Span::styled(
             " Mentions ",
-            Style::default().fg(Color::Rgb(100, 100, 115)),
+            Style::default().fg(SV_FG_DIM),
         ))
-        .style(Style::default().bg(Color::Rgb(30, 30, 40)));
+        .style(Style::default().bg(SV_ELEVATED));
 
     let popup = Paragraph::new(lines).block(block);
     frame.render_widget(Clear, popup_rect);

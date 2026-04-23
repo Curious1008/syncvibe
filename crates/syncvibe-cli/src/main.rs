@@ -117,12 +117,9 @@ fn cmd_join(name: Option<String>, color: Option<String>) -> Result<()> {
         }
     };
 
-    let colors = [
-        "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEAA7", "#DDA0DD", "#98D8C8", "#F7DC6F",
-    ];
     let color = color.unwrap_or_else(|| {
         let hash: usize = name.bytes().map(|b| b as usize).sum();
-        colors[hash % colors.len()].to_string()
+        theme::USER_PALETTE[hash % theme::USER_PALETTE.len()].to_string()
     });
 
     let name = onboarding::sanitize_name(&name);

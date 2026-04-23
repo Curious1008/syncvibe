@@ -9,6 +9,7 @@ use syncvibe_core::models::{ChatMessage, MessageType};
 
 use crate::app::{AppState, Panel};
 use crate::components::util::{parse_hex_color, truncate_str};
+use crate::theme::{SV_ELEVATED, SV_FG_DIM, SV_FG_MUTED, SV_SURFACE};
 
 /// Parse message content into spans, highlighting @mentions.
 fn parse_mentions(content: &str, default_style: Style) -> Vec<Span<'static>> {
@@ -249,7 +250,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
             label,
             Style::default()
                 .fg(Color::White)
-                .bg(Color::Rgb(30, 100, 160))
+                .bg(SV_SURFACE)
                 .add_modifier(Modifier::BOLD),
         )));
     }
@@ -294,7 +295,7 @@ fn estimate_lines(msg: &ChatMessage, width: usize) -> usize {
 fn format_message(msg: &ChatMessage, selected: bool, grouped: bool) -> Vec<Line<'static>> {
     let prefix = if selected { "▸" } else { " " };
     let sel_style = Style::default()
-        .bg(Color::Rgb(20, 40, 60))
+        .bg(SV_ELEVATED)
         .add_modifier(Modifier::BOLD);
 
     let mut result: Vec<Line> = Vec::new();
@@ -304,7 +305,7 @@ fn format_message(msg: &ChatMessage, selected: bool, grouped: bool) -> Vec<Line<
         let truncated = truncate_str(&q.content, 57);
         let mut quote_line = Line::from(Span::styled(
             format!("{}        ↩ {}: {}", prefix, q.user_name, truncated),
-            Style::default().fg(Color::Rgb(100, 100, 120)),
+            Style::default().fg(SV_FG_DIM),
         ));
         if selected {
             quote_line = quote_line.style(sel_style);
@@ -378,7 +379,7 @@ fn format_message(msg: &ChatMessage, selected: bool, grouped: bool) -> Vec<Line<
             )),
             MessageType::Tip => Line::from(Span::styled(
                 format!("{}   {}", prefix, msg.content),
-                Style::default().fg(Color::Rgb(100, 120, 130)),
+                Style::default().fg(SV_FG_MUTED),
             )),
             MessageType::Unknown => Line::from(Span::styled(
                 format!("{} {} {}", prefix, time, msg.content),

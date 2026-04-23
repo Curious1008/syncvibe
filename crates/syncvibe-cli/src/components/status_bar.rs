@@ -9,6 +9,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::agents;
 use crate::app::AppState;
 use crate::components::util::parse_hex_color;
+use crate::theme::{SV_ACCENT, SV_ELEVATED, SV_FG_FAINT};
 
 pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
     let width = area.width as usize;
@@ -149,7 +150,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
     // Spacer — or toast notification if active
     let total_right = presence_len + others_used;
     let remaining = width.saturating_sub(left_used).saturating_sub(total_right);
-    let spacer_style = Style::default().fg(Color::Rgb(60, 60, 60));
+    let spacer_style = Style::default().fg(SV_FG_FAINT);
 
     let active_toast = state
         .active_toast
@@ -176,7 +177,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
-                    .fg(Color::Rgb(78, 205, 196))
+                    .fg(SV_ACCENT)
                     .add_modifier(Modifier::BOLD)
             };
             spans.push(Span::styled(format!(" {} ", toast_text), toast_style));
@@ -200,7 +201,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
-                    .fg(Color::Rgb(78, 205, 196))
+                    .fg(SV_ACCENT)
                     .add_modifier(Modifier::BOLD)
             };
             spans.push(Span::styled(format!(" {} ", truncated), toast_style));
@@ -244,6 +245,6 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
 
     spans.extend(presence_spans);
 
-    let bar = Paragraph::new(Line::from(spans)).style(Style::default().bg(Color::Rgb(30, 30, 30)));
+    let bar = Paragraph::new(Line::from(spans)).style(Style::default().bg(SV_ELEVATED));
     frame.render_widget(bar, area);
 }

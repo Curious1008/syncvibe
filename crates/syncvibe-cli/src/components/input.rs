@@ -6,6 +6,7 @@ use unicode_width::UnicodeWidthChar;
 
 use crate::app::{AppState, Panel};
 use crate::components::util::truncate_str;
+use crate::theme::SV_FG_FAINT;
 
 pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
     let is_focused = state.focus == Panel::Input;
@@ -108,7 +109,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
     } else if state.input_buffer.is_empty() {
         (
             " Type a message...".to_string(),
-            Style::default().fg(Color::Rgb(60, 60, 60)),
+            Style::default().fg(SV_FG_FAINT),
         )
     } else {
         let mut visible = String::with_capacity(inner_width + 1);

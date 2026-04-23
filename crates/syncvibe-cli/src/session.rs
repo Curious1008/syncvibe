@@ -5,7 +5,7 @@ use anyhow::Result;
 use syncvibe_core::models::{RoomConfig, UserConfig};
 
 use crate::onboarding::{self, B, DIM, GREEN, R, RED, TEAL};
-use crate::{config, init, tmux};
+use crate::{config, init, theme, tmux};
 
 /// Ensure user profile exists, prompting interactively if needed.
 pub fn ensure_user_profile() -> Result<UserConfig> {
@@ -38,11 +38,8 @@ pub fn ensure_user_profile() -> Result<UserConfig> {
         anyhow::bail!("That name is reserved for the AI agent. Please choose another.");
     }
 
-    let colors = [
-        "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEAA7", "#DDA0DD", "#98D8C8", "#F7DC6F",
-    ];
     let hash: usize = name.bytes().map(|b| b as usize).sum();
-    let color = colors[hash % colors.len()].to_string();
+    let color = theme::USER_PALETTE[hash % theme::USER_PALETTE.len()].to_string();
 
     let user_config = UserConfig::new(name.clone(), color);
     config::save_user_config(&user_config)?;
