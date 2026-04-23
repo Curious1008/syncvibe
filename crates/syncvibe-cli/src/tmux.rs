@@ -1,8 +1,10 @@
 use std::env;
 
 use anyhow::Result;
+use syncvibe_core::protocol::WsMessage;
 
 use crate::agents;
+use crate::app::AppState;
 use crate::config;
 use crate::onboarding::{self, DIM, GREEN, R, RED, TEAL, YELLOW};
 
@@ -808,6 +810,92 @@ pub fn kill_current_tmux_session(in_tmux: bool) {
                 .status();
         }
     }
+}
+
+/// Capture the agent pane (right-side pane) content and produce a delta
+/// `WsMessage::ScreenFrame`. Mutates `state.cached_agent_pane` (to avoid
+/// re-discovering the pane every tick) and `state.last_screen_snapshot`
+/// (to compute the delta). Returns `None` when nothing changed or when
+/// we're outside tmux.
+pub fn capture_agent_pane(state: &mut AppState) -> Option<WsMessage> {
+    use std::process::{Command, Stdio};
+
+    let agent_pane = match &state.cached_agent_pane {
+        Some(p) => p.clone(),
+        None => {
+            let pane = discover_agent_pane()?;
+            state.cached_agent_pane = Some(pane.clone());
+            pane
+        }
+    };
+
+    let size_output = Command::new("tmux")
+        .args([
+            "display",
+            "-t",
+            &agent_pane,
+            "-p",
+            "#{pane_width}:#{pane_height}",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .env_remove("TMUX")
+        .output()
+        .ok()?;
+    if !size_output.status.success() {
+        return None;
+    }
+    let size_str = String::from_utf8_lossy(&size_output.stdout)
+        .trim()
+        .to_string();
+    let (cols, rows) = size_str.split_once(':')?;
+    let cols: u16 = cols.parse().ok()?;
+    let rows: u16 = rows.parse().ok()?;
+
+    let capture = Command::new("tmux")
+        .args(["capture-pane", "-t", &agent_pane, "-p", "-e"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .env_remove("TMUX")
+        .output()
+        .ok()?;
+    if !capture.status.success() {
+        return None;
+    }
+    let content = String::from_utf8_lossy(&capture.stdout);
+    let current_lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+
+    let mut delta: Vec<(usize, String)> = Vec::new();
+    for (i, line) in current_lines.iter().enumerate() {
+        let changed = state
+            .last_screen_snapshot
+            .get(i)
+            .map(|old| old != line)
+            .unwrap_or(true);
+        if changed {
+            delta.push((i, line.clone()));
+        }
+    }
+    if state.last_screen_snapshot.len() > current_lines.len() {
+        for i in current_lines.len()..state.last_screen_snapshot.len() {
+            delta.push((i, String::new()));
+        }
+    }
+
+    state.last_screen_snapshot = current_lines;
+
+    if delta.is_empty() {
+        return None;
+    }
+
+    Some(WsMessage::ScreenFrame {
+        user_id: state.user.profile.user_id.clone(),
+        lines: delta,
+        cols,
+        rows,
+    })
 }
 
 #[cfg(test)]

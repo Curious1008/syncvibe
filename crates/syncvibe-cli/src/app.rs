@@ -100,8 +100,8 @@ pub struct AppState {
 
     // Screen sharing (sharer side)
     pub sharing_screen: bool,
-    last_screen_snapshot: Vec<String>,
-    cached_agent_pane: Option<String>, // e.g. "session:0.1" — cached tmux pane target
+    pub(crate) last_screen_snapshot: Vec<String>,
+    pub(crate) cached_agent_pane: Option<String>, // e.g. "session:0.1" — cached tmux pane target
     pub(crate) last_remote_trigger: Option<std::time::Instant>,
 
     // Screen sharing (viewer side) — latest full frame per user_id
@@ -802,94 +802,6 @@ impl AppState {
 /// Max lines allowed in a screen frame (prevents OOM from malicious frames).
 pub(crate) const MAX_SCREEN_LINES: usize = 500;
 
-/// Capture the agent pane (right-side pane) content and produce a delta frame.
-fn capture_agent_pane(state: &mut AppState) -> Option<WsMessage> {
-    use std::process::{Command, Stdio};
-
-    // Use cached pane target, or discover it once
-    let agent_pane = match &state.cached_agent_pane {
-        Some(p) => p.clone(),
-        None => {
-            let pane = crate::tmux::discover_agent_pane()?;
-            state.cached_agent_pane = Some(pane.clone());
-            pane
-        }
-    };
-
-    // Get pane dimensions
-    let size_output = Command::new("tmux")
-        .args([
-            "display",
-            "-t",
-            &agent_pane,
-            "-p",
-            "#{pane_width}:#{pane_height}",
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .env_remove("TMUX")
-        .output()
-        .ok()?;
-    if !size_output.status.success() {
-        return None;
-    }
-    let size_str = String::from_utf8_lossy(&size_output.stdout)
-        .trim()
-        .to_string();
-    let (cols, rows) = size_str.split_once(':')?;
-    let cols: u16 = cols.parse().ok()?;
-    let rows: u16 = rows.parse().ok()?;
-
-    // Capture pane content (with ANSI colors)
-    let capture = Command::new("tmux")
-        .args(["capture-pane", "-t", &agent_pane, "-p", "-e"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .env_remove("TMUX")
-        .output()
-        .ok()?;
-    if !capture.status.success() {
-        return None;
-    }
-    let content = String::from_utf8_lossy(&capture.stdout);
-    let current_lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
-
-    // Compute delta — only changed lines
-    let mut delta: Vec<(usize, String)> = Vec::new();
-    for (i, line) in current_lines.iter().enumerate() {
-        let changed = state
-            .last_screen_snapshot
-            .get(i)
-            .map(|old| old != line)
-            .unwrap_or(true);
-        if changed {
-            delta.push((i, line.clone()));
-        }
-    }
-    // If the old snapshot was longer, send empty lines to clear
-    if state.last_screen_snapshot.len() > current_lines.len() {
-        for i in current_lines.len()..state.last_screen_snapshot.len() {
-            delta.push((i, String::new()));
-        }
-    }
-
-    state.last_screen_snapshot = current_lines;
-
-    // Skip if nothing changed
-    if delta.is_empty() {
-        return None;
-    }
-
-    Some(WsMessage::ScreenFrame {
-        user_id: state.user.profile.user_id.clone(),
-        lines: delta,
-        cols,
-        rows,
-    })
-}
-
 pub async fn run() -> Result<()> {
     let cwd = std::env::current_dir()?;
     let storage = Storage::find(&cwd)?;
@@ -1215,7 +1127,7 @@ pub async fn run() -> Result<()> {
 
             // Screen sharing capture — send delta frames every second (skip when offline)
             _ = capture_tick.tick(), if state.sharing_screen && state.ws_client.is_some() => {
-                if let Some(frame) = capture_agent_pane(&mut state) {
+                if let Some(frame) = crate::tmux::capture_agent_pane(&mut state) {
                     if let Some(ref ws) = state.ws_client {
                         let ws = ws.clone();
                         tokio::spawn(async move {
