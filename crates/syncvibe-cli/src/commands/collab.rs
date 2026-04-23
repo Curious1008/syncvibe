@@ -10,8 +10,12 @@ use super::{Command, TuiCtx};
 pub struct Collab;
 
 impl Command for Collab {
-    fn name(&self) -> &'static str { "/collab" }
-    fn description(&self) -> &'static str { "open GitHub collaborator page" }
+    fn name(&self) -> &'static str {
+        "/collab"
+    }
+    fn description(&self) -> &'static str {
+        "open GitHub collaborator page"
+    }
 
     fn run_tui(&self, ctx: &mut TuiCtx<'_>, _arg: &str) -> Result<()> {
         match ctx.github_repo() {

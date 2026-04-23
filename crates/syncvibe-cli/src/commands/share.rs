@@ -15,9 +15,13 @@ use super::{Command, TuiCtx};
 pub struct Share;
 
 impl Command for Share {
-    fn name(&self) -> &'static str { "/share" }
+    fn name(&self) -> &'static str {
+        "/share"
+    }
 
-    fn description(&self) -> &'static str { "toggle agent screen sharing" }
+    fn description(&self) -> &'static str {
+        "toggle agent screen sharing"
+    }
 
     fn run_tui(&self, ctx: &mut TuiCtx<'_>, _arg: &str) -> Result<()> {
         if !ctx.in_tmux() {
@@ -112,7 +116,11 @@ mod tests {
     use std::sync::Arc;
     struct ArcWsShim(Arc<CapturingWs>);
     impl crate::commands::ctx::WsTransport for ArcWsShim {
-        fn send(&self, msg: WsMessage) -> anyhow::Result<()> { self.0.send(msg) }
-        fn close(&self) -> anyhow::Result<()> { self.0.close() }
+        fn send(&self, msg: WsMessage) -> anyhow::Result<()> {
+            self.0.send(msg)
+        }
+        fn close(&self) -> anyhow::Result<()> {
+            self.0.close()
+        }
     }
 }

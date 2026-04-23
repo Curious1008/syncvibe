@@ -14,13 +14,17 @@ use super::{Command, TuiCtx};
 pub struct Name;
 
 impl Command for Name {
-    fn name(&self) -> &'static str { "/name" }
+    fn name(&self) -> &'static str {
+        "/name"
+    }
 
     fn description(&self) -> &'static str {
         "change display name  e.g. /name Alice"
     }
 
-    fn needs_arg(&self) -> bool { true }
+    fn needs_arg(&self) -> bool {
+        true
+    }
 
     fn run_tui(&self, ctx: &mut TuiCtx<'_>, arg: &str) -> Result<()> {
         match ctx.set_display_name(arg) {
@@ -68,7 +72,10 @@ mod tests {
         let prior = state.user.profile.name.clone();
         let mut ctx = TuiCtx::new_with_ws(&mut state, Box::new(NoopWs));
         Name.run_tui(&mut ctx, "Claude").unwrap();
-        assert_eq!(state.user.profile.name, prior, "reserved name must be rejected");
+        assert_eq!(
+            state.user.profile.name, prior,
+            "reserved name must be rejected"
+        );
     }
 
     #[test]

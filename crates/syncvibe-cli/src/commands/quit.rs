@@ -10,9 +10,15 @@ use super::{Command, TuiCtx};
 pub struct Quit;
 
 impl Command for Quit {
-    fn name(&self) -> &'static str { "/quit" }
-    fn aliases(&self) -> &'static [&'static str] { &["/q"] }
-    fn description(&self) -> &'static str { "exit SyncVibe  (/q)" }
+    fn name(&self) -> &'static str {
+        "/quit"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["/q"]
+    }
+    fn description(&self) -> &'static str {
+        "exit SyncVibe  (/q)"
+    }
 
     fn run_tui(&self, ctx: &mut TuiCtx<'_>, _arg: &str) -> Result<()> {
         ctx.request_quit();

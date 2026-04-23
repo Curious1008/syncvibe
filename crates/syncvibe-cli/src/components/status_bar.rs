@@ -176,9 +176,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
                     .bg(Color::Red)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default()
-                    .fg(SV_ACCENT)
-                    .add_modifier(Modifier::BOLD)
+                Style::default().fg(SV_ACCENT).add_modifier(Modifier::BOLD)
             };
             spans.push(Span::styled(format!(" {} ", toast_text), toast_style));
             spans.push(Span::styled("─".repeat(pad_right), spacer_style));
@@ -200,9 +198,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
                     .bg(Color::Red)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default()
-                    .fg(SV_ACCENT)
-                    .add_modifier(Modifier::BOLD)
+                Style::default().fg(SV_ACCENT).add_modifier(Modifier::BOLD)
             };
             spans.push(Span::styled(format!(" {} ", truncated), toast_style));
         }

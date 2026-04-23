@@ -15,9 +15,15 @@ use crate::onboarding::{DIM, R};
 pub struct Join;
 
 impl Command for Join {
-    fn name(&self) -> &'static str { "/join" }
-    fn aliases(&self) -> &'static [&'static str] { &["/j"] }
-    fn description(&self) -> &'static str { "join a room by invite  (/j)" }
+    fn name(&self) -> &'static str {
+        "/join"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["/j"]
+    }
+    fn description(&self) -> &'static str {
+        "join a room by invite  (/j)"
+    }
 
     fn run_tui(&self, ctx: &mut TuiCtx<'_>, _arg: &str) -> Result<()> {
         ctx.request_join_project();

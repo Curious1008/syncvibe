@@ -23,7 +23,9 @@ pub struct RealGitOps {
 }
 
 impl RealGitOps {
-    pub fn new(root: PathBuf) -> Self { Self { root } }
+    pub fn new(root: PathBuf) -> Self {
+        Self { root }
+    }
 }
 
 impl GitOps for RealGitOps {
@@ -45,7 +47,11 @@ impl GitOps for RealGitOps {
             return None;
         }
         let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if name.is_empty() { None } else { Some(name) }
+        if name.is_empty() {
+            None
+        } else {
+            Some(name)
+        }
     }
 }
 
@@ -78,7 +84,9 @@ pub struct NativeWsTransport {
 }
 
 impl NativeWsTransport {
-    pub fn new(client: WsClient) -> Self { Self { client } }
+    pub fn new(client: WsClient) -> Self {
+        Self { client }
+    }
 }
 
 impl WsTransport for NativeWsTransport {
@@ -104,6 +112,10 @@ impl WsTransport for NativeWsTransport {
 pub struct NoopWsTransport;
 
 impl WsTransport for NoopWsTransport {
-    fn send(&self, _msg: WsMessage) -> Result<()> { Ok(()) }
-    fn close(&self) -> Result<()> { Ok(()) }
+    fn send(&self, _msg: WsMessage) -> Result<()> {
+        Ok(())
+    }
+    fn close(&self) -> Result<()> {
+        Ok(())
+    }
 }

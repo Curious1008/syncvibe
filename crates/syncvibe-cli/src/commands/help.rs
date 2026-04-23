@@ -13,9 +13,15 @@ use super::{all, Command, TuiCtx};
 pub struct Help;
 
 impl Command for Help {
-    fn name(&self) -> &'static str { "/help" }
-    fn aliases(&self) -> &'static [&'static str] { &["/h", "/?"] }
-    fn description(&self) -> &'static str { "list available commands" }
+    fn name(&self) -> &'static str {
+        "/help"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["/h", "/?"]
+    }
+    fn description(&self) -> &'static str {
+        "list available commands"
+    }
 
     fn run_tui(&self, ctx: &mut TuiCtx<'_>, _arg: &str) -> Result<()> {
         let mut entries: Vec<(String, &'static str)> = all()

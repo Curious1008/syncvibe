@@ -16,9 +16,15 @@ use super::{Command, TuiCtx};
 pub struct Invite;
 
 impl Command for Invite {
-    fn name(&self) -> &'static str { "/invite" }
-    fn aliases(&self) -> &'static [&'static str] { &["/i"] }
-    fn description(&self) -> &'static str { "create invite code  (/i)" }
+    fn name(&self) -> &'static str {
+        "/invite"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["/i"]
+    }
+    fn description(&self) -> &'static str {
+        "create invite code  (/i)"
+    }
 
     fn run_tui(&self, ctx: &mut TuiCtx<'_>, _arg: &str) -> Result<()> {
         let mut room = match ctx.read_room_config() {
@@ -87,10 +93,7 @@ fn build_invite_code(room: &RoomConfig) -> Result<String> {
 /// identical to the pre-W3.5 `main.rs::cmd_invite` body through the point
 /// where the message is produced (the CLI subcommand then prints it;
 /// `/invite` copies to clipboard).
-pub fn generate_invite_for_storage(
-    storage: &Storage,
-    user_name: &str,
-) -> Result<(String, String)> {
+pub fn generate_invite_for_storage(storage: &Storage, user_name: &str) -> Result<(String, String)> {
     let mut room = storage.read_room_config()?;
     refresh_git_remote_in_place(&mut room, storage.project_root(), |r| {
         let _ = storage.write_room_config(r);

@@ -10,8 +10,12 @@ use super::{Command, TuiCtx};
 pub struct Remote;
 
 impl Command for Remote {
-    fn name(&self) -> &'static str { "/remote" }
-    fn description(&self) -> &'static str { "show/set git remote  e.g. /remote <url>" }
+    fn name(&self) -> &'static str {
+        "/remote"
+    }
+    fn description(&self) -> &'static str {
+        "show/set git remote  e.g. /remote <url>"
+    }
 
     fn run_tui(&self, ctx: &mut TuiCtx<'_>, arg: &str) -> Result<()> {
         if arg.is_empty() {

@@ -7,8 +7,12 @@ use super::{Command, TuiCtx};
 pub struct Chats;
 
 impl Command for Chats {
-    fn name(&self) -> &'static str { "/chats" }
-    fn description(&self) -> &'static str { "switch between rooms" }
+    fn name(&self) -> &'static str {
+        "/chats"
+    }
+    fn description(&self) -> &'static str {
+        "switch between rooms"
+    }
 
     fn run_tui(&self, ctx: &mut TuiCtx<'_>, _arg: &str) -> Result<()> {
         ctx.show_chats_picker();

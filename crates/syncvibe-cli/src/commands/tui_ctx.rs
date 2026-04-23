@@ -74,16 +74,30 @@ impl<'a> TuiCtx<'a> {
 
     // -- ephemeral UI ------------------------------------------------------
 
-    pub fn system_msg(&mut self, text: &str) { self.state.system_msg(text); }
-    pub fn toast(&mut self, text: &str) { self.state.toast(text); }
-    pub fn toast_err(&mut self, text: &str) { self.state.toast_err(text); }
+    pub fn system_msg(&mut self, text: &str) {
+        self.state.system_msg(text);
+    }
+    pub fn toast(&mut self, text: &str) {
+        self.state.toast(text);
+    }
+    pub fn toast_err(&mut self, text: &str) {
+        self.state.toast_err(text);
+    }
 
     // -- state queries -----------------------------------------------------
 
-    pub fn in_tmux(&self) -> bool { self.state.in_tmux }
-    pub fn is_sharing(&self) -> bool { self.state.sharing_screen }
-    pub fn current_user_id(&self) -> &str { &self.state.user.profile.user_id }
-    pub fn current_user_name(&self) -> &str { &self.state.user.profile.name }
+    pub fn in_tmux(&self) -> bool {
+        self.state.in_tmux
+    }
+    pub fn is_sharing(&self) -> bool {
+        self.state.sharing_screen
+    }
+    pub fn current_user_id(&self) -> &str {
+        &self.state.user.profile.user_id
+    }
+    pub fn current_user_name(&self) -> &str {
+        &self.state.user.profile.name
+    }
 
     // -- high-level ops ----------------------------------------------------
 
@@ -120,11 +134,21 @@ impl<'a> TuiCtx<'a> {
 
     // -- W2 flag flips -----------------------------------------------------
 
-    pub fn request_quit(&mut self) { self.state.should_quit = true; }
-    pub fn show_chats_picker(&mut self) { self.state.show_picker = true; }
-    pub fn request_new_project(&mut self) { self.state.want_new_project = true; }
-    pub fn request_join_project(&mut self) { self.state.want_join_project = true; }
-    pub fn request_leave(&mut self) { self.state.want_leave = true; }
+    pub fn request_quit(&mut self) {
+        self.state.should_quit = true;
+    }
+    pub fn show_chats_picker(&mut self) {
+        self.state.show_picker = true;
+    }
+    pub fn request_new_project(&mut self) {
+        self.state.want_new_project = true;
+    }
+    pub fn request_join_project(&mut self) {
+        self.state.want_join_project = true;
+    }
+    pub fn request_leave(&mut self) {
+        self.state.want_leave = true;
+    }
 
     /// Toggle notification mute. Returns the new state (true = muted).
     pub fn toggle_mute(&mut self) -> bool {
@@ -132,12 +156,18 @@ impl<'a> TuiCtx<'a> {
         self.state.muted
     }
 
-    pub fn is_online(&self) -> bool { self.state.is_online }
-    pub fn request_reconnect(&mut self) { self.state.want_reconnect = true; }
+    pub fn is_online(&self) -> bool {
+        self.state.is_online
+    }
+    pub fn request_reconnect(&mut self) {
+        self.state.want_reconnect = true;
+    }
 
     // -- /color ------------------------------------------------------------
 
-    pub fn current_color(&self) -> &str { &self.state.user.profile.color }
+    pub fn current_color(&self) -> &str {
+        &self.state.user.profile.color
+    }
 
     /// Apply a new color (must pre-validate via `is_valid_color`/agent-color guards).
     /// Updates profile + local presence entry and persists config.
@@ -155,8 +185,7 @@ impl<'a> TuiCtx<'a> {
             .read_room_config()
             .ok()
             .and_then(|r| r.git_remote);
-        let actual =
-            crate::git::ops::get_git_remote_in(self.state.storage.project_root());
+        let actual = crate::git::ops::get_git_remote_in(self.state.storage.project_root());
         (room, actual)
     }
 

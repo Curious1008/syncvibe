@@ -78,7 +78,9 @@ impl<'a> CmdCtx<'a> {
     /// Marker method. A command whose `run_core` needs WebSocket access
     /// can call this at entry; today it is a no-op. W1-W2 may tighten it
     /// when WS access moves into CmdCtx.
-    pub fn ws_required(&self) -> Result<()> { Ok(()) }
+    pub fn ws_required(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// Closed outcome enum. Every `run_tui` impl must match all variants

@@ -8,9 +8,15 @@ use super::{Command, TuiCtx};
 pub struct New;
 
 impl Command for New {
-    fn name(&self) -> &'static str { "/new" }
-    fn aliases(&self) -> &'static [&'static str] { &["/n"] }
-    fn description(&self) -> &'static str { "create a new room  (/n)" }
+    fn name(&self) -> &'static str {
+        "/new"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["/n"]
+    }
+    fn description(&self) -> &'static str {
+        "create a new room  (/n)"
+    }
 
     fn run_tui(&self, ctx: &mut TuiCtx<'_>, _arg: &str) -> Result<()> {
         ctx.request_new_project();

@@ -12,8 +12,12 @@ use super::{Command, TuiCtx};
 pub struct Watch;
 
 impl Command for Watch {
-    fn name(&self) -> &'static str { "/watch" }
-    fn description(&self) -> &'static str { "watch someone's screen share" }
+    fn name(&self) -> &'static str {
+        "/watch"
+    }
+    fn description(&self) -> &'static str {
+        "watch someone's screen share"
+    }
 
     fn run_tui(&self, ctx: &mut TuiCtx<'_>, arg: &str) -> Result<()> {
         // Toggle off if already watching.

@@ -10,9 +10,13 @@ use super::{Command, TuiCtx};
 pub struct Clear;
 
 impl Command for Clear {
-    fn name(&self) -> &'static str { "/clear" }
+    fn name(&self) -> &'static str {
+        "/clear"
+    }
 
-    fn description(&self) -> &'static str { "clear chat view" }
+    fn description(&self) -> &'static str {
+        "clear chat view"
+    }
 
     fn run_tui(&self, ctx: &mut TuiCtx<'_>, _arg: &str) -> Result<()> {
         ctx.clear_chat_state();

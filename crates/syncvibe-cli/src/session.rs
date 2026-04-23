@@ -73,7 +73,11 @@ pub fn cmd_session() -> Result<()> {
     });
 
     let projects_count = valid_projects.len();
-    let cwd_action_idx = if offer_cwd { Some(projects_count) } else { None };
+    let cwd_action_idx = if offer_cwd {
+        Some(projects_count)
+    } else {
+        None
+    };
     let create_action_idx = projects_count + if offer_cwd { 1 } else { 0 };
 
     onboarding::print_section("Choose a Room");

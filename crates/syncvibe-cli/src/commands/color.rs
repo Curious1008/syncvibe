@@ -10,9 +10,15 @@ use super::{Command, TuiCtx};
 pub struct Color;
 
 impl Command for Color {
-    fn name(&self) -> &'static str { "/color" }
-    fn description(&self) -> &'static str { "change your color  e.g. /color #4ECDC4" }
-    fn needs_arg(&self) -> bool { true }
+    fn name(&self) -> &'static str {
+        "/color"
+    }
+    fn description(&self) -> &'static str {
+        "change your color  e.g. /color #4ECDC4"
+    }
+    fn needs_arg(&self) -> bool {
+        true
+    }
 
     fn run_tui(&self, ctx: &mut TuiCtx<'_>, arg: &str) -> Result<()> {
         if arg.is_empty() {

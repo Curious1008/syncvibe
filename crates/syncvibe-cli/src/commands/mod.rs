@@ -54,14 +54,18 @@ pub trait Command: Sync {
     fn name(&self) -> &'static str;
 
     /// Optional short aliases, e.g. `["/i"]` for `/invite`.
-    fn aliases(&self) -> &'static [&'static str] { &[] }
+    fn aliases(&self) -> &'static [&'static str] {
+        &[]
+    }
 
     /// One-line description for autocomplete + `/help`.
     fn description(&self) -> &'static str;
 
     /// Should autocomplete pause after expansion (waiting for an argument)?
     /// True for `/name`, `/color`, `/join`. Default false.
-    fn needs_arg(&self) -> bool { false }
+    fn needs_arg(&self) -> bool {
+        false
+    }
 
     /// TUI entry point. Receives a narrowed view of `AppState`.
     fn run_tui(&self, ctx: &mut TuiCtx<'_>, arg: &str) -> Result<()>;
@@ -125,9 +129,8 @@ pub fn dispatch_tui(ctx: &mut TuiCtx<'_>, cmd_name: &str, arg: &str) -> bool {
     for cmd in all() {
         if cmd.name() == cmd_name || cmd.aliases().contains(&cmd_name) {
             tracing::debug!(cmd = cmd.name(), arg_len = arg.len(), "dispatching");
-            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                cmd.run_tui(ctx, arg)
-            }));
+            let outcome =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cmd.run_tui(ctx, arg)));
             match outcome {
                 Ok(Ok(())) => {}
                 Ok(Err(e)) => {
@@ -158,9 +161,8 @@ mod tests {
         assert_eq!(
             names,
             vec![
-                "/name", "/clear", "/share", "/quit", "/mute", "/rc", "/chats", "/help",
-                "/color", "/remote", "/collab", "/invite", "/new", "/join", "/leave",
-                "/watch",
+                "/name", "/clear", "/share", "/quit", "/mute", "/rc", "/chats", "/help", "/color",
+                "/remote", "/collab", "/invite", "/new", "/join", "/leave", "/watch",
             ]
         );
     }
@@ -169,7 +171,11 @@ mod tests {
     fn registry_has_no_duplicate_names_or_aliases() {
         let mut seen: std::collections::HashSet<&'static str> = Default::default();
         for cmd in all() {
-            assert!(seen.insert(cmd.name()), "duplicate command name: {}", cmd.name());
+            assert!(
+                seen.insert(cmd.name()),
+                "duplicate command name: {}",
+                cmd.name()
+            );
             for alias in cmd.aliases() {
                 assert!(seen.insert(alias), "alias collision: {alias}");
             }
@@ -206,11 +212,13 @@ mod tests {
         // is renamed or removed upstream, forcing this table (and the
         // matching slash command) to be updated in lockstep.
         let checks: &[(&'static str, bool, fn() -> CliCmd)] = &[
-            ("/new",    false, || CliCmd::Init),
+            ("/new", false, || CliCmd::Init),
             ("/invite", false, || CliCmd::Invite),
-            ("/leave",  false, || CliCmd::Leave),
-            ("/chats",  false, || CliCmd::Switch),
-            ("/join",   false, || CliCmd::Connect { code: String::new() }),
+            ("/leave", false, || CliCmd::Leave),
+            ("/chats", false, || CliCmd::Switch),
+            ("/join", false, || CliCmd::Connect {
+                code: String::new(),
+            }),
         ];
 
         for (slash, expect_needs_arg, cli_ctor) in checks {
@@ -254,9 +262,15 @@ mod tests {
         // Patterns that would indicate a hardcoded list snuck back in.
         // Each entry is (substring, reason).
         let forbidden: &[(&str, &str)] = &[
-            (r#""/name" | "/color""#, "literal match arm for /name|/color"),
+            (
+                r#""/name" | "/color""#,
+                "literal match arm for /name|/color",
+            ),
             (r#""/color" | "/name""#, "literal match arm (reversed)"),
-            (r#"["/name", "/color"]"#, "literal array of arg-taking commands"),
+            (
+                r#"["/name", "/color"]"#,
+                "literal array of arg-taking commands",
+            ),
             (r#"["/color", "/name"]"#, "literal array (reversed)"),
         ];
         for (needle, reason) in forbidden {

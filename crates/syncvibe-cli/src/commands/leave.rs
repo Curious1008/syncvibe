@@ -13,15 +13,17 @@ use syncvibe_core::storage::Storage;
 
 use super::{Command, TuiCtx};
 use crate::config;
-use crate::onboarding::{
-    confirm_destructive, print_section, B, DIM, GREEN, R, RED, TEAL, YELLOW,
-};
+use crate::onboarding::{confirm_destructive, print_section, B, DIM, GREEN, R, RED, TEAL, YELLOW};
 
 pub struct Leave;
 
 impl Command for Leave {
-    fn name(&self) -> &'static str { "/leave" }
-    fn description(&self) -> &'static str { "leave the current room" }
+    fn name(&self) -> &'static str {
+        "/leave"
+    }
+    fn description(&self) -> &'static str {
+        "leave the current room"
+    }
 
     fn run_tui(&self, ctx: &mut TuiCtx<'_>, _arg: &str) -> Result<()> {
         ctx.request_leave();
@@ -129,6 +131,9 @@ mod tests {
         let mut ctx = TuiCtx::new_with_ws(&mut state, Box::new(NoopWs));
         Leave.run_tui(&mut ctx, "").unwrap();
         assert!(state.want_leave);
-        assert!(syncvibe_dir.is_dir(), "slash /leave must not delete storage");
+        assert!(
+            syncvibe_dir.is_dir(),
+            "slash /leave must not delete storage"
+        );
     }
 }

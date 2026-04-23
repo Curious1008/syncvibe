@@ -10,9 +10,15 @@ use super::{Command, TuiCtx};
 pub struct Rc;
 
 impl Command for Rc {
-    fn name(&self) -> &'static str { "/rc" }
-    fn aliases(&self) -> &'static [&'static str] { &["/reconnect"] }
-    fn description(&self) -> &'static str { "reconnect to chat" }
+    fn name(&self) -> &'static str {
+        "/rc"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["/reconnect"]
+    }
+    fn description(&self) -> &'static str {
+        "reconnect to chat"
+    }
 
     fn run_tui(&self, ctx: &mut TuiCtx<'_>, _arg: &str) -> Result<()> {
         if ctx.is_online() {

@@ -35,14 +35,22 @@ use super::ctx::{Clock, CmdCtx, GitOps, RemoteApi, WsTransport};
 
 pub struct FixedClock(pub u64);
 impl Clock for FixedClock {
-    fn now_millis(&self) -> u64 { self.0 }
+    fn now_millis(&self) -> u64 {
+        self.0
+    }
 }
 
 pub struct NoopGitOps;
 impl GitOps for NoopGitOps {
-    fn current_remote(&self) -> Option<String> { None }
-    fn set_remote(&self, _url: &str) -> Result<()> { Ok(()) }
-    fn user_name(&self) -> Option<String> { None }
+    fn current_remote(&self) -> Option<String> {
+        None
+    }
+    fn set_remote(&self, _url: &str) -> Result<()> {
+        Ok(())
+    }
+    fn user_name(&self) -> Option<String> {
+        None
+    }
 }
 
 pub struct NoopRemoteApi;
@@ -50,7 +58,9 @@ impl RemoteApi for NoopRemoteApi {
     fn create_invite(&self, _room_code: &str) -> Result<String> {
         Ok("TEST-CODE".to_string())
     }
-    fn leave_room(&self, _room_code: &str, _user_id: &str) -> Result<()> { Ok(()) }
+    fn leave_room(&self, _room_code: &str, _user_id: &str) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// Records every `send` call so tests can assert on WsMessage variants
@@ -90,8 +100,12 @@ impl WsTransport for CapturingWs {
 
 pub struct NoopWs;
 impl WsTransport for NoopWs {
-    fn send(&self, _msg: WsMessage) -> Result<()> { Ok(()) }
-    fn close(&self) -> Result<()> { Ok(()) }
+    fn send(&self, _msg: WsMessage) -> Result<()> {
+        Ok(())
+    }
+    fn close(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 // -- builder -----------------------------------------------------------------
@@ -123,8 +137,12 @@ impl MockCtxBuilder {
         // the test retains a handle via its own Arc to inspect `sent`.
         struct ArcWs(Arc<CapturingWs>);
         impl WsTransport for ArcWs {
-            fn send(&self, msg: WsMessage) -> Result<()> { self.0.send(msg) }
-            fn close(&self) -> Result<()> { self.0.close() }
+            fn send(&self, msg: WsMessage) -> Result<()> {
+                self.0.send(msg)
+            }
+            fn close(&self) -> Result<()> {
+                self.0.close()
+            }
         }
         self.ws = Box::new(ArcWs(ws));
         self
@@ -132,7 +150,9 @@ impl MockCtxBuilder {
 
     /// Reserved hook for W1 `/share` tests — will capture tmux spawn intents.
     /// Stub today: accepts the marker, does nothing.
-    pub fn with_capture_spawn(self) -> Self { self }
+    pub fn with_capture_spawn(self) -> Self {
+        self
+    }
 
     /// Build owns the fakes; `MockCtx::ctx()` hands out a borrowed `CmdCtx`.
     pub fn build(self) -> MockCtx {
@@ -187,8 +207,8 @@ pub fn mk_app_state() -> (tempfile::TempDir, crate::app::AppState) {
     let tmp = tempfile::TempDir::new().expect("create temp dir");
     // Isolate config writes to the TempDir.
     std::env::set_var("SYNCVIBE_CONFIG_DIR", tmp.path());
-    let storage = syncvibe_core::storage::Storage::init(tmp.path())
-        .expect("init .syncvibe/ in temp dir");
+    let storage =
+        syncvibe_core::storage::Storage::init(tmp.path()).expect("init .syncvibe/ in temp dir");
     let user = syncvibe_core::models::UserConfig {
         profile: syncvibe_core::models::UserProfile {
             name: "Alice".to_string(),

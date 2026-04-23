@@ -7,9 +7,15 @@ use super::{Command, TuiCtx};
 pub struct Mute;
 
 impl Command for Mute {
-    fn name(&self) -> &'static str { "/mute" }
-    fn aliases(&self) -> &'static [&'static str] { &["/m"] }
-    fn description(&self) -> &'static str { "toggle @mention bell  (/m)" }
+    fn name(&self) -> &'static str {
+        "/mute"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["/m"]
+    }
+    fn description(&self) -> &'static str {
+        "toggle @mention bell  (/m)"
+    }
 
     fn run_tui(&self, ctx: &mut TuiCtx<'_>, _arg: &str) -> Result<()> {
         if ctx.toggle_mute() {
