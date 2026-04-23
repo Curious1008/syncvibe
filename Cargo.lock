@@ -2115,7 +2115,7 @@ dependencies = [
 
 [[package]]
 name = "syncvibe"
-version = "0.4.5"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2147,7 +2147,7 @@ dependencies = [
 
 [[package]]
 name = "syncvibe-core"
-version = "0.4.5"
+version = "0.5.0"
 dependencies = [
  "base64",
  "chrono",
