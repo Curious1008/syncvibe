@@ -204,21 +204,10 @@ fn cmd_chat(message: String) -> Result<()> {
 fn cmd_invite() -> Result<()> {
     let cwd = env::current_dir()?;
     let storage = Storage::find(&cwd)?;
-    let mut room = storage.read_room_config()?;
     let user = config::load_user_config()?;
+    let (_code, msg) =
+        commands::invite::generate_invite_for_storage(&storage, &user.profile.name)?;
 
-    // Refresh git_remote — user may have added a remote after room creation
-    if let Some(detected) = git::ops::get_git_remote_in(storage.project_root()) {
-        if room.git_remote.as_deref() != Some(&detected) {
-            room.git_remote = Some(detected);
-            let _ = storage.write_room_config(&room);
-        }
-    }
-
-    let code = invite::create_short_invite(&room)
-        .or_else(|_| room.to_invite_code().map_err(|e| anyhow::anyhow!(e)))?;
-
-    let msg = invite::share_message(&code, &user.profile.name, room.room_name.as_deref());
     println!("\n  Share this with your team:\n");
     for line in msg.lines() {
         println!("  {}", line);

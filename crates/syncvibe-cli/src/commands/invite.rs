@@ -4,7 +4,12 @@
 //!
 //! Also refreshes `git_remote` in room config so late-added remotes propagate.
 
+use std::path::Path;
+
 use anyhow::Result;
+
+use syncvibe_core::models::RoomConfig;
+use syncvibe_core::storage::Storage;
 
 use super::{Command, TuiCtx};
 
@@ -26,17 +31,11 @@ impl Command for Invite {
 
         // Refresh git_remote — user may have added a remote after room creation.
         let project_root = ctx.project_root();
-        if let Some(detected) = crate::git::ops::get_git_remote_in(&project_root) {
-            if room.git_remote.as_deref() != Some(&detected) {
-                room.git_remote = Some(detected);
-                let _ = ctx.write_room_config(&room);
-            }
-        }
+        refresh_git_remote_in_place(&mut room, &project_root, |r| {
+            let _ = ctx.write_room_config(r);
+        });
 
-        let code = crate::invite::create_short_invite(&room)
-            .or_else(|_| room.to_invite_code().map_err(|e| anyhow::anyhow!(e)));
-
-        match code {
+        match build_invite_code(&room) {
             Ok(code) => {
                 let msg = crate::invite::share_message(
                     &code,
@@ -57,6 +56,48 @@ impl Command for Invite {
         }
         Ok(())
     }
+}
+
+/// Refresh git_remote on `room` if the on-disk repo has a newer remote than
+/// what room config remembers. `persist` is a caller-supplied closure that
+/// writes the updated room config (TUI writes via `ctx`, CLI via `Storage`).
+fn refresh_git_remote_in_place<F: FnOnce(&RoomConfig)>(
+    room: &mut RoomConfig,
+    project_root: &Path,
+    persist: F,
+) {
+    if let Some(detected) = crate::git::ops::get_git_remote_in(project_root) {
+        if room.git_remote.as_deref() != Some(&detected) {
+            room.git_remote = Some(detected);
+            persist(room);
+        }
+    }
+}
+
+/// Build a short invite code, falling back to the legacy long code.
+fn build_invite_code(room: &RoomConfig) -> Result<String> {
+    crate::invite::create_short_invite(room)
+        .or_else(|_| room.to_invite_code().map_err(|e| anyhow::anyhow!(e)))
+}
+
+/// CLI-side invite generation: refresh git remote, mint a code, format the
+/// shareable message. Returns `(code, share_message)`.
+///
+/// Shared with `/invite` in the TUI via the private helpers above. Byte-
+/// identical to the pre-W3.5 `main.rs::cmd_invite` body through the point
+/// where the message is produced (the CLI subcommand then prints it;
+/// `/invite` copies to clipboard).
+pub fn generate_invite_for_storage(
+    storage: &Storage,
+    user_name: &str,
+) -> Result<(String, String)> {
+    let mut room = storage.read_room_config()?;
+    refresh_git_remote_in_place(&mut room, storage.project_root(), |r| {
+        let _ = storage.write_room_config(r);
+    });
+    let code = build_invite_code(&room)?;
+    let msg = crate::invite::share_message(&code, user_name, room.room_name.as_deref());
+    Ok((code, msg))
 }
 
 #[cfg(test)]
