@@ -15,6 +15,7 @@ pub mod tui_ctx;
 
 // First wave of ported commands. One module per command file.
 pub mod clear;
+pub mod mute;
 pub mod name;
 pub mod quit;
 pub mod share;
@@ -85,6 +86,7 @@ register_commands! {
     clear::Clear,
     share::Share,
     quit::Quit,
+    mute::Mute,
 }
 
 /// Called first by `app.rs::handle_command`. Returns `true` if `cmd_name`
@@ -131,7 +133,7 @@ mod tests {
         // updating the legacy removal side of the Strangler Fig. Every name
         // listed here MUST have its arm deleted from `app.rs::handle_command`.
         let names: Vec<&'static str> = all().iter().map(|c| c.name()).collect();
-        assert_eq!(names, vec!["/name", "/clear", "/share", "/quit"]);
+        assert_eq!(names, vec!["/name", "/clear", "/share", "/quit", "/mute"]);
     }
 
     #[test]

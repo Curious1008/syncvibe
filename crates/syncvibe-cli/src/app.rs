@@ -666,14 +666,7 @@ impl AppState {
                 let _ = config::save_user_config(&self.user);
                 self.system_msg(&format!("Color changed to {}", new_color));
             }
-            "/mute" | "/m" => {
-                self.muted = !self.muted;
-                if self.muted {
-                    self.system_msg("Notifications muted");
-                } else {
-                    self.system_msg("Notifications unmuted");
-                }
-            }
+            // `/mute` ported to commands::mute (W2). See commands/mod.rs registry.
             // `/clear` ported to commands::clear (W1). See commands/mod.rs registry.
             "/rc" | "/reconnect" => {
                 if self.is_online {
