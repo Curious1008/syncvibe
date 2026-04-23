@@ -21,6 +21,7 @@ mod theme;
 mod tmux;
 mod tui;
 mod updates;
+mod util;
 
 use std::env;
 

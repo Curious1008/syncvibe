@@ -42,7 +42,7 @@ impl Command for Invite {
                     ctx.current_user_name(),
                     room.room_name.as_deref(),
                 );
-                if crate::app::copy_to_clipboard(&msg) {
+                if crate::util::copy_to_clipboard(&msg) {
                     ctx.system_msg(&format!("Invite copied: {}", code));
                 } else {
                     let path = ctx.storage_root().join("invite.txt");
