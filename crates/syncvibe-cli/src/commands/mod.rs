@@ -71,6 +71,7 @@ pub trait Command: Sync {
     fn run_tui(&self, ctx: &mut TuiCtx<'_>, arg: &str) -> Result<()>;
 
     /// Pure-logic core. Default: no-op. Commands with testable logic override.
+    #[allow(dead_code)] // W0 seam; first override lands in W1-W2 per spec §4.
     fn run_core(&self, _ctx: &mut CmdCtx<'_>, _arg: &str) -> Result<CoreOutcome> {
         Ok(CoreOutcome::Done)
     }

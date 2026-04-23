@@ -8,6 +8,9 @@
 //! no retry, no side effects beyond the trait contract. If a command wants
 //! retry logic, it belongs in the command, not here.
 
+// Scaffolding module, same rationale as commands/ctx.rs.
+#![allow(dead_code)]
+
 use std::path::PathBuf;
 
 use anyhow::Result;

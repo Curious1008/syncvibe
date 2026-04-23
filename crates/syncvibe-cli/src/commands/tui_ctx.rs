@@ -13,6 +13,11 @@
 //!   match arms at app.rs:559-583 / 617-623 / 702-734. Their state mutations
 //!   call `pub(crate)` helpers on `AppState` so the boundary stays honest.
 
+// `clock`/`git`/`remote` fields + `cmd_ctx`/`current_user_id` helpers are
+// consumed by `run_core` impls as commands port in W1-W2. Silencing here
+// keeps the W0 scaffolding honest without premature deletion.
+#![allow(dead_code)]
+
 use anyhow::Result;
 
 use syncvibe_core::protocol::WsMessage;

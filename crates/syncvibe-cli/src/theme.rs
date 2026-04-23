@@ -4,6 +4,12 @@
 // Raw `Color::Rgb(...)` / `Color::Cyan` / `Color::DarkGray` outside this file
 // will be rejected by the `no_raw_color_at_call_sites` guard (added in Wave 3).
 
+// Design tokens and semantic styles are deliberately the source of truth even
+// when not every token is currently consumed — call sites migrate to them
+// incrementally and adding one here must never require a separate "wire it
+// up" commit.
+#![allow(dead_code)]
+
 use ratatui::style::{Color, Modifier, Style};
 
 // -- tokens ------------------------------------------------------------------

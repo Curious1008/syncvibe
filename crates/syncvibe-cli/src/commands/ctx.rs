@@ -5,6 +5,11 @@
 //! real commands port in (each added field must come with the command that
 //! needs it — no speculative growth).
 
+// Scaffolding module: the traits, `CmdCtx`, and `CoreOutcome` are wired in
+// as commands port to `run_core` in W1-W2. Clippy's dead-code check would
+// force premature deletion of the seams the spec depends on.
+#![allow(dead_code)]
+
 use anyhow::Result;
 use syncvibe_core::protocol::WsMessage;
 
