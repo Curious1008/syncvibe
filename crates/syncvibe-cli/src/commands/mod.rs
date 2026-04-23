@@ -16,6 +16,7 @@ pub mod tui_ctx;
 // First wave of ported commands. One module per command file.
 pub mod chats;
 pub mod clear;
+pub mod color;
 pub mod help;
 pub mod mute;
 pub mod name;
@@ -93,6 +94,7 @@ register_commands! {
     rc::Rc,
     chats::Chats,
     help::Help,
+    color::Color,
 }
 
 /// Called first by `app.rs::handle_command`. Returns `true` if `cmd_name`
@@ -143,6 +145,7 @@ mod tests {
             names,
             vec![
                 "/name", "/clear", "/share", "/quit", "/mute", "/rc", "/chats", "/help",
+                "/color",
             ]
         );
     }

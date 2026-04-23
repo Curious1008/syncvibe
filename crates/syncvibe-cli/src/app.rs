@@ -620,31 +620,7 @@ impl AppState {
                 self.want_leave = true;
             }
             // `/name` ported to commands::name (W1). See commands/mod.rs registry.
-            "/color" => {
-                if arg.is_empty() {
-                    self.system_msg(&format!("Color: {}", self.user.profile.color));
-                    return true;
-                }
-                if !crate::onboarding::is_valid_color(arg) {
-                    self.system_msg("Invalid color. Use #RRGGBB format (e.g. #4ECDC4).");
-                    return true;
-                }
-                if crate::onboarding::is_agent_color(arg) {
-                    self.system_msg("That color is reserved for the AI agent.");
-                    return true;
-                }
-                let new_color = arg.to_string();
-                self.user.profile.color = new_color.clone();
-                if let Some(p) = self
-                    .presence
-                    .iter_mut()
-                    .find(|p| p.user_id == self.user.profile.user_id)
-                {
-                    p.user_color = new_color.clone();
-                }
-                let _ = config::save_user_config(&self.user);
-                self.system_msg(&format!("Color changed to {}", new_color));
-            }
+            // `/color` ported to commands::color (W2). See commands/mod.rs registry.
             // `/mute` ported to commands::mute (W2). See commands/mod.rs registry.
             // `/clear` ported to commands::clear (W1). See commands/mod.rs registry.
             // `/rc` ported to commands::rc (W2). See commands/mod.rs registry.
