@@ -117,4 +117,113 @@ impl<'a> TuiCtx<'a> {
         self.ws.send(WsMessage::ScreenShareStop { user_id: uid })?;
         Ok(())
     }
+
+    // -- W2 flag flips -----------------------------------------------------
+
+    pub fn request_quit(&mut self) { self.state.should_quit = true; }
+    pub fn show_chats_picker(&mut self) { self.state.show_picker = true; }
+    pub fn request_new_project(&mut self) { self.state.want_new_project = true; }
+    pub fn request_join_project(&mut self) { self.state.want_join_project = true; }
+    pub fn request_leave(&mut self) { self.state.want_leave = true; }
+
+    /// Toggle notification mute. Returns the new state (true = muted).
+    pub fn toggle_mute(&mut self) -> bool {
+        self.state.muted = !self.state.muted;
+        self.state.muted
+    }
+
+    pub fn is_online(&self) -> bool { self.state.is_online }
+    pub fn request_reconnect(&mut self) { self.state.want_reconnect = true; }
+
+    // -- /color ------------------------------------------------------------
+
+    pub fn current_color(&self) -> &str { &self.state.user.profile.color }
+
+    /// Apply a new color (must pre-validate via `is_valid_color`/agent-color guards).
+    /// Updates profile + local presence entry and persists config.
+    pub fn apply_color(&mut self, new_color: &str) {
+        self.state.apply_color_change(new_color);
+    }
+
+    // -- /remote -----------------------------------------------------------
+
+    /// Read the current git remote: (room_remote, actual_remote).
+    pub fn git_remote_state(&self) -> (Option<String>, Option<String>) {
+        let room = self
+            .state
+            .storage
+            .read_room_config()
+            .ok()
+            .and_then(|r| r.git_remote);
+        let actual =
+            crate::git::ops::get_git_remote_in(self.state.storage.project_root());
+        (room, actual)
+    }
+
+    /// Set git remote on disk + in room config. Caller validates URL prefix.
+    pub fn set_git_remote(&mut self, url: &str) {
+        let root = self.state.storage.project_root().to_path_buf();
+        let _ = crate::git::ops::set_git_remote(&root, url);
+        if let Ok(mut room) = self.state.storage.read_room_config() {
+            room.git_remote = Some(url.to_string());
+            let _ = self.state.storage.write_room_config(&room);
+        }
+    }
+
+    /// Resolve the current GitHub (owner, repo) from room or local git.
+    pub fn github_repo(&self) -> Option<(String, String)> {
+        self.state
+            .storage
+            .read_room_config()
+            .ok()
+            .and_then(|r| r.git_remote)
+            .or_else(|| crate::git::ops::get_git_remote_in(self.state.storage.project_root()))
+            .and_then(|u| crate::git::ops::parse_github_repo(&u))
+    }
+
+    // -- /invite -----------------------------------------------------------
+
+    pub fn read_room_config(
+        &self,
+    ) -> Result<syncvibe_core::models::RoomConfig, syncvibe_core::error::SyncVibeError> {
+        self.state.storage.read_room_config()
+    }
+
+    pub fn write_room_config(
+        &self,
+        room: &syncvibe_core::models::RoomConfig,
+    ) -> Result<(), syncvibe_core::error::SyncVibeError> {
+        self.state.storage.write_room_config(room)
+    }
+
+    pub fn storage_root(&self) -> std::path::PathBuf {
+        self.state.storage.root().to_path_buf()
+    }
+
+    pub fn project_root(&self) -> std::path::PathBuf {
+        self.state.storage.project_root().to_path_buf()
+    }
+
+    // -- /watch ------------------------------------------------------------
+
+    pub fn watching_pane_id(&self) -> Option<&str> {
+        self.state.watching_pane_id.as_deref()
+    }
+
+    pub fn set_watching_pane_id(&mut self, id: Option<String>) {
+        self.state.watching_pane_id = id;
+    }
+
+    pub fn screen_frames_count(&self) -> usize {
+        self.state.screen_frames.len()
+    }
+
+    /// Snapshot of (user_id, user_name) currently sharing.
+    pub fn screen_sharers(&self) -> Vec<(String, String)> {
+        self.state
+            .screen_frames
+            .iter()
+            .map(|(uid, sf)| (uid.clone(), sf.user_name.clone()))
+            .collect()
+    }
 }

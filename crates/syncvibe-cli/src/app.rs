@@ -108,7 +108,7 @@ pub struct AppState {
 
     // Screen sharing (viewer side) — latest full frame per user_id
     pub screen_frames: std::collections::HashMap<String, ScreenFrameState>,
-    watching_pane_id: Option<String>, // tmux pane ID of active watch overlay
+    pub(crate) watching_pane_id: Option<String>, // tmux pane ID of active watch overlay
 
     // Toast notification queue + active display
     toast_queue: Vec<(String, bool)>, // (text, is_error) — accumulated during event
@@ -266,6 +266,20 @@ impl AppState {
         }
         let _ = config::save_user_config(&self.user);
         Ok(new_name)
+    }
+
+    /// Apply a new color to the current user profile + local presence entry
+    /// and persist. Caller validates format and agent-color reservation.
+    pub(crate) fn apply_color_change(&mut self, new_color: &str) {
+        self.user.profile.color = new_color.to_string();
+        if let Some(p) = self
+            .presence
+            .iter_mut()
+            .find(|p| p.user_id == self.user.profile.user_id)
+        {
+            p.user_color = new_color.to_string();
+        }
+        let _ = config::save_user_config(&self.user);
     }
 
     /// Atomic wipe: chat panes, dedupe set, line-count cache, selection.
@@ -847,9 +861,7 @@ impl AppState {
                     }
                 }
             }
-            "/quit" | "/q" => {
-                self.should_quit = true;
-            }
+            // `/quit` ported to commands::quit (W2). See commands/mod.rs registry.
             _ => {
                 self.system_msg(&format!("Unknown command: {} — type /help", cmd));
             }
