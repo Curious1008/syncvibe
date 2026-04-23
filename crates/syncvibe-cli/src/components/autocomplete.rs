@@ -99,30 +99,72 @@ pub struct MentionItem {
 }
 
 /// Build the mention list from presence — only agents actually in the room.
+///
+/// Three levels of qualification:
+/// - Agent has ONE owner: bare `@claude`.
+/// - Agent has multiple owners with UNIQUE names: `@claude(Alice)` / `@claude(Bob)`.
+/// - Agent has multiple owners and some share a name: `@claude(Alice#7af)`
+///   appended with the last 4 chars of user_id to disambiguate. Only the
+///   colliding names get the suffix — unique peers in the same agent group
+///   stay bare-named so the UI stays readable.
 pub fn build_mentions(presence: &[PresenceInfo], self_id: &str) -> Vec<MentionItem> {
     let mut items = Vec::new();
 
-    // Collect which agents are present in the room (from presence data)
-    let mut seen_agents = std::collections::HashSet::new();
+    // agent_id -> [(user_id, user_name, user_color), ...]
+    let mut agent_owners: std::collections::HashMap<String, Vec<(String, String, String)>> =
+        std::collections::HashMap::new();
     for p in presence {
         if let Some(ref aid) = p.agent_id {
-            seen_agents.insert(aid.clone());
+            agent_owners.entry(aid.clone()).or_default().push((
+                p.user_id.clone(),
+                p.user_name.clone(),
+                p.user_color.clone(),
+            ));
         }
     }
 
-    // Show specific agent mentions for agents in the room (sorted for stable order)
-    if !seen_agents.is_empty() {
-        let mut sorted_agents: Vec<_> = seen_agents.iter().cloned().collect();
-        sorted_agents.sort();
-        for aid in &sorted_agents {
-            if let Some(agent) = agents::find(aid) {
-                items.push(MentionItem {
-                    handle: format!("@{}", agent.id),
-                    name: agent.id.to_string(),
-                    hint: agent.name.to_string(),
-                    color: parse_hex_color(agent.color),
-                });
-            }
+    let mut sorted_agents: Vec<_> = agent_owners.keys().cloned().collect();
+    sorted_agents.sort();
+    for aid in &sorted_agents {
+        let owners = &agent_owners[aid];
+        let agent = match agents::find(aid) {
+            Some(a) => a,
+            None => continue,
+        };
+        if owners.len() == 1 {
+            items.push(MentionItem {
+                handle: format!("@{}", agent.id),
+                name: agent.id.to_string(),
+                hint: agent.name.to_string(),
+                color: parse_hex_color(agent.color),
+            });
+            continue;
+        }
+
+        // Count name frequency (case-insensitive) to decide who needs a suffix.
+        let mut name_counts: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        for (_, user_name, _) in owners {
+            *name_counts.entry(user_name.to_lowercase()).or_insert(0) += 1;
+        }
+
+        for (user_id, user_name, _) in owners {
+            let collides = name_counts
+                .get(&user_name.to_lowercase())
+                .copied()
+                .unwrap_or(0)
+                > 1;
+            let qualifier = if collides {
+                format!("{}#{}", user_name, agents::owner_suffix(user_id))
+            } else {
+                user_name.clone()
+            };
+            items.push(MentionItem {
+                handle: format!("@{}({})", agent.id, qualifier),
+                name: format!("{}({})", agent.id, qualifier),
+                hint: format!("{} · {}", agent.name, qualifier),
+                color: parse_hex_color(agent.color),
+            });
         }
     }
 
@@ -285,5 +327,70 @@ mod tests {
         assert!(need_arg.contains(&"/name"));
         assert!(need_arg.contains(&"/color"));
         assert!(!need_arg.contains(&"/join"));
+    }
+
+    fn pres(user_id: &str, user_name: &str, agent: Option<&str>) -> PresenceInfo {
+        PresenceInfo {
+            user_id: user_id.to_string(),
+            user_name: user_name.to_string(),
+            user_color: "#ffffff".to_string(),
+            agent_id: agent.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn single_owner_keeps_bare_mention() {
+        let presence = vec![
+            pres("u1", "Alice", Some("claude")),
+            pres("u2", "Bob", None),
+        ];
+        let items = build_mentions(&presence, "u2");
+        let agent_items: Vec<_> = items.iter().filter(|m| m.hint != "online").collect();
+        assert_eq!(agent_items.len(), 1);
+        assert_eq!(agent_items[0].handle, "@claude");
+    }
+
+    #[test]
+    fn multiple_owners_produce_qualified_mentions() {
+        let presence = vec![
+            pres("u1", "Alice", Some("claude")),
+            pres("u2", "Bob", Some("claude")),
+        ];
+        let items = build_mentions(&presence, "u1");
+        let handles: Vec<_> = items
+            .iter()
+            .filter(|m| m.hint != "online")
+            .map(|m| m.handle.clone())
+            .collect();
+        assert!(handles.contains(&"@claude(Alice)".to_string()));
+        assert!(handles.contains(&"@claude(Bob)".to_string()));
+        // No bare @claude when there's a collision.
+        assert!(!handles.contains(&"@claude".to_string()));
+    }
+
+    /// Plan A guard: when two owners of the same agent share a user_name
+    /// (names are user-editable via /name so collisions are possible), only
+    /// the colliding names get the `#suffix` tail — a unique third peer
+    /// stays bare-named so the UI doesn't get noisier than it has to.
+    #[test]
+    fn name_collision_within_agent_group_appends_suffix() {
+        let presence = vec![
+            pres("uuid-alice-7af", "Alice", Some("claude")),
+            pres("uuid-alice-b2c", "Alice", Some("claude")),
+            pres("uuid-bob-001", "Bob", Some("claude")),
+        ];
+        let items = build_mentions(&presence, "uuid-bob-001");
+        let handles: Vec<_> = items
+            .iter()
+            .filter(|m| m.hint != "online")
+            .map(|m| m.handle.clone())
+            .collect();
+        // Colliding Alices get suffixed (last 4 chars of user_id).
+        assert!(handles.contains(&"@claude(Alice#-7af)".to_string()));
+        assert!(handles.contains(&"@claude(Alice#-b2c)".to_string()));
+        // Bare @claude(Alice) is ambiguous — must not appear.
+        assert!(!handles.contains(&"@claude(Alice)".to_string()));
+        // Unique Bob stays bare-named — no suffix.
+        assert!(handles.contains(&"@claude(Bob)".to_string()));
     }
 }

@@ -98,17 +98,39 @@ pub fn handle_ws_message(state: &mut AppState, msg: WsMessage) {
             state.disk_msg_count += 1;
             state.msg_id_set.insert(msg.id.clone());
             state.chat_messages.push(msg);
-            // Trigger local agent if a remote peer @mentions it
+            // Trigger local agent if a remote peer @mentions it.
+            //
+            // Routing rules:
+            // - Bare `@claude` → fire any local claude pane (legacy, for
+            //   single-owner rooms).
+            // - Qualified `@claude(Alice)` → fire ONLY if our user name is
+            //   Alice. This is how Plan B avoids double-firing when two
+            //   users both brought Claude into the same room.
             if remote_sender_id != state.user.profile.user_id
                 && !remote_sender_id.starts_with("agent-")
             {
-                let content_lower = remote_content.to_lowercase();
                 let local_agent = state
                     .local_agent_id
                     .as_deref()
                     .and_then(crate::agents::find);
                 if let Some(agent) = local_agent {
-                    if agent.mentions.iter().any(|m| content_lower.contains(m)) {
+                    let my_name = &state.user.profile.name;
+                    let parsed = crate::agents::extract_mentions(&remote_content);
+                    let my_suffix = crate::agents::owner_suffix(&state.user.profile.user_id);
+                    let matched = parsed.iter().any(|m| {
+                        agent.mentions.iter().any(|kw| *kw == m.keyword.as_str())
+                            && match &m.owner {
+                                None => true,
+                                Some(o) => {
+                                    o.name.eq_ignore_ascii_case(my_name)
+                                        && match &o.suffix {
+                                            None => true,
+                                            Some(s) => *s == my_suffix,
+                                        }
+                                }
+                            }
+                    });
+                    if matched {
                         let debounce_ok = state
                             .last_remote_trigger
                             .map(|t| t.elapsed() > Duration::from_secs(30))

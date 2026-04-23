@@ -75,9 +75,6 @@ pub struct AppState {
     pub pending_quote: Option<Quote>,
     pub autocomplete_idx: usize,
 
-    // Project info
-    pub project_name: String,
-
     // WebSocket
     pub ws_client: Option<ws_client::WsClient>,
     pub is_online: bool,
@@ -111,6 +108,9 @@ pub struct AppState {
     // Toast notification queue + active display
     toast_queue: Vec<(String, bool)>, // (text, is_error) — accumulated during event
     pub active_toast: Option<(String, bool, std::time::Instant)>, // (text, is_error, expire_at)
+
+    // Ctrl+C double-press window: set on first press; second press within 2s quits.
+    pub ctrl_c_armed_at: Option<std::time::Instant>,
 
     // Cached line counts for chat rendering (keyed by msg id, valid for a given terminal width)
     pub line_count_cache: std::collections::HashMap<String, usize>,
@@ -160,7 +160,6 @@ impl AppState {
         let chat_messages = all_msgs[split_at..].to_vec();
         let msg_id_set: std::collections::HashSet<String> =
             chat_messages.iter().map(|m| m.id.clone()).collect();
-        let project_name = crate::git::ops::repo_name().unwrap_or_else(|_| "project".to_string());
 
         // Read local agent from room config
         let local_agent_id = storage.read_room_config().ok().and_then(|r| r.agent);
@@ -195,7 +194,6 @@ impl AppState {
             input_scroll: 0,
             pending_quote: None,
             autocomplete_idx: 0,
-            project_name,
             ws_client: None,
             is_online: false,
             last_bell: None,
@@ -212,6 +210,7 @@ impl AppState {
             watching_pane_id: None,
             toast_queue: Vec::new(),
             active_toast: None,
+            ctrl_c_armed_at: None,
             line_count_cache: std::collections::HashMap::new(),
             line_count_cache_width: 0,
             chat_area_top: 0,
@@ -713,11 +712,32 @@ impl AppState {
             return;
         }
 
-        let content_lower = msg.content.to_lowercase();
-        // Only trigger send-keys for the agent running in THIS room
+        // Only trigger send-keys for the agent running in THIS room.
+        //
+        // Respects the owner qualifier `@claude(Alice)` — if I am Bob, a
+        // message targeted at Alice should NOT fire my local Claude pane.
         let local_agent = self.local_agent_id.as_deref().and_then(crate::agents::find);
+        let my_name = &self.user.profile.name;
+        let my_suffix = crate::agents::owner_suffix(&self.user.profile.user_id);
+        let parsed = crate::agents::extract_mentions(&msg.content);
         let agent_name = match local_agent {
-            Some(a) if a.mentions.iter().any(|m| content_lower.contains(m)) => a.name,
+            Some(a)
+                if parsed.iter().any(|m| {
+                    a.mentions.iter().any(|kw| *kw == m.keyword.as_str())
+                        && match &m.owner {
+                            None => true,
+                            Some(o) => {
+                                o.name.eq_ignore_ascii_case(my_name)
+                                    && match &o.suffix {
+                                        None => true,
+                                        Some(s) => *s == my_suffix,
+                                    }
+                            }
+                        }
+                }) =>
+            {
+                a.name
+            }
             _ => return,
         };
         {
