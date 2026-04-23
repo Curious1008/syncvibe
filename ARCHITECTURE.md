@@ -319,3 +319,42 @@ For full details, see [Data & Privacy](https://syncvibe.online/docs/data-privacy
 9. **Context window protection**: MCP `read_chat` offloads large conversations to `.syncvibe/chat-digest.md` instead of returning them inline. Tool response stays bounded (~3 lines for large chats), agent reads the file at its own discretion.
 10. **Message retention**: Configurable `retention_days` (default 90). Old messages pruned atomically on startup — temp file + rename to prevent data loss.
 11. **Git remote sync**: Zero token storage. The `git_remote` URL is passed via invite codes; cloning/pushing uses the user's existing git credentials. No PATs, no OAuth for repo access.
+
+---
+
+## Substrate Strategy (future direction, not current code)
+
+SyncVibe's unique surface area is deliberately thin: agent-trigger semantics, teaching-tuned TUI, craft coaching workflow. Chat protocol and terminal multiplexing are commodities we should ride, not rebuild.
+
+**Future direction (not in v3.2 refactor):**
+
+| Layer | Current implementation | Future substrate |
+|---|---|---|
+| Chat protocol | Custom WebSocket + JSONL | IRC / IRCv3 compatible gateway so weechat, irssi, HexChat can connect. Native protocol stays as the optimized path. |
+| Terminal sharing | Custom `/share` + `/watch` via tmux hooks | tmate-compatible pairing / bridge. Our layer adds agent awareness on top. |
+| Offline / persistence | Local JSONL + retention sweep | IRC bouncer pattern (ZNC-style) for pure-IRC clients. |
+
+**Invariant for the refactor:** `TuiCtx::spawn_tmux` (spec §4.3) and its siblings must preserve a clean adapter shape. A future tmate backend should drop in as an alternative implementation of the same trait without forcing a command-layer rewrite. This is the main architectural gate for any change touching share / watch / tmux operations.
+
+**Why this matters:** it pre-empts the "bro vibe-coded IRC" critique at the architecture level. We are not rebuilding chat or terminal multiplexing. We are the teaching layer that rides on top of both. See `POSITIONING.md` for the product framing that backs this.
+
+### Decision Record: IRC as Transport (2026-04-23)
+
+**Question.** Can SyncVibe drop its custom WebSocket relay in favor of IRC infrastructure?
+
+**Decision.** No. Keep the relay. Post-launch, add an IRCv3 endpoint *alongside* (not replacing) the native WS protocol, once demand is proven.
+
+**Rationale.** `relay.syncvibe.online` is not a dumb pipe. It performs four functions:
+
+1. **Invite code → room resolution** (control plane).
+2. **Identity stamping.** Supabase-verified `user_id` is stamped on every message server-side. Clients cannot forge identity.
+3. **Agent identity verification.** Only connections with a matching `agentId` credential can send as `agent-{id}`. This is how the whole @mention-triggers-tmux safety model holds up.
+4. **WebSocket routing + dedup + screen-share coordination.**
+
+IRC can transport only #4's text portion. #1–#3 are the product differentiation. Screen-share binary data and high-rate cursor/heartbeat events exceed IRC's 512-byte line limit and standard rate-limit tolerance.
+
+**Rejected alternative.** Pure IRC replacement (drop relay, rely on public or self-hosted IRC servers). Would require an IRC services daemon for identity, a separate WebRTC/binary channel for screen share, and abandoning centralized abuse controls. Roughly 5× the current relay complexity, while losing the identity layer that keeps `agent-{id}` trustworthy.
+
+**Chosen direction.** Relay stays as the control plane and primary transport. Post-launch, add an IRCv3 port on the same relay so weechat / irssi / HexChat users can connect for chat + presence. Screen share remains native-only. Estimated 1–2 weeks of work when the demand signal arrives.
+
+**Refactor constraint (v3.2).** Introduce a `WsTransport` trait as a sibling of `HttpRemoteApi` (spec §4.7). Today there is a single implementation (`NativeWsTransport`). This lets `IrcTransport` drop in later without touching the command layer. Adds ~0.5h to Wave 0.
