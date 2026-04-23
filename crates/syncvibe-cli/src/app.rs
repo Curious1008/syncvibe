@@ -568,25 +568,9 @@ impl AppState {
             }
         }
 
-        match cmd {
-            // `/help` ported to commands::help (W2). See commands/mod.rs registry.
-            // `/invite` ported to commands::invite (W2). See commands/mod.rs registry.
-            // `/chats` ported to commands::chats (W2). See commands/mod.rs registry.
-            // `/new`, `/join`, `/leave` ported to commands:: (W2). See commands/mod.rs registry.
-            // `/name` ported to commands::name (W1). See commands/mod.rs registry.
-            // `/color` ported to commands::color (W2). See commands/mod.rs registry.
-            // `/mute` ported to commands::mute (W2). See commands/mod.rs registry.
-            // `/clear` ported to commands::clear (W1). See commands/mod.rs registry.
-            // `/rc` ported to commands::rc (W2). See commands/mod.rs registry.
-            // `/remote` ported to commands::remote (W2). See commands/mod.rs registry.
-            // `/collab` ported to commands::collab (W2). See commands/mod.rs registry.
-            // `/share` ported to commands::share (W1). See commands/mod.rs registry.
-            // `/watch` ported to commands::watch (W2). See commands/mod.rs registry.
-            // `/quit` ported to commands::quit (W2). See commands/mod.rs registry.
-            _ => {
-                self.system_msg(&format!("Unknown command: {} — type /help", cmd));
-            }
-        }
+        // All commands ported to commands::* registry (see commands/mod.rs).
+        // Anything reaching here is unknown.
+        self.system_msg(&format!("Unknown command: {} — type /help", cmd));
         true
     }
 

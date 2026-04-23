@@ -208,8 +208,7 @@ fn cmd_invite() -> Result<()> {
     let cwd = env::current_dir()?;
     let storage = Storage::find(&cwd)?;
     let user = config::load_user_config()?;
-    let (_code, msg) =
-        commands::invite::generate_invite_for_storage(&storage, &user.profile.name)?;
+    let (_code, msg) = commands::invite::generate_invite_for_storage(&storage, &user.profile.name)?;
 
     println!("\n  Share this with your team:\n");
     for line in msg.lines() {
@@ -221,7 +220,7 @@ fn cmd_invite() -> Result<()> {
 }
 
 fn cmd_connect(code: String) -> Result<()> {
-    let mut room = invite::resolve_short_invite(&code)?;
+    let room = invite::resolve_short_invite(&code)?;
 
     if let Some(ref name) = room.room_name {
         println!("  {GREEN}✓{R} Code accepted — {B}{name}{R}\n");

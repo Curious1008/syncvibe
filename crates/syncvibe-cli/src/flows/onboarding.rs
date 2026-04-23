@@ -77,7 +77,7 @@ pub fn detect_clipboard_invite() -> Result<Option<()>> {
     ))? {
         return Ok(None);
     }
-    let mut room = match crate::invite::resolve_short_invite(trimmed) {
+    let room = match crate::invite::resolve_short_invite(trimmed) {
         Ok(r) => r,
         Err(e) => {
             println!("  {RED}✗{R} Invalid invite code in clipboard: {e}");
@@ -102,7 +102,7 @@ pub fn detect_clipboard_invite() -> Result<Option<()>> {
 /// Pure move from `session::cmd_session` per R4c. Byte-identical behavior.
 pub fn run_join_code_flow() -> Result<()> {
     println!();
-    let mut room = loop {
+    let room = loop {
         let code = onboarding::prompt(&format!("  {TEAL}Invite code:{R} "))?;
         if code.is_empty() {
             anyhow::bail!("Cancelled.");
