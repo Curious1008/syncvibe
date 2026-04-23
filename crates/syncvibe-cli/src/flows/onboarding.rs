@@ -8,8 +8,8 @@ use anyhow::Result;
 
 use syncvibe_core::models::UserConfig;
 
-use crate::onboarding::{self, DIM, GREEN, R, TEAL};
-use crate::{config, theme};
+use crate::onboarding::{self, B, DIM, GREEN, R, RED, TEAL};
+use crate::{config, init, theme, tmux};
 
 /// Ensure user profile exists, prompting interactively if needed.
 pub fn ensure_user_profile() -> Result<UserConfig> {
@@ -50,4 +50,58 @@ pub fn ensure_user_profile() -> Result<UserConfig> {
 
     println!("  {GREEN}✓{R} Profile saved {DIM}({name}){R}\n");
     Ok(user_config)
+}
+
+/// Probe the system clipboard for a SyncVibe invite code and, if present and
+/// confirmed by the user, join + launch the corresponding room.
+///
+/// Return values:
+/// - `Ok(Some(()))` — clipboard had a valid code, user confirmed, tmux session
+///   launched. Caller should return immediately (do not fall through to menu).
+/// - `Ok(None)` — no clipboard, not a code, user declined, or code was
+///   invalid. Caller should continue to the normal room menu.
+/// - `Err(e)` — a real failure (init, prepare_project_dir, select_agent).
+///
+/// Behavior mirrors the pre-R4b inline branch in `session::cmd_session` byte
+/// for byte (same prompts, same error strings, same launch calls).
+pub fn detect_clipboard_invite() -> Result<Option<()>> {
+    let Some(clip) = crate::invite::read_clipboard() else {
+        return Ok(None);
+    };
+    let trimmed = clip.trim();
+    if !crate::invite::looks_like_short_code(trimmed) && !trimmed.starts_with("syncvibe://") {
+        return Ok(None);
+    }
+    if !onboarding::confirm(&format!(
+        "  {TEAL}◆{R} Found invite code in clipboard — join this room?"
+    ))? {
+        return Ok(None);
+    }
+    let mut room = match crate::invite::resolve_short_invite(trimmed) {
+        Ok(r) => r,
+        Err(e) => {
+            println!("  {RED}✗{R} Invalid invite code in clipboard: {e}");
+            println!("  {DIM}→ Opening room menu...{R}\n");
+            // Fall through to normal menu instead of recursing
+            return Ok(None);
+        }
+    };
+    let name = room
+        .room_name
+        .clone()
+        .unwrap_or_else(|| "syncvibe-room".to_string());
+    println!("  {GREEN}✓{R} Code accepted — {B}{name}{R}\n");
+    let proj = init::projects_dir().join(&name);
+    // Already joined — just launch
+    if proj.join(".syncvibe").is_dir() {
+        println!("  {DIM}→ {} (already set up){R}\n", proj.display());
+        tmux::launch_project(&proj)?;
+        return Ok(Some(()));
+    }
+    let agent_id = crate::agents::select_agent()?;
+    room.agent = Some(agent_id);
+    let path = init::prepare_project_dir_with_remote(&name, room.git_remote.as_deref())?;
+    init::perform_init(&path, Some(room))?;
+    tmux::launch_project(&path)?;
+    Ok(Some(()))
 }
