@@ -583,113 +583,7 @@ impl AppState {
             // `/remote` ported to commands::remote (W2). See commands/mod.rs registry.
             // `/collab` ported to commands::collab (W2). See commands/mod.rs registry.
             // `/share` ported to commands::share (W1). See commands/mod.rs registry.
-            "/watch" => {
-                // Toggle off — if already watching, kill the watch pane
-                if let Some(ref pane_id) = self.watching_pane_id {
-                    let _ = std::process::Command::new("tmux")
-                        .args(["kill-pane", "-t", pane_id])
-                        .env_remove("TMUX")
-                        .status();
-                    self.watching_pane_id = None;
-                    self.toast("Stopped watching");
-                    return true;
-                }
-                if self.screen_frames.is_empty() {
-                    self.toast_err("No one is sharing right now");
-                    return true;
-                }
-                // Resolve target: if arg given, match by name; otherwise auto-pick if only 1
-                let target = if arg.is_empty() {
-                    if self.screen_frames.len() == 1 {
-                        if let Some((uid, sf)) = self.screen_frames.iter().next() {
-                            Some((uid.clone(), sf.user_name.clone()))
-                        } else {
-                            None
-                        }
-                    } else {
-                        let names: Vec<String> = self
-                            .screen_frames
-                            .values()
-                            .map(|sf| sf.user_name.clone())
-                            .collect();
-                        self.toast(&format!(
-                            "Multiple sharing — /watch {}",
-                            names.join(", /watch ")
-                        ));
-                        None
-                    }
-                } else {
-                    let target_name = arg.to_string();
-                    self.screen_frames
-                        .iter()
-                        .find(|(_, sf)| sf.user_name.to_lowercase() == target_name.to_lowercase())
-                        .map(|(uid, sf)| (uid.clone(), sf.user_name.clone()))
-                        .or_else(|| {
-                            self.toast_err(&format!("No active share from '{}'", target_name));
-                            None
-                        })
-                };
-                if let Some((uid, name)) = target {
-                    // Validate uid: must be hex+hyphens only (UUID-like) to prevent shell injection
-                    if !uid.chars().all(|c| c.is_ascii_hexdigit() || c == '-') || uid.is_empty() {
-                        self.toast_err("Invalid user ID for screen share");
-                        return true;
-                    }
-                    let safe_name: String =
-                        name.chars().filter(|c| !c.is_control()).take(32).collect();
-                    if let Some(agent_pane) = discover_agent_pane() {
-                        let bin = std::env::current_exe()
-                            .map(|p| p.to_string_lossy().to_string())
-                            .unwrap_or_else(|_| "syncvibe".to_string());
-                        let shell_cmd =
-                            format!("{} watch-render {}", shell_escape(&bin), shell_escape(&uid));
-                        // Split agent pane — watch overlays it. When watch-render exits, pane closes.
-                        let result = std::process::Command::new("tmux")
-                            .args([
-                                "split-window",
-                                "-b",
-                                "-t",
-                                &agent_pane,
-                                "-v",
-                                "-l",
-                                "99%",
-                                "-P",
-                                "-F",
-                                "#{pane_id}",
-                                &shell_cmd,
-                            ])
-                            .env_remove("TMUX")
-                            .output();
-                        if let Ok(out) = result {
-                            let pid = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                            if !pid.is_empty() {
-                                self.watching_pane_id = Some(pid);
-                            }
-                        }
-                        // Find chat pane (left-side) and keep focus there
-                        let chat_pane_output = std::process::Command::new("tmux")
-                            .args(["list-panes", "-F", "#{pane_left}:#{pane_id}"])
-                            .env_remove("TMUX")
-                            .output();
-                        if let Ok(out) = chat_pane_output {
-                            let pane_str = String::from_utf8_lossy(&out.stdout);
-                            if let Some(chat_id) = pane_str
-                                .lines()
-                                .filter_map(|l| l.split_once(':'))
-                                .filter(|(left, _)| left.trim() == "0")
-                                .map(|(_, id)| id.trim().to_string())
-                                .next()
-                            {
-                                let _ = std::process::Command::new("tmux")
-                                    .args(["select-pane", "-t", &chat_id])
-                                    .env_remove("TMUX")
-                                    .status();
-                            }
-                        }
-                        self.toast(&format!("Watching {} — /watch to stop", safe_name));
-                    }
-                }
-            }
+            // `/watch` ported to commands::watch (W2). See commands/mod.rs registry.
             // `/quit` ported to commands::quit (W2). See commands/mod.rs registry.
             _ => {
                 self.system_msg(&format!("Unknown command: {} — type /help", cmd));
@@ -959,7 +853,7 @@ pub(crate) fn copy_to_clipboard(text: &str) -> bool {
 }
 
 /// Shell-escape a string for safe use in tmux shell commands.
-fn shell_escape(s: &str) -> String {
+pub(crate) fn shell_escape(s: &str) -> String {
     if s.is_empty() {
         return "''".to_string();
     }
@@ -998,7 +892,7 @@ fn current_pane_id() -> Option<String> {
 }
 
 /// Discover the agent pane target (session:window.pane_index).
-fn discover_agent_pane() -> Option<String> {
+pub(crate) fn discover_agent_pane() -> Option<String> {
     use std::process::{Command, Stdio};
 
     let session = Command::new("tmux")

@@ -29,6 +29,7 @@ pub mod quit;
 pub mod rc;
 pub mod remote;
 pub mod share;
+pub mod watch;
 
 #[cfg(test)]
 pub mod test_support;
@@ -107,6 +108,7 @@ register_commands! {
     new::New,
     join::Join,
     leave::Leave,
+    watch::Watch,
 }
 
 /// Called first by `app.rs::handle_command`. Returns `true` if `cmd_name`
@@ -158,6 +160,7 @@ mod tests {
             vec![
                 "/name", "/clear", "/share", "/quit", "/mute", "/rc", "/chats", "/help",
                 "/color", "/remote", "/collab", "/invite", "/new", "/join", "/leave",
+                "/watch",
             ]
         );
     }
