@@ -1,9 +1,16 @@
 //! `/join` — request to join an existing project / room via invite code.
 //! Sets `want_join_project` flag that the main loop consumes after this tick.
+//!
+//! Also exposes `join_resolved_room` — the shared post-resolve tail that
+//! `main.rs::cmd_connect`, `flows::onboarding::detect_clipboard_invite`, and
+//! `flows::onboarding::run_join_code_flow` all delegate to (W3.5).
 
 use anyhow::Result;
 
+use syncvibe_core::models::RoomConfig;
+
 use super::{Command, TuiCtx};
+use crate::onboarding::{DIM, R};
 
 pub struct Join;
 
@@ -16,6 +23,25 @@ impl Command for Join {
         ctx.request_join_project();
         Ok(())
     }
+}
+
+/// Post-resolve join flow: if the project dir is already set up, launch it;
+/// otherwise pick an agent, prepare the dir + remote, run init, then launch.
+///
+/// `name` is the on-disk directory name; callers compute it with their own
+/// rules (sanitize / fallback) before delegating — byte-identical to the
+/// three pre-W3.5 inline copies from the hand-off point onward.
+pub fn join_resolved_room(name: &str, mut room: RoomConfig) -> Result<()> {
+    let proj = crate::init::projects_dir().join(name);
+    if proj.join(".syncvibe").is_dir() {
+        println!("  {DIM}→ {} (already set up){R}\n", proj.display());
+        return crate::tmux::launch_project(&proj);
+    }
+    let agent_id = crate::agents::select_agent()?;
+    room.agent = Some(agent_id);
+    let path = crate::init::prepare_project_dir_with_remote(name, room.git_remote.as_deref())?;
+    crate::init::perform_init(&path, Some(room))?;
+    crate::tmux::launch_project(&path)
 }
 
 #[cfg(test)]

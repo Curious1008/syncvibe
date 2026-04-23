@@ -239,20 +239,7 @@ fn cmd_connect(code: String) -> Result<()> {
         name
     };
 
-    let proj = init::projects_dir().join(&name);
-
-    // Already joined — just launch
-    if proj.join(".syncvibe").is_dir() {
-        println!("  {DIM}→ {} (already set up){R}\n", proj.display());
-        return tmux::launch_project(&proj);
-    }
-
-    let agent_id = agents::select_agent()?;
-    room.agent = Some(agent_id);
-
-    let path = init::prepare_project_dir_with_remote(&name, room.git_remote.as_deref())?;
-    init::perform_init(&path, Some(room))?;
-    tmux::launch_project(&path)
+    commands::join::join_resolved_room(&name, room)
 }
 
 fn cmd_status() -> Result<()> {

@@ -91,18 +91,7 @@ pub fn detect_clipboard_invite() -> Result<Option<()>> {
         .clone()
         .unwrap_or_else(|| "syncvibe-room".to_string());
     println!("  {GREEN}✓{R} Code accepted — {B}{name}{R}\n");
-    let proj = init::projects_dir().join(&name);
-    // Already joined — just launch
-    if proj.join(".syncvibe").is_dir() {
-        println!("  {DIM}→ {} (already set up){R}\n", proj.display());
-        tmux::launch_project(&proj)?;
-        return Ok(Some(()));
-    }
-    let agent_id = crate::agents::select_agent()?;
-    room.agent = Some(agent_id);
-    let path = init::prepare_project_dir_with_remote(&name, room.git_remote.as_deref())?;
-    init::perform_init(&path, Some(room))?;
-    tmux::launch_project(&path)?;
+    crate::commands::join::join_resolved_room(&name, room)?;
     Ok(Some(()))
 }
 
@@ -138,17 +127,7 @@ pub fn run_join_code_flow() -> Result<()> {
         name
     };
     println!("  {GREEN}✓{R} Code accepted — {B}{name}{R}\n");
-    let proj = init::projects_dir().join(&name);
-    // Already joined — just launch
-    if proj.join(".syncvibe").is_dir() {
-        println!("  {DIM}→ {} (already set up){R}\n", proj.display());
-        return tmux::launch_project(&proj);
-    }
-    let agent_id = crate::agents::select_agent()?;
-    room.agent = Some(agent_id);
-    let path = init::prepare_project_dir_with_remote(&name, room.git_remote.as_deref())?;
-    init::perform_init(&path, Some(room))?;
-    tmux::launch_project(&path)
+    crate::commands::join::join_resolved_room(&name, room)
 }
 
 /// Interactive "Create a new room" menu branch: gate on auth, prompt for
