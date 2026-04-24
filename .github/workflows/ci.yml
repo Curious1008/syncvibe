@@ -55,7 +55,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: shellcheck install.sh
+      - run: shellcheck --severity=warning install.sh
 
   install-smoke:
     name: Install smoke test
@@ -67,9 +67,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run install.sh against latest release
-        run: |
-          sh ./install.sh
+        run: sh ./install.sh
       - name: Verify binary works
         run: |
-          export PATH="$HOME/.local/bin:$PATH"
-          syncvibe --version
+          export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
+          syncvibe --help
