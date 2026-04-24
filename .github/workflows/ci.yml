@@ -66,7 +66,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Run install.sh against latest release
+      - name: Resolve latest release tag
+        id: rel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "tag=$(gh release view --repo Curious1008/syncvibe --json tagName -q .tagName)" >> "$GITHUB_OUTPUT"
+      - name: Run install.sh
+        env:
+          SYNCVIBE_VERSION: ${{ steps.rel.outputs.tag }}
         run: sh ./install.sh
       - name: Verify binary works
         run: |
