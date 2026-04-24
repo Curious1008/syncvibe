@@ -54,25 +54,12 @@ warn() {
     printf "  ${YELLOW}!${R} %s\n" "$1"
 }
 
-# If GITHUB_TOKEN is set and URL targets api.github.com, emit an auth header flag.
-# Echoes a single arg suitable for eval (quoted). Empty if not applicable.
-_auth_header() {
-    case "$1" in
-        https://api.github.com/*)
-            if [ -n "${GITHUB_TOKEN:-}" ]; then
-                printf '%s' "Authorization: Bearer ${GITHUB_TOKEN}"
-            fi
-            ;;
-    esac
-}
-
 # Fetch a URL to stdout (curl preferred, wget fallback)
 fetch() {
-    hdr=$(_auth_header "$1")
     if command -v curl >/dev/null 2>&1; then
-        if [ -n "$hdr" ]; then curl -fsSL -H "$hdr" "$1"; else curl -fsSL "$1"; fi
+        curl -fsSL "$1"
     elif command -v wget >/dev/null 2>&1; then
-        if [ -n "$hdr" ]; then wget -qO- --header="$hdr" "$1"; else wget -qO- "$1"; fi
+        wget -qO- "$1"
     else
         err "curl or wget is required"
     fi
@@ -80,11 +67,10 @@ fetch() {
 
 # Fetch a URL to a file
 fetch_to() {
-    hdr=$(_auth_header "$1")
     if command -v curl >/dev/null 2>&1; then
-        if [ -n "$hdr" ]; then curl -fsSL -H "$hdr" "$1" -o "$2"; else curl -fsSL "$1" -o "$2"; fi
+        curl -fsSL "$1" -o "$2"
     elif command -v wget >/dev/null 2>&1; then
-        if [ -n "$hdr" ]; then wget -q --header="$hdr" "$1" -O "$2"; else wget -q "$1" -O "$2"; fi
+        wget -q "$1" -O "$2"
     fi
 }
 

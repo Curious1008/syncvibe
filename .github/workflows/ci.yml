@@ -67,8 +67,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run install.sh against latest release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: sh ./install.sh
       - name: Verify binary works
         run: |
