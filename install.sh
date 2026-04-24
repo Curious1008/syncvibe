@@ -230,28 +230,27 @@ download() {
 
     fetch_to "$URL" "${TMP_DIR}/${FILENAME}" || err "Download failed. Is ${VERSION} a valid release?"
 
-    # Verify SHA256 checksum
-    if fetch_to "$CHECKSUM_URL" "${TMP_DIR}/checksums.txt" 2>/dev/null; then
-        EXPECTED=$(grep "${FILENAME}" "${TMP_DIR}/checksums.txt" | cut -d ' ' -f1)
-        if [ -n "$EXPECTED" ]; then
-            if command -v sha256sum >/dev/null 2>&1; then
-                ACTUAL=$(sha256sum "${TMP_DIR}/${FILENAME}" | cut -d ' ' -f1)
-            elif command -v shasum >/dev/null 2>&1; then
-                ACTUAL=$(shasum -a 256 "${TMP_DIR}/${FILENAME}" | cut -d ' ' -f1)
-            else
-                warn "Cannot verify checksum (sha256sum/shasum not found)"
-                ACTUAL="$EXPECTED"
-            fi
-            if [ "$ACTUAL" != "$EXPECTED" ]; then
-                err "Checksum mismatch! Expected ${EXPECTED}, got ${ACTUAL}. Download may be corrupted or tampered."
-            fi
-            ok "Checksum verified"
-        else
-            warn "No checksum found for ${FILENAME}, skipping verification"
-        fi
+    # Verify SHA256 checksum — hard fail if we can't actually verify.
+    # The only way to bypass is SYNCVIBE_SKIP_CHECKSUM=1 (explicit, logged).
+    fetch_to "$CHECKSUM_URL" "${TMP_DIR}/checksums.txt" 2>/dev/null \
+        || err "Could not fetch checksums.txt from ${CHECKSUM_URL}. Refusing to install unverified binary. Set SYNCVIBE_SKIP_CHECKSUM=1 to override (not recommended)."
+    EXPECTED=$(grep "${FILENAME}" "${TMP_DIR}/checksums.txt" | cut -d ' ' -f1)
+    [ -n "$EXPECTED" ] \
+        || err "No checksum entry for ${FILENAME} in checksums.txt. Refusing to install unverified binary."
+    if command -v sha256sum >/dev/null 2>&1; then
+        ACTUAL=$(sha256sum "${TMP_DIR}/${FILENAME}" | cut -d ' ' -f1)
+    elif command -v shasum >/dev/null 2>&1; then
+        ACTUAL=$(shasum -a 256 "${TMP_DIR}/${FILENAME}" | cut -d ' ' -f1)
+    elif [ "${SYNCVIBE_SKIP_CHECKSUM:-0}" = "1" ]; then
+        warn "SYNCVIBE_SKIP_CHECKSUM=1 set — installing without checksum verification"
+        ACTUAL="$EXPECTED"
     else
-        warn "Checksums file not available, skipping verification"
+        err "Neither sha256sum nor shasum is available. Install one, or set SYNCVIBE_SKIP_CHECKSUM=1 to override (not recommended)."
     fi
+    if [ "$ACTUAL" != "$EXPECTED" ]; then
+        err "Checksum mismatch! Expected ${EXPECTED}, got ${ACTUAL}. Download may be corrupted or tampered."
+    fi
+    ok "Checksum verified"
 }
 
 # ── Install binary ───────────────────────────────────────────────
@@ -379,7 +378,12 @@ main() {
     verify
     check_tmux
 
-    # Launch SyncVibe immediately after install
+    # Launch SyncVibe immediately after install (skip in CI / non-interactive)
+    if [ "${SYNCVIBE_NO_LAUNCH:-0}" = "1" ] || [ -n "${CI:-}" ] || [ ! -t 0 ]; then
+        printf "\n"
+        ok "Installed. Run 'syncvibe' to start."
+        return
+    fi
     printf "\n"
     info "Launching SyncVibe...\n"
     exec "${INSTALL_DIR}/syncvibe"

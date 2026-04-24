@@ -52,6 +52,18 @@ brew install syncvibe
 
 Supports **macOS** (Apple Silicon + Intel) and **Linux** (x86_64, aarch64).
 
+### Verify manually
+
+Don't trust `curl | sh`? Inspect first, then run:
+
+```bash
+curl -fsSLO https://syncvibe.online/install.sh
+less install.sh        # review it
+sh install.sh
+```
+
+The installer SHA256-verifies every binary against `checksums.txt` from the GitHub release and hard-fails if no hash tool (`sha256sum` / `shasum`) is available. To skip verification explicitly (not recommended), set `SYNCVIBE_SKIP_CHECKSUM=1`.
+
 ---
 
 ## Quick Start

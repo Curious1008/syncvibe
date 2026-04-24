@@ -49,3 +49,27 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run audit
         run: cargo audit
+
+  shellcheck:
+    name: Shellcheck install.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck install.sh
+
+  install-smoke:
+    name: Install smoke test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run install.sh against latest release
+        run: |
+          sh ./install.sh
+      - name: Verify binary works
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          syncvibe --version
