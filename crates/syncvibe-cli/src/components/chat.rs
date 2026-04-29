@@ -167,9 +167,12 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
             .position(|item| matches!(item, ChatLine::Message { idx } if *idx == sel))
     });
 
-    // Determine visible window
+    // Determine visible window. `lines_used` tracks post-wrap visual rows the
+    // selected messages will occupy — needed below to compute scroll_offset
+    // correctly (lines.len() counts pre-wrap Line objects, which is wrong when
+    // a single message wraps to multiple visual rows).
     let total_items = items.len();
-    let (start, end) = if let Some(sel_item) = selected_item {
+    let (start, end, lines_used) = if let Some(sel_item) = selected_item {
         let mut lines_before = 0;
         let target_before = inner_height / 2;
         let mut s = sel_item;
@@ -187,7 +190,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
             s -= 1;
             lines_used += line_counts[s];
         }
-        (s, e)
+        (s, e, lines_used)
     } else {
         let mut lines_used = 0;
         let mut s = total_items;
@@ -195,7 +198,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
             s -= 1;
             lines_used += line_counts[s];
         }
-        (s, total_items)
+        (s, total_items, lines_used)
     };
 
     // Render visible items
@@ -269,12 +272,17 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
         )));
     }
 
-    // Scroll to bottom if rendered lines exceed visible area
-    let scroll_offset = if lines.len() > inner_height {
-        (lines.len() - inner_height) as u16
-    } else {
-        0
-    };
+    // ratatui Paragraph scrolls in post-wrap visual rows, not pre-wrap Lines.
+    // Compute visual rows = wrapped message rows + indicator lines (each 1 row),
+    // then offset so the bottom row stays pinned to the viewport.
+    let mut visual_rows = lines_used;
+    if total_above > 0 {
+        visual_rows += 1;
+    }
+    if state.unread_below > 0 && state.chat_selected.is_some() {
+        visual_rows += 1;
+    }
+    let scroll_offset = (visual_rows.saturating_sub(inner_height)) as u16;
     let paragraph = Paragraph::new(lines)
         .block(block)
         .wrap(Wrap { trim: false })
@@ -408,4 +416,96 @@ fn format_message(msg: &ChatMessage, selected: bool, grouped: bool) -> Vec<Line<
 
     result.push(line);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::test_support::mk_app_state;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+    use syncvibe_core::models::ChatMessage;
+
+    fn render(state: &mut AppState, w: u16, h: u16) -> String {
+        let backend = TestBackend::new(w, h);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = Rect {
+                    x: 0,
+                    y: 0,
+                    width: w,
+                    height: h,
+                };
+                draw(frame, area, state);
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let mut out = String::new();
+        for y in 0..h {
+            for x in 0..w {
+                out.push_str(buf[(x, y)].symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    fn push_msg(state: &mut AppState, content: &str) {
+        let m = ChatMessage::new_user_message(
+            "u1".into(),
+            "Alice".into(),
+            "#4ECDC4".into(),
+            content.into(),
+            "s1".into(),
+            None,
+        );
+        state.msg_id_set.insert(m.id.clone());
+        state.chat_messages.push(m);
+    }
+
+    /// Regression: when the chat window fills exactly and an extra "↑ N more"
+    /// header is added, the latest message must remain visible. Previously
+    /// scroll_offset was computed from `lines.len()` (pre-wrap) but ratatui's
+    /// Paragraph scroll counts post-wrap rows — so the bottom got clipped and
+    /// the latest message only appeared when the next one arrived.
+    #[test]
+    fn latest_message_visible_when_more_header_added() {
+        let (_tmp, mut state) = mk_app_state();
+        // Inner height = h - 2 (top + bottom border) = 6. Each short message is
+        // 1 visual row. Push enough that we'll need to window past the oldest.
+        for i in 0..10 {
+            push_msg(&mut state, &format!("msg-{}", i));
+        }
+        let out = render(&mut state, 60, 8);
+        assert!(
+            out.contains("msg-9"),
+            "latest message must appear in viewport, got:\n{}",
+            out
+        );
+    }
+
+    /// Regression: when a message wraps to multiple visual rows and the
+    /// "↑ more" header is also rendered, the bottom of the chat must stay
+    /// pinned. Buggy scroll_offset (using pre-wrap lines.len()) clipped the
+    /// latest message because post-wrap rows exceeded inner_height.
+    #[test]
+    fn latest_visible_with_wrapping_message() {
+        let (_tmp, mut state) = mk_app_state();
+        for _ in 0..3 {
+            push_msg(&mut state, "x");
+        }
+        push_msg(
+            &mut state,
+            "this medium message wraps to roughly two rows in narrow",
+        );
+        push_msg(&mut state, "LATEST");
+        let out = render(&mut state, 40, 6);
+        assert!(
+            out.contains("LATEST"),
+            "latest must remain visible when wrap + header push post-wrap \
+             rows past inner_height, got:\n{}",
+            out
+        );
+    }
 }
